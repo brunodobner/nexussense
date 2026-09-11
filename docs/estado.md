@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-11 (v1.0.0: identidade própria, histórico resetado, remoto publicado)
+**Última atualização:** 2026-09-11 (v1.1.0: poda para um modelo só, dois bugs de kernel corrigidos)
 
 ---
 
@@ -12,8 +12,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | funcional no ANV15-52; ~200 linhas divergentes da base do DAMX |
-| versão | **v1.0.0** — primeira estável; `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 4728 linhas (eram 5167) |
+| versão | **v1.1.0** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
@@ -38,7 +38,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Ajustes visuais e de resposta    Diagnóstico, ventoinhas e cliques sem atraso
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
-[ ] Fases B-G das melhorias          spec 2026-09-05, secoes 4-9 (menos a 6)
+[x] Poda para um modelo so           v1.1.0: 32 entradas DMI -> 1, bitmask identico
+[ ] Podar os subsistemas             precisa de medicao por subsistema, como a tabela precisou
 ```
 
 ### Concluído
@@ -340,8 +341,15 @@ Coisas verdadeiras hoje que alguém pode estranhar:
 - **`SCRIPT_VERSION` e as versões foram alinhadas em `1.0.0`** e o
   `release.txt` do upstream foi removido — a pendência antiga sobre eles
   deixou de existir.
-- **O bitmask de capabilities nunca foi medido.** É o passo zero da fase F
-  (spec §4.4) e nada pode ser removido do driver antes dele.
+- **O bitmask de capabilities foi medido em 2026-09-11:** `0x2c26`
+  (`WIRELESS BLUETOOTH SET_FUNCTION_MODE PLATFORM_PROFILE FAN_SPEED_READ
+  NITRO_SENSE`). `acer_dump_capabilities()` o imprime no carregamento, e é o
+  critério de regressão de qualquer poda futura. A pendência antiga — que
+  bloqueava a fase F — deixou de existir, e a poda da tabela foi feita.
+- **Os parâmetros `enable_all`, `predator_v4` e `nitro_v4` continuam no
+  driver.** São inertes, mas estão entranhados no provisionamento de perfis.
+  Removê-los é alterar código que roda e merece mudança própria — é o que
+  sobrou da poda.
 - **Os testes em shell são quase todos `grep` sobre o fonte.** É adequado ao
   propósito declarado — detectar o que a próxima release do upstream
   sobrescreveu — mas não verifica comportamento. A suíte Python nova, em

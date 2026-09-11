@@ -7,14 +7,16 @@ bandeja — sem daemon, sem socket e **sem processo root permanente**.
 O módulo sobrevive a atualizações de kernel via DKMS, e o instalador funciona
 em Arch, Debian, Fedora e openSUSE.
 
-**Sobre outros modelos:** o driver herda de sua linhagem uma tabela com 37
-entradas DMI — a família Nitro, Predator, Aspire e alguns não-Acer — e ainda
-cria o grupo `predator_sense` quando o hardware o anuncia. Nada disso foi
-removido, mas **nada disso foi verificado**: o único modelo medido é o
-ANV15-52, e é só por ele que este projeto responde. Enxugar a tabela é
-trabalho pendente e não é trivial — vários quirks carregam bits de
-comportamento (o `rfkill` do wifi, entre eles) que não têm relação com o nome
-do modelo na entrada. Ver [docs/estado.md](docs/estado.md).
+**Este driver atende um modelo só.** Em 2026-09-11 a tabela de quirks herdada
+foi podada de 32 entradas DMI para **uma**, e de 14 quirks para dois. Num Acer
+diferente o driver não vincula e nenhum grupo `sysfs` é criado.
+
+A poda foi guiada por medição, não por leitura de código: as capabilities vêm
+de **três** fontes, e a tabela de quirks é só uma delas — o `rfkill` do wifi e
+do bluetooth vem do descritor `AA` do firmware, em tempo de execução. Cortar
+pela tabela sem medir teria arrancado o controle do wifi sem que nada
+acusasse. O bitmask antes e depois é idêntico (`0x2c26`). Ver
+[docs/decisoes.md](docs/decisoes.md), seção 6.
 
 ```bash
 sudo ./setup.sh
