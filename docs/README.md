@@ -10,14 +10,6 @@ Nada aqui vai junto numa instalação — é tudo ferramenta de manutenção.
 | [interface.md](interface.md) | o sistema visual da janela e da bandeja | ao mexer na GUI |
 | [verificacao-manual.md](verificacao-manual.md) | o que a suíte automatizada não alcança, e por quê | antes de dar uma versão por boa |
 
-## Referência do upstream
-
-[`upstream/`](upstream/) guarda o que veio do Div Acer Manager Max e não
-instala nada: o README do driver original, o `release.txt` da 1.0.2-h1 e os
-ícones da GUI .NET que este projeto não distribui. Ficam por procedência, não
-por uso. O de-para arquivo a arquivo está no
-[README da raiz](../README.md#licença-e-origem).
-
 ## Histórico
 
 [`superpowers/specs/`](superpowers/) e [`superpowers/plans/`](superpowers/)

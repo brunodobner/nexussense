@@ -137,7 +137,6 @@ reescrito, e a GUI .NET original foi substituída por uma em PySide6.
 | `original/Linuwu-Sense/linuwu_sense.service` | `packaging/systemd/nexus_sense.service` | reescrita |
 | `original/nitro-key-detection.sh` | `packaging/scripts/nitro-key-detection.sh` | 13+/3− |
 | `original/Linuwu-Sense/LICENSE` | `driver/LICENSE` | intocado |
-| `original/Linuwu-Sense/README.md` | `docs/upstream/linuwu-sense.md` | intocado |
 | — | `driver/dkms.conf` | inteiramente nosso |
 | — | `src/` (janela, bandeja, agente) | escrito do zero |
 

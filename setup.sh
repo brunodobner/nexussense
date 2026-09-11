@@ -21,6 +21,10 @@
 # DRIVER_VERSION (nexus_sense.c), que alimenta o pacote DKMS -- sao dois
 # espacos de numeracao de proposito. Ver docs/decisoes.md secao 7.
 SCRIPT_VERSION="1.0.0"
+# Caminhos de instalacoes ANTIGAS, mantidos so para a limpeza encontra-los.
+# Nada deste projeto e instalado neles: o pacote vai para
+# /usr/lib/nexus-sense e os lancadores para /usr/bin. Ver docs/decisoes.md
+# secao 3.
 INSTALL_DIR="/opt/damx"
 BIN_DIR="/usr/local/bin"
 SYSTEMD_DIR="/etc/systemd/system"
@@ -1030,10 +1034,7 @@ detect_desktop_user() {
 
 install_nitro_service() {
   echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
-  
-    # First, remove any existing installation
-  # cleanup_nitro_service
-  
+
   NITRO_SCRIPT="${RAIZ}/packaging/scripts/nitro-key-detection.sh"
   TARGET_USER=$(detect_desktop_user)
 
@@ -1100,9 +1101,6 @@ EOF
   echo -e "  Logs:  journalctl -u nitro-key-detection.service -f"
 }
 
-# Example of how to call it from your main script
-# configure_nitro_button
-
 perform_install() {
   local skip_drivers=$1
   local is_update=$2
@@ -1117,9 +1115,6 @@ perform_install() {
     cleanup_legacy_installation
     echo ""
   fi
-
-  # Create main installation directory
-  mkdir -p ${INSTALL_DIR}
 
   # Install components
   if [ "$skip_drivers" = false ]; then
@@ -1192,6 +1187,61 @@ check_system() {
   return 0
 }
 
+# Relata o que este projeto instala.
+#
+# Ate 2026-09-11 esta opcao procurava damx-daemon.service, que saiu do
+# projeto na virada para o agente proprio. Ela respondia "nao instalado"
+# para quem tinha tudo funcionando -- pior que nao existir, porque mandava
+# reinstalar sem motivo.
+print_status() {
+  local ok="${GREEN}sim${NC}" nao="${RED}nao${NC}"
+
+  # O modulo e o sysfs: se o driver nao vinculou, nada mais importa.
+  if lsmod | grep -q '^nexus_sense'; then
+    echo -e "  modulo nexus_sense carregado ............. $ok"
+  else
+    echo -e "  modulo nexus_sense carregado ............. $nao"
+  fi
+  if [ -d /sys/devices/platform/acer-wmi/nitro_sense ] \
+     || [ -d /sys/devices/platform/acer-wmi/predator_sense ]; then
+    echo -e "  sysfs populado ........................... $ok"
+  else
+    echo -e "  sysfs populado ........................... $nao"
+  fi
+
+  # DKMS: e o que faz o modulo sobreviver a atualizacao de kernel.
+  local ver registrados
+  ver=$(driver_version 2>/dev/null || true)
+  if [ -n "$ver" ]; then
+    registrados=$(dkms status "nexus_sense/${ver}" 2>/dev/null | grep -c installed)
+    echo -e "  DKMS nexus_sense/${ver} ................ ${registrados} kernel(s)"
+  fi
+
+  # A unit de sistema so descarrega o modulo no desligamento.
+  if systemctl is-enabled --quiet nexus_sense.service 2>/dev/null; then
+    echo -e "  nexus_sense.service (desligamento) ....... $ok"
+  else
+    echo -e "  nexus_sense.service (desligamento) ....... $nao"
+  fi
+
+  # O agente e servico de USUARIO: consultar como root nao o enxerga.
+  local u uid
+  u=$(detect_desktop_user)
+  if [ -n "$u" ] && uid=$(id -u "$u" 2>/dev/null); then
+    if runuser -u "$u" -- env XDG_RUNTIME_DIR="/run/user/${uid}" \
+         systemctl --user is-active --quiet nexus-sense-agent.service 2>/dev/null; then
+      echo -e "  nexus-sense-agent (usuario ${u}) ..... $ok"
+    else
+      echo -e "  nexus-sense-agent (usuario ${u}) ..... $nao"
+    fi
+  fi
+
+  # Os dois lancadores.
+  [ -x /usr/bin/nexus-sense ] \
+    && echo -e "  /usr/bin/nexus-sense ..................... $ok" \
+    || echo -e "  /usr/bin/nexus-sense ..................... $nao"
+}
+
 main_menu() {
   # Perform initial system check
   if ! check_system; then
@@ -1238,13 +1288,9 @@ main_menu() {
         ;;
       5)
         print_banner
-        echo -e "${BLUE}Checking Nexus Sense service status...${NC}"
+        echo -e "${BLUE}Checking Nexus Sense status...${NC}"
         echo ""
-        if systemctl list-unit-files | grep -q ${DAEMON_SERVICE_NAME}; then
-          systemctl status ${DAEMON_SERVICE_NAME} --no-pager -l
-        else
-          echo -e "${YELLOW}DAMX service not found. The suite may not be installed.${NC}"
-        fi
+        print_status
         echo ""
         pause
         ;;
