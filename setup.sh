@@ -764,9 +764,13 @@ install_drivers() {
   # objetos de outro kernel -- e fazendo a verificacao de "fonte encenado
   # identico ao repositorio" falhar por artefato, nao por divergencia real.
   install -d "/usr/src/nexus_sense-${ver}/src"
-  install -m 644 "$DRIVER_DIR"/src/*.c "/usr/src/nexus_sense-${ver}/src/"
-  for h in "$DRIVER_DIR"/src/*.h; do
-    [ -e "$h" ] && install -m 644 "$h" "/usr/src/nexus_sense-${ver}/src/"
+  local f
+  for f in "$DRIVER_DIR"/src/*.c "$DRIVER_DIR"/src/*.h; do
+    [ -e "$f" ] || continue
+    # *.mod.c e gerado pelo build do kernel e TAMBEM casa com *.c; sem
+    # esta excecao ele viaja junto e a arvore encenada deixa de ser fonte.
+    case "$f" in *.mod.c) continue ;; esac
+    install -m 644 "$f" "/usr/src/nexus_sense-${ver}/src/"
   done
   install -m 644 "$DRIVER_DIR/Makefile" "/usr/src/nexus_sense-${ver}/"
   sed "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"${ver}\"/" \

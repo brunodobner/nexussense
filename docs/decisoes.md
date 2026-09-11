@@ -98,26 +98,51 @@ Medido nesta máquina: `Function bitmap for Communication Button: 0x801`, que é
 `acer-bluetooth` em `/sys/class/rfkill/`, **apesar de `quirk_acer_nitro` não
 ligar nenhum dos dois**.
 
-### Podar a tabela: risco baixo
+### A tabela foi podada em 2026-09-11
 
-Criar um quirk próprio do modelo e apagar as outras 36 entradas DMI e 13 quirks
-**não toca o rfkill**, porque ele não vem daí. `quirk_acer_nitro` é literalmente
-`{ .nitro_sense = 1 }` — um bit.
+Feito, e verificado pelo critério acima.
 
-O que exige cuidado, e é pouco:
+| | antes | depois |
+|---|---|---|
+| entradas DMI | 32 Acer + 7 não-Acer | **1** (`Nitro ANV15-52`) |
+| structs de quirk | 14 | **2** (o do modelo e `quirk_unknown`) |
+| tabelas auxiliares | `acer_blacklist`, `amw0_whitelist` | removidas |
+| linhas do `.c` | 5167 | **4728** |
 
-- os parâmetros de módulo `enable_all` e `force_series` referenciam
-  `quirk_acer_predator_v4` e `quirk_acer_travelmate_2490` por nome. Apagar
-  esses quirks sem remover os parâmetros não compila.
-- há uma segunda tabela, `non_acer_quirks` (Gateway, Packard Bell, Medion,
-  Fujitsu, Lenovo), separada da `acer_quirks`.
-- `quirks->mailled` é lido fora do `set_quirks` (no `switch` de `:1069`); sem
-  nenhum quirk ligando `mailled`, o caminho fica morto mas inofensivo.
+O quirk novo é `quirk_acer_anv15_52 = { .nitro_sense = 1 }` — exatamente o que
+o `quirk_acer_nitro` tinha, agora com nome que diz de quem é.
 
-**Como verificar que não quebrou:** o módulo carrega, o log diz
-`Detected model type: Nitro ANV15-52`, os seis atributos do `nitro_sense`
-continuam lá, **e os dois `rfkill` do Acer continuam registrados**. Esse último
-é o que distingue esta poda da perigosa.
+**A verificação, medida antes e depois:**
+
+```
+capability bitmask: 0x00002c26
+[WIRELESS BLUETOOTH SET_FUNCTION_MODE PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+```
+
+Idêntico. Mais: modelo reconhecido, os seis atributos no lugar, perfis térmicos
+inalterados (`low-power quiet balanced balanced-performance`), e **`acer-wireless`
+e `acer-bluetooth` continuam em `/sys/class/rfkill/`** — que é o critério que
+separa esta poda da perigosa.
+
+Três coisas caíram junto por dependência, e voltaram ou foram ajustadas:
+
+- o `enum acer_predator_v4_thermal_profile` e quatro declarações de estado
+  (`last_non_turbo_profile`, `acer_predator_v4_max_perf`, …) moravam **entre**
+  as tabelas e foram restaurados;
+- `set_force_caps()` era `.callback` de quatro entradas DMI apagadas e ficou
+  sem chamador — removida;
+- a guarda `AMW0_GUID1 && !amw0_whitelist && quirk_unknown` virou
+  `AMW0_GUID1 && quirk_unknown`: num driver de um modelo só, quirk desconhecido
+  já basta para não carregar.
+
+Compilar entre cada estágio foi o que tornou isso administrável — os três
+primeiros builds falharam, cada um apontando exatamente o que tinha caído junto.
+
+**O que NÃO foi podado, de propósito:** os parâmetros de módulo `enable_all`,
+`predator_v4` e `nitro_v4`. Eles são inertes (nascem `false` e ninguém os
+passa), mas estão entranhados na lógica de provisionamento de perfis —
+`:1933`, `:2046`, `:2109`, `:4524`, `:4608`. Mexer neles é alterar código que
+roda, e merece mudança própria, não carona nesta.
 
 ### Podar os subsistemas: risco alto, e é o que está bloqueado
 

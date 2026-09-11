@@ -374,7 +374,6 @@ static int max_brightness = 0xF;
 static int mailled = -1;
 static int brightness = -1;
 static int threeg = -1;
-static int force_series;
 static int force_caps = -1;
 static bool ec_raw_mode;
 static bool has_type_aa;
@@ -392,7 +391,6 @@ MODULE_PARM_DESC(enable_all, "Enable all available features");
 module_param(mailled, int, 0444);
 module_param(brightness, int, 0444);
 module_param(threeg, int, 0444);
-module_param(force_series, int, 0444);
 module_param(force_caps, int, 0444);
 module_param(ec_raw_mode, bool, 0444);
 module_param(cycle_gaming_thermal_profile, bool, 0644);
@@ -401,7 +399,6 @@ module_param(nitro_v4, bool, 0444);
 MODULE_PARM_DESC(mailled, "Set initial state of Mail LED");
 MODULE_PARM_DESC(brightness, "Set initial LCD backlight brightness");
 MODULE_PARM_DESC(threeg, "Set initial state of 3G hardware");
-MODULE_PARM_DESC(force_series, "Force a different laptop series");
 MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
 MODULE_PARM_DESC(ec_raw_mode, "Enable EC raw mode");
 MODULE_PARM_DESC(cycle_gaming_thermal_profile,
@@ -512,446 +509,42 @@ static int __init dmi_matched(const struct dmi_system_id *dmi)
     return 1;
 }
 
-static int __init set_force_caps(const struct dmi_system_id *dmi)
-{
-    if (force_caps == -1)
-    {
-        force_caps = (uintptr_t)dmi->driver_data;
-        pr_info("Found %s, set force_caps to 0x%x\n", dmi->ident, force_caps);
-    }
-    return 1;
-}
-
+/*
+ * Dois quirks, e mais nada. Os outros doze sairam na poda de
+ * 2026-09-11, junto com os modelos que os usavam.
+ *
+ * O ANV15-52 usa nitro_sense, nao nitro_v4: os dois criam um diretorio
+ * de mesmo nome, mas nitro_v4 seta tambem ACER_CAP_PREDATOR_SENSE, e e
+ * essa capability que liga acer_predator_state_load/save(). Escolher
+ * errado levaria junto a persistencia do perfil termico entre
+ * reinicios. Ver docs/decisoes.md, secao 5.
+ */
 static struct quirk_entry quirk_unknown = {};
 
-static struct quirk_entry quirk_acer_aspire_1520 = {
-    .brightness = -1,
-};
-
-static struct quirk_entry quirk_acer_travelmate_2490 = {
-    .mailled = 1,
-};
-
-static struct quirk_entry quirk_acer_predator_ph315_53 = {
-    .turbo = 1,
-    .cpu_fans = 1,
-    .gpu_fans = 1,
-};
-
-static struct quirk_entry quirk_acer_predator_phn16_71 = {
-    .predator_v4 = 1,
-    .four_zone_kb = 1,
-};
-
-static struct quirk_entry quirk_acer_predator_phn16_72 = {
-    .predator_v4 = 1,
-    .four_zone_kb = 1,
-};
-
-static struct quirk_entry quirk_acer_nitro_an16_41 = {
-    .nitro_v4 = 1,
-    .four_zone_kb = 1,
-};
-
-static struct quirk_entry quirk_acer_nitro_an16_43 = {
-    .nitro_v4 = 1,
-    .four_zone_kb = 1,
-};
-
- static struct quirk_entry quirk_acer_nitro_an515_58 = {
-    .nitro_sense = 1,
-    .four_zone_kb = 1,
- };
-
-
-static struct quirk_entry quirk_acer_nitro = {
+static struct quirk_entry quirk_acer_anv15_52 = {
     .nitro_sense = 1,
 };
-
-static struct quirk_entry quirk_acer_predator_v4 = {
-    .predator_v4 = 1,
-};
-
-/* This AMW0 laptop has no bluetooth */
-static struct quirk_entry quirk_medion_md_98300 = {
-    .wireless = 1,
-};
-
-static struct quirk_entry quirk_fujitsu_amilo_li_1718 = {
-    .wireless = 2,
-};
-
-static struct quirk_entry quirk_lenovo_ideapad_s205 = {
-    .wireless = 3,
-};
-
-static struct quirk_entry quirk_acer_nitro_v4 = {
-    .nitro_v4 = 1,
-    
-};
-
-/* The Aspire One has a dummy ACPI-WMI interface - disable it */
-static const struct dmi_system_id acer_blacklist[] __initconst = {
-    {
-        .ident = "Acer Aspire One (SSD)",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "AOA110"),
-        },
-    },
-    {
-        .ident = "Acer Aspire One (HDD)",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "AOA150"),
-        },
-    },
-    {}};
-
-static const struct dmi_system_id amw0_whitelist[] __initconst = {
-    {
-        .ident = "Acer",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-        },
-    },
-    {
-        .ident = "Gateway",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Gateway"),
-        },
-    },
-    {
-        .ident = "Packard Bell",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Packard Bell"),
-        },
-    },
-    {}};
 
 /*
- * This quirk table is only for Acer/Gateway/Packard Bell family
- * that those machines are supported by acer-wmi driver.
+ * Um modelo so. Este driver atende o Acer Nitro ANV15-52 e mais nada:
+ * as outras 31 entradas sairam na poda de 2026-09-11, junto com a
+ * tabela non_acer_quirks (Gateway, Packard Bell, Medion, Fujitsu,
+ * Lenovo) e a blacklist do Aspire One.
+ *
+ * DMI_MATCH compara por SUBSTRING, e "Nitro ANV15-51" nao e substring de
+ * "Nitro ANV15-52" -- sem entrada propria este modelo cairia em
+ * quirk_unknown e nenhum grupo sysfs seria criado. Ver
+ * docs/armadilhas.md, armadilha 1.
  */
 static const struct dmi_system_id acer_quirks[] __initconst = {
     {
-        .callback = dmi_matched,
-        .ident = "Acer Nitro AN16-43",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Nitro AN16-43"),
-        },
-        .driver_data = &quirk_acer_nitro_an16_43,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Nitro AN16-41",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Nitro AN16-41"),
-        },
-        .driver_data = &quirk_acer_nitro_an16_41,
-    },
-         {
-         .callback = dmi_matched,
-         .ident = "Acer Nitro AN515-58",
-         .matches = {
-             DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-             DMI_MATCH(DMI_PRODUCT_NAME, "Nitro AN515-58"),
-         },
-         .driver_data = &quirk_acer_nitro_an515_58,
-     },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Nitro ANV15-41",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Nitro ANV15-41"),
-        },
-        .driver_data = &quirk_acer_nitro,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Nitro ANV15-51",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Nitro ANV15-51"),
-        },
-        .driver_data = &quirk_acer_nitro,
-    },
-    {
-        /* DMI_MATCH compara por substring, e "Nitro ANV15-51" nao e
-         * substring de "Nitro ANV15-52": sem entrada propria este modelo
-         * cai em quirk_unknown e nenhum grupo sysfs e criado. */
         .callback = dmi_matched,
         .ident = "Acer Nitro ANV15-52",
         .matches = {
             DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
             DMI_MATCH(DMI_PRODUCT_NAME, "Nitro ANV15-52"),
         },
-        .driver_data = &quirk_acer_nitro,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 1360",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 1360"),
-        },
-        .driver_data = &quirk_acer_aspire_1520,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 1520",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 1520"),
-        },
-        .driver_data = &quirk_acer_aspire_1520,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 3100",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 3100"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 3610",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 3610"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 5100",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5100"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 5610",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5610"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 5630",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5630"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 5650",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5650"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 5680",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 5680"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Aspire 9110",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire 9110"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer TravelMate 2490",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "TravelMate 2490"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer TravelMate 4200",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "TravelMate 4200"),
-        },
-        .driver_data = &quirk_acer_travelmate_2490,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Predator PH315-53",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Predator PH315-53"),
-        },
-        .driver_data = &quirk_acer_predator_ph315_53,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Predator PHN16-71",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Predator PHN16-71"),
-        },
-        .driver_data = &quirk_acer_predator_phn16_71,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Predator PHN16-72",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Predator PHN16-72"),
-        },
-        .driver_data = &quirk_acer_predator_phn16_72,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Predator PH16-71",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Predator PH16-71"),
-        },
-        .driver_data = &quirk_acer_predator_v4,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Acer Predator PH18-71",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Predator PH18-71"),
-        },
-        .driver_data = &quirk_acer_predator_v4,
-    },
-    {
-        .callback = set_force_caps,
-        .ident = "Acer Aspire Switch 10E SW3-016",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire SW3-016"),
-        },
-        .driver_data = (void *)ACER_CAP_KBD_DOCK,
-    },
-    {
-        .callback = set_force_caps,
-        .ident = "Acer Aspire Switch 10 SW5-012",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Aspire SW5-012"),
-        },
-        .driver_data = (void *)ACER_CAP_KBD_DOCK,
-    },
-    {
-        .callback = set_force_caps,
-        .ident = "Acer Aspire Switch V 10 SW5-017",
-        .matches = {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "SW5-017"),
-        },
-        .driver_data = (void *)ACER_CAP_KBD_DOCK,
-    },
-    {
-        .callback = set_force_caps,
-        .ident = "Acer One 10 (S1003)",
-        .matches = {
-            DMI_EXACT_MATCH(DMI_SYS_VENDOR, "Acer"),
-            DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "One S1003"),
-        },
-        .driver_data = (void *)ACER_CAP_KBD_DOCK,
-    },
-    {}};
-
-/*
- * This quirk list is for those non-acer machines that have AMW0_GUID1
- * but supported by acer-wmi in past days. Keeping this quirk list here
- * is only for backward compatible. Please do not add new machine to
- * here anymore. Those non-acer machines should be supported by
- * appropriate wmi drivers.
- */
-static const struct dmi_system_id non_acer_quirks[] __initconst = {
-    {
-        .callback = dmi_matched,
-        .ident = "Fujitsu Siemens Amilo Li 1718",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "FUJITSU SIEMENS"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "AMILO Li 1718"),
-        },
-        .driver_data = &quirk_fujitsu_amilo_li_1718,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Medion MD 98300",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "MEDION"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "WAM2030"),
-        },
-        .driver_data = &quirk_medion_md_98300,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Lenovo Ideapad S205",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "10382LG"),
-        },
-        .driver_data = &quirk_lenovo_ideapad_s205,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Lenovo Ideapad S205 (Brazos)",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "Brazos"),
-        },
-        .driver_data = &quirk_lenovo_ideapad_s205,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Lenovo 3000 N200",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "0687A31"),
-        },
-        .driver_data = &quirk_fujitsu_amilo_li_1718,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Lenovo Ideapad S205-10382JG",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "10382JG"),
-        },
-        .driver_data = &quirk_lenovo_ideapad_s205,
-    },
-    {
-        .callback = dmi_matched,
-        .ident = "Lenovo Ideapad S205-1038DPG",
-        .matches = {
-            DMI_MATCH(DMI_SYS_VENDOR, "LENOVO"),
-            DMI_MATCH(DMI_PRODUCT_NAME, "1038DPG"),
-        },
-        .driver_data = &quirk_lenovo_ideapad_s205,
+        .driver_data = &quirk_acer_anv15_52,
     },
     {}};
 
@@ -976,42 +569,14 @@ enum acer_predator_v4_thermal_profile
     ACER_PREDATOR_V4_THERMAL_PROFILE_ECO = 0x06,
 };
 
+
 /* Find which quirks are needed for a particular vendor/ model pair */
 static void __init find_quirks(void)
 {
-    if (enable_all)
-    {
-        quirks = &quirk_acer_predator_v4;
-        quirks->predator_v4 = 1;
-        quirks->nitro_v4 = 1;
-        quirks->nitro_sense = 1;
-        quirks->four_zone_kb = 1;  // This enables four-zone keyboard
-        quirks->turbo = 1;
-        quirks->cpu_fans = 1;
-        quirks->gpu_fans = 1;
-        return;
-    }
+    dmi_check_system(acer_quirks);
 
-    if (predator_v4)
-    {
-        quirks = &quirk_acer_predator_v4;
-        return;
-    }
-    else if (nitro_v4)
-    {
-        quirks = &quirk_acer_nitro_v4;
-        return;
-    }
-    else if (!force_series)
-    {
-        dmi_check_system(acer_quirks);
-        dmi_check_system(non_acer_quirks);
-    }
-    else if (force_series == 2490)
-    {
-        quirks = &quirk_acer_travelmate_2490;
-    }
-
+    /* Nao casou: struct vazia, nenhuma capability, nenhum grupo sysfs.
+     * Acontece em qualquer Acer que nao seja o ANV15-52. */
     if (quirks == NULL)
         quirks = &quirk_unknown;
 }
@@ -4960,12 +4525,6 @@ static int __init acer_wmi_init(void)
 
     pr_info("Initializing Nexus Sense - Version %s\n", DRIVER_VERSION);
 
-    if (dmi_check_system(acer_blacklist))
-    {
-        pr_info("Blacklisted hardware detected - not loading\n");
-        return -ENODEV;
-    }
-
     find_quirks();
 
     pr_info("Detected model type: %s\n", dmi_get_system_info(DMI_PRODUCT_NAME));
@@ -4987,9 +4546,10 @@ static int __init acer_wmi_init(void)
      * should be in Acer/Gateway/Packard Bell white list, or it's already
      * in the past quirk list.
      */
-    if (wmi_has_guid(AMW0_GUID1) &&
-        !dmi_check_system(amw0_whitelist) &&
-        quirks == &quirk_unknown)
+    /* A whitelist Acer/Gateway/Packard Bell saiu na poda de 2026-09-11:
+     * num driver de um modelo so, quirk desconhecido ja e motivo
+     * suficiente para nao carregar. */
+    if (wmi_has_guid(AMW0_GUID1) && quirks == &quirk_unknown)
     {
         pr_debug("Unsupported machine has AMW0_GUID1, unable to load\n");
         return -ENODEV;
