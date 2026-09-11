@@ -4612,19 +4612,15 @@ static int __init acer_wmi_init(void)
     }
 
     /*
-     * The AMW0_GUID1 wmi is not only found on Acer family but also other
-     * machines like Lenovo, Fujitsu and Medion. In the past days,
-     * acer-wmi driver handled those non-Acer machines by quirks list.
-     * But actually acer-wmi driver was loaded on any machines that have
-     * AMW0_GUID1. This behavior is strange because those machines should
-     * be supported by appropriate wmi drivers. e.g. fujitsu-laptop,
-     * ideapad-laptop. So, here checks the machine that has AMW0_GUID1
-     * should be in Acer/Gateway/Packard Bell white list, or it's already
-     * in the past quirk list.
+     * AMW0_GUID1 nao e exclusivo da Acer: outros fabricantes o expoem, e
+     * o acer-wmi do kernel carregava em qualquer maquina que o tivesse.
+     * O upstream se defendia com uma whitelist de fabricantes.
+     *
+     * Aqui a defesa e mais simples e mais estreita: este driver tem UM
+     * quirk. Se o DMI nao casou, quirks aponta para quirk_unknown, e
+     * nao ha nada a fazer nesta maquina. A whitelist saiu na poda de
+     * 2026-09-11.
      */
-    /* A whitelist Acer/Gateway/Packard Bell saiu na poda de 2026-09-11:
-     * num driver de um modelo so, quirk desconhecido ja e motivo
-     * suficiente para nao carregar. */
     if (wmi_has_guid(AMW0_GUID1) && quirks == &quirk_unknown)
     {
         pr_debug("Unsupported machine has AMW0_GUID1, unable to load\n");
