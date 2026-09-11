@@ -4920,6 +4920,40 @@ static int acer_wmi_hwmon_init(void)
     return 0;
 }
 
+/*
+ * Imprime o bitmask de capabilities depois que TODAS as fontes
+ * contribuiram: a tabela de quirks (set_quirks), o descritor AA do
+ * firmware (type_aa_dmi_decode), o WMID_set_capabilities e o override
+ * force_caps.
+ *
+ * Existe porque a tabela de quirks NAO diz o que o modelo usa -- ver
+ * docs/armadilhas.md, armadilha 18, e docs/decisoes.md secao 6. Antes de
+ * remover qualquer subsistema do driver, o corte tem de sair deste
+ * numero, medido na maquina, e nunca de leitura da tabela.
+ */
+static void __init acer_dump_capabilities(void)
+{
+    static const char *const nomes[] = {
+        "MAILLED", "WIRELESS", "BLUETOOTH", "BRIGHTNESS", "THREEG",
+        "SET_FUNCTION_MODE", "KBD_DOCK", "TURBO_OC", "TURBO_LED",
+        "TURBO_FAN", "PLATFORM_PROFILE", "FAN_SPEED_READ",
+        "PREDATOR_SENSE", "NITRO_SENSE", "NITRO_SENSE_V4",
+    };
+    char buf[256];
+    int i, n = 0;
+
+    for (i = 0; i < ARRAY_SIZE(nomes); i++)
+    {
+        if (!(interface->capability & BIT(i)))
+            continue;
+        n += scnprintf(buf + n, sizeof(buf) - n, "%s%s",
+                       n ? " " : "", nomes[i]);
+    }
+
+    pr_info("capability bitmask: 0x%08x [%s]\n",
+            interface->capability, n ? buf : "nenhuma");
+}
+
 static int __init acer_wmi_init(void)
 {
     int err;
@@ -5034,6 +5068,8 @@ static int __init acer_wmi_init(void)
 
     if (force_caps != -1)
         interface->capability = force_caps;
+
+    acer_dump_capabilities();
 
     if (wmi_has_guid(WMID_GUID3) &&
         (interface->capability & ACER_CAP_SET_FUNCTION_MODE))
