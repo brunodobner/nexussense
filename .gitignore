@@ -1,0 +1,27 @@
+# Artefatos de build de modulo do kernel
+*.o
+*.o.d
+*.ko
+*.ko.zst
+*.mod
+*.mod.c
+*.symvers
+*.order
+.*.cmd
+.tmp_versions/
+Module.markers
+modules.order
+Module.symvers
+
+# Os binarios do upstream (DivAcerManagerMax e DAMX-Daemon) foram
+# removidos na virada da GUI: nao ha mais o que ignorar. Se uma release
+# nova do upstream os trouxer de volta ao extrair, apague-os -- este
+# fork nao os instala nem os distribui.
+
+# Mockups do companion visual do brainstorming
+.superpowers/
+
+# Artefatos do Python
+__pycache__/
+*.py[cod]
+.pytest_cache/

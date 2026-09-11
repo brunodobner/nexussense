@@ -1,0 +1,26 @@
+[Unit]
+Description=Nexus Sense — perfis de energia e modo de desempenho máximo
+Documentation=file:/usr/share/doc/nexus-sense/README.md
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/nexus-sense-agent
+Restart=always
+RestartSec=3
+# Não precisa de privilégio: escreve pelo grupo nexus_sense, aplicado
+# pela regra udev 60-nexus-sense.rules.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# A excecao que o read-only exige: o agente grava o perfil de tomada em
+# ~/.config/nexus-sense/. Sem esta linha ele nao consegue, e o perfil nao
+# volta depois de um reinicio -- medido na virada. O "-" torna a ausencia
+# do diretorio nao-fatal, e ~/.config e o menor caminho que sempre existe
+# e permite ao agente criar o proprio subdiretorio.
+ReadWritePaths=-%h/.config
+PrivateTmp=yes
+
+[Install]
+WantedBy=graphical-session.target

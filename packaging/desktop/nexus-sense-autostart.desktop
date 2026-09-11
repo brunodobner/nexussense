@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus Sense (bandeja)
+Comment=Coloca o Nexus Sense na bandeja ao iniciar a sessão
+Exec=/usr/bin/nexus-sense --tray-only
+Icon=nexus-sense
+Terminal=false
+# --tray-only: a sessão começa com o ícone e sem janela na cara. Quem
+# quiser a janela clica no ícone, ou abre pelo lançador normal.
+#
+# NoDisplay: esta entrada é só de autostart. O lançador que aparece no
+# menu é o outro, em /usr/share/applications.
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

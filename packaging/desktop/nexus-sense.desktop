@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Nexus Sense
+GenericName=Controle do laptop
+Comment=Perfis térmicos, ventoinhas e bateria para laptops Acer Nitro e Predator
+Exec=/usr/bin/nexus-sense
+Icon=nexus-sense
+Terminal=false
+Categories=System;Settings;HardwareSettings;
+Keywords=acer;nitro;predator;ventoinha;bateria;perfil;térmico;
+StartupNotify=true

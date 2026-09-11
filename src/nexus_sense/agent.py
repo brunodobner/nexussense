@@ -1,0 +1,248 @@
+"""Correcao do perfil termico na troca de fonte de energia.
+
+Por que isto existe: o driver recusa quiet, balanced-performance e
+performance na bateria, mas NAO derruba um perfil ja ativo -- ele nao
+tem notificador de fonte de energia nenhum. Sem alguem corrigindo, a
+maquina fica em balanced-performance na bateria por tempo indefinido,
+num estado que ela recusaria assumir se pedido. Ver spec secao 2.9.
+
+`decide` e pura de proposito: recebe o estado, devolve o que escrever.
+Todo o comportamento do agente e testavel sem hardware e sem relogio.
+"""
+
+import dataclasses
+import logging
+import threading
+from typing import NamedTuple
+
+from .config import Config, load, save
+from .device import Controls, WriteError
+from .maximum import MaximumMode, THERMAL_PROFILE
+from .model import available, nearest
+from .powermizer import PowerMizer, PowerMizerError
+
+
+class Decision(NamedTuple):
+    profile: str | None  # None significa "nao escreva nada"
+    config: Config  # possivelmente atualizado em relacao ao recebido
+    reason: str
+
+
+def decide(current_profile, was_on_ac, now_on_ac, config, choices):
+    """O que fazer quando a fonte de energia acabou de ser lida.
+
+    `was_on_ac` e None na primeira leitura: nao houve troca ainda, entao
+    nada dispara.
+    """
+    # O modo máximo sempre acompanha a tomada, mesmo que a troca
+    # automática comum esteja desligada. Também corrige a primeira
+    # leitura após o agente iniciar já na bateria.
+    if config.maximum_mode and was_on_ac != now_on_ac:
+        if not now_on_ac:
+            return _on_unplug(current_profile, config, choices)
+        if was_on_ac is not None:
+            return _on_plug(config, choices)
+
+    if was_on_ac is None or was_on_ac == now_on_ac:
+        return Decision(None, config, "sem troca de fonte")
+
+    if not config.auto_switch:
+        return Decision(None, config, "troca automatica desligada")
+
+    if not now_on_ac:
+        return _on_unplug(current_profile, config, choices)
+    return _on_plug(config, choices)
+
+
+def _on_unplug(current_profile, config, choices):
+    permitidos = available(choices, on_ac=False)
+    if not permitidos:
+        return Decision(None, config, "nenhum perfil permitido na bateria")
+
+    if current_profile in permitidos:
+        return Decision(None, config, "o perfil corrente ja e permitido na bateria")
+
+    desejado = config.battery_profile
+    if desejado in permitidos:
+        alvo = desejado
+        razao = f"na bateria: {current_profile} nao e permitido, indo para {alvo}"
+    else:
+        # Recua para o padrao, nao para o vizinho mais proximo. Se o
+        # usuario pediu 'quiet' -- que o driver recusa na bateria --, o
+        # vizinho mais proximo seria 'low-power', bem mais agressivo na
+        # economia do que ele pediu. O padrao e a escolha menos
+        # surpreendente. Ver spec secao 8.
+        padrao = Config().battery_profile
+        alvo = padrao if padrao in permitidos else nearest(desejado, permitidos)
+        razao = (
+            f"o perfil de bateria escolhido ({desejado}) e recusado pelo driver; "
+            f"usando {alvo}"
+        )
+
+    novo = dataclasses.replace(config, saved_ac_profile=current_profile)
+    return Decision(alvo, novo, razao)
+
+
+def _on_plug(config, choices):
+    guardado = config.saved_ac_profile
+    limpo = dataclasses.replace(config, saved_ac_profile=None)
+
+    if guardado is None:
+        return Decision(None, config, "nada guardado para devolver")
+
+    if guardado not in available(choices, on_ac=True):
+        return Decision(
+            None, limpo, f"o perfil guardado ({guardado}) nao esta mais disponivel"
+        )
+
+    return Decision(guardado, limpo, f"de volta na tomada: devolvendo {guardado}")
+
+
+LOG = logging.getLogger("nexus-sense-agent")
+
+# Sondagem simples: um arquivo de 4 bytes, modo 444. As alternativas --
+# netlink do udev, UPower via DBus -- sao mais elegantes e mais frageis,
+# e trariam dependencia. Ver spec secao 4.2.
+DEFAULT_INTERVAL = 2.0
+
+
+class Agent:
+    """Vigia a fonte de energia e corrige o perfil termico."""
+
+    def __init__(self, sysfs, config_path, interval=DEFAULT_INTERVAL, logger=None):
+        self.sysfs = sysfs
+        self.config_path = config_path
+        self.interval = interval
+        self.log = logger or LOG
+        self._was_on_ac = None
+        # Ultimo perfil de tomada conhecido. Espelha o arquivo quando ele
+        # e gravavel, e o substitui quando nao e.
+        self._saved_memoria = None
+        self._maximum = MaximumMode(Controls(sysfs), config_path, gpu=PowerMizer())
+        self._gpu_confirmed = False
+
+    def _read_choices(self):
+        caminho = self.sysfs.choices_path()
+        if caminho is None:
+            return []
+        try:
+            return self.sysfs.read(caminho).split()
+        except OSError:
+            return []
+
+    def _read_profile(self):
+        caminho = self.sysfs.profile_path()
+        if caminho is None:
+            return None
+        try:
+            return self.sysfs.read(caminho)
+        except OSError:
+            return None
+
+    def tick(self):
+        """Uma passada: le a fonte, decide, escreve se preciso."""
+        now_on_ac = self.sysfs.on_ac()
+        perfil = self._read_profile()
+
+        if now_on_ac is None or perfil is None:
+            self._release_gpu()
+            return Decision(None, load(self.config_path), "driver ou fonte ausente")
+
+        # Recarregado a cada passada de proposito: a GUI escreve neste
+        # arquivo, e o agente nao tem outro jeito de saber.
+        config = load(self.config_path)
+
+        # Se a gravacao anterior falhou, o disco nao sabe qual era o
+        # perfil da tomada -- mas nos sabemos. Sem isto, um $HOME
+        # somente-leitura desliga a restauracao inteira deixando so um
+        # aviso, que foi exatamente o que aconteceu na virada.
+        # Persistir e bom; restaurar dentro da sessao nao pode depender
+        # disso.
+        if config.saved_ac_profile is None and self._saved_memoria is not None:
+            config = dataclasses.replace(
+                config, saved_ac_profile=self._saved_memoria
+            )
+
+        decisao = decide(
+            perfil,
+            was_on_ac=self._was_on_ac,
+            now_on_ac=now_on_ac,
+            config=config,
+            choices=self._read_choices(),
+        )
+        self._was_on_ac = now_on_ac
+        # A memoria acompanha a decisao, tenha a gravacao dado certo ou nao.
+        self._saved_memoria = decisao.config.saved_ac_profile
+
+        if decisao.config != config:
+            try:
+                save(decisao.config, self.config_path)
+            except OSError as erro:
+                self.log.warning("não foi possível gravar a configuração: %s", erro)
+
+        if decisao.profile is not None:
+            try:
+                self.sysfs.write(self.sysfs.profile_path(), decisao.profile)
+                self.log.info("perfil -> %s (%s)", decisao.profile, decisao.reason)
+            except OSError as erro:
+                # Acontece de verdade: sem a regra udev aplicada, ou numa
+                # corrida em que o cabo volta entre a decisao e a escrita.
+                self.log.warning(
+                    "não foi possível escrever o perfil %s: %s", decisao.profile, erro
+                )
+
+        self._reconcile_maximum(decisao.config, now_on_ac)
+
+        return decisao
+
+    def _reconcile_maximum(self, config, on_ac):
+        """Mantém o modo após login, suspensão e alterações externas."""
+        if not config.maximum_mode:
+            self._release_gpu()
+            return
+        active = on_ac is True
+        if active:
+            # Releitura de proposito: o tick ja pode ter escrito o perfil
+            # acima. Le so o arquivo do perfil -- um `read_state` aqui
+            # arrastaria os cinco atributos do grupo sense, cada um uma
+            # chamada WMI, para usar um campo so.
+            perfil_atual = self._read_profile()
+            try:
+                if perfil_atual != THERMAL_PROFILE:
+                    self._maximum.controls.set_profile(THERMAL_PROFILE)
+            except WriteError as error:
+                self.log.warning("não foi possível manter desempenho máximo: %s", error)
+        errors = self._maximum.enforce_runtime(config, active=active)
+        for error in errors:
+            self.log.warning("não foi possível manter desempenho máximo: %s", error)
+        confirmed = active and not errors
+        if confirmed and not self._gpu_confirmed:
+            self.log.info("GPUPowerMizerMode=1 confirmado no cliente NVML persistente")
+        if not active and self._gpu_confirmed:
+            self.log.info("pedido PowerMizer liberado na bateria")
+        self._gpu_confirmed = confirmed
+
+    def _release_gpu(self):
+        try:
+            if self._maximum.gpu is not None:
+                self._maximum.gpu.close()
+            if self._gpu_confirmed:
+                self.log.info("pedido PowerMizer liberado")
+        except PowerMizerError as error:
+            self.log.warning("falha ao liberar PowerMizer: %s", error)
+        self._gpu_confirmed = False
+
+    def run(self, stop_event=None):
+        """O laco. Para quando `stop_event` for sinalizado."""
+        parar = stop_event or threading.Event()
+        self.log.info("agente no ar, sondando a cada %.1f s", self.interval)
+        try:
+            while not parar.is_set():
+                try:
+                    self.tick()
+                except Exception:  # nunca deixar o laco morrer por um tick ruim
+                    self.log.exception("falha inesperada numa passada")
+                parar.wait(self.interval)
+        finally:
+            self._release_gpu()
+        self.log.info("agente encerrado")

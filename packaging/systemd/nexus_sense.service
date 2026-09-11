@@ -1,0 +1,27 @@
+[Unit]
+Description=Save Nexus Sense state and unload the module at shutdown
+Documentation=https://github.com/PXDiv/Div-Acer-Manager-Max
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Loading is NOT this unit's job. Measured on an ANV15-52 by disabling the
+# unit and rebooting: systemd-modules-load.service loads the module from
+# /etc/modules-load.d/nexus_sense.conf, earlier than any unit ordered
+# After=multi-user.target could, and the driver bound normally
+# ("Detected model type: Nitro ANV15-52", sysfs populated).
+#
+# What is left undone without a unit is the unload. systemd does not
+# remove modules at shutdown, so acer_predator_state_save() -- which runs
+# from the driver's remove path -- would never fire, and the settings in
+# /etc/predator_state would never be refreshed. That is what ExecStop is
+# here for.
+ExecStart=/bin/true
+ExecStop=/sbin/modprobe -r nexus_sense
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus_sense
+
+[Install]
+WantedBy=multi-user.target

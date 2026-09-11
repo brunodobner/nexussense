@@ -1,0 +1,30 @@
+[project]
+name = "nexus-sense"
+version = "1.0.0"
+description = "Controle e monitoramento para laptops Acer Nitro e Predator no Linux"
+authors = [{ name = "Bruno Dobner", email = "contato@brunodobner.com" }]
+license = "GPL-3.0-or-later"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["tomli-w>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/brunodobner/nexussense"
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6", "dbus-python>=1.3"]
+
+[project.scripts]
+nexus-sense-agent = "nexus_sense.__main__:main"
+nexus-sense = "nexus_sense.gui.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+pythonpath = ["src"]

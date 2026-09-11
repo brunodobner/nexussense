@@ -1,0 +1,17 @@
+# Nexus Sense -- permissao de escrita para o grupo nexus_sense.
+#
+# Por que existe: os atributos que a interface precisa escrever nascem
+# root:root 644. Dar o grupo a eles dispensa o daemon root que o upstream
+# usava, e estreita o acesso -- o socket do daemon era modo 666, aceitando
+# comando de qualquer processo da maquina. Ver spec secao 5.
+#
+# Exatamente seis atributos. 'version' fica de fora, e permanece 444.
+#
+# udev nao altera permissao de atributo sysfs por ATTR{}; e preciso RUN.
+# O caminho vem de $sys/$devpath para nao supor a montagem em /sys.
+
+ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
+  RUN+="/usr/lib/nexus-sense/apply-perms.sh"
+
+ACTION=="add|change", SUBSYSTEM=="platform-profile", KERNEL=="platform-profile-*", \
+  RUN+="/usr/lib/nexus-sense/apply-perms.sh"
