@@ -759,7 +759,16 @@ install_drivers() {
 
   echo -e "${BLUE}Staging source in /usr/src/nexus_sense-${ver}...${NC}"
   mkdir -p "/usr/src/nexus_sense-${ver}"
-  cp -r "$DRIVER_DIR/src" "$DRIVER_DIR/Makefile" "/usr/src/nexus_sense-${ver}/"
+  # Encena so o FONTE. "cp -r src/" levava junto o que um build local
+  # tivesse deixado ali (.ko, .o, .mod.c), poluindo a arvore do DKMS com
+  # objetos de outro kernel -- e fazendo a verificacao de "fonte encenado
+  # identico ao repositorio" falhar por artefato, nao por divergencia real.
+  install -d "/usr/src/nexus_sense-${ver}/src"
+  install -m 644 "$DRIVER_DIR"/src/*.c "/usr/src/nexus_sense-${ver}/src/"
+  for h in "$DRIVER_DIR"/src/*.h; do
+    [ -e "$h" ] && install -m 644 "$h" "/usr/src/nexus_sense-${ver}/src/"
+  done
+  install -m 644 "$DRIVER_DIR/Makefile" "/usr/src/nexus_sense-${ver}/"
   sed "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"${ver}\"/" \
       "$DRIVER_DIR/dkms.conf" > "/usr/src/nexus_sense-${ver}/dkms.conf"
 
