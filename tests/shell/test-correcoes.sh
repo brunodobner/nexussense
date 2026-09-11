@@ -132,4 +132,31 @@ else
   echo "  FALHA so $n_wrap usos do wrapper: alguem escapou"; fail=1
 fi
 
+# --- as sequencias ler-modificar-escrever sao atomicas (armadilha 24)
+#
+# Serializar cada chamada WMI nao basta: entre ler o valor atual e
+# escrever o modificado, outro escritor entra. Ha dois, em processos
+# separados -- o agente e a janela/bandeja.
+if grep -q 'DEFINE_MUTEX(acer_op_lock)' "$S"; then
+  echo "  OK   existe mutex de operacao"
+else
+  echo "  FALHA sem acer_op_lock: sequencias RMW nao sao atomicas"; fail=1
+fi
+
+for fn in predator_usb_charging_store acer_predator_v4_platform_profile_set; do
+  if awk "/${fn}\(/,/^}/" "$S" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+    echo "  OK   ${fn} e atomica"
+  else
+    echo "  FALHA ${fn} faz RMW sem o acer_op_lock"; fail=1
+  fi
+done
+
+# A ordem e o que impede deadlock: o caminho interno NUNCA pode tomar o
+# lock de operacao, senao ha ciclo.
+if awk '/^static acpi_status acer_wmi_evaluate_method/,/^}/' "$S" | grep -q 'acer_op_lock'; then
+  echo "  FALHA o wrapper WMI toma acer_op_lock: ciclo de lock"; fail=1
+else
+  echo "  OK   o wrapper WMI nao toma o lock de operacao (sem ciclo)"
+fi
+
 exit $fail

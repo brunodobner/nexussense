@@ -641,15 +641,38 @@ notify do ACPI, que roda na workqueue de eventos, não em interrupção.
 e travar. Pôr o lock em nível mais alto — nos helpers `WMID_*` — criaria esse
 risco, porque alguns chamam outros.
 
-### O que isto NÃO resolve
+### E um segundo mutex, para as sequências
 
-Sequências ler-modificar-escrever continuam sem atomicidade. A armadilha 3
-manda partir do valor atual ao escrever num atributo de campos
-(`usb_charging`, por exemplo); entre a leitura e a escrita, outro escritor
-ainda pode entrar. Cada chamada é serializada, a sequência não.
+Serializar cada chamada não torna a **sequência** atômica. Duas funções leem o
+estado atual antes de escrever, e entre ler e escrever outro escritor entra:
 
-Não foi observado na prática — só há um escritor por vez na interface — mas
-está aqui para quando alguém acrescentar o segundo.
+| | o que lê antes de escrever |
+|---|---|
+| `predator_usb_charging_store` | o valor cru, para preservar o limiar (armadilha 3) |
+| `acer_predator_v4_platform_profile_set` | a fonte de energia, e talvez baixe as ventoinhas |
+
+E há **dois escritores de verdade, em processos separados**: o agente
+(`nexus-sense-agent`) e a janela/bandeja (`nexus-sense`). Eu havia afirmado que
+só existia um; era suposição, e estava errada.
+
+Daí `acer_op_lock`, tomado só por essas duas funções, com
+**ordem obrigatória: `acer_op_lock` antes de `acer_wmi_lock`**. Não há ciclo
+possível porque o caminho interno nunca toma o de cima.
+
+### Por que NÃO travar todos os pontos de entrada
+
+Foi o primeiro plano, e travaria a máquina no carregamento.
+
+`acer_platform_probe` registra rfkill, backlight, platform_profile e hwmon — e
+**o kernel chama os callbacks de volta de dentro do probe**. Travar o probe e
+os callbacks com o mesmo mutex é recursão garantida.
+
+Esse aninhamento é invisível ao grep: quem chama de volta é o kernel, não o
+driver. A checagem "nenhum ponto de entrada aparece mais de duas vezes no
+arquivo" passa, e mente.
+
+**A regra:** ao serializar por ponto de entrada, liste primeiro o que o seu
+`probe` **registra** — cada registro é um caminho de reentrada.
 
 ---
 

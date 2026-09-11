@@ -46,6 +46,7 @@
 #include <linux/rfkill.h>
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
+#include <linux/cleanup.h>
 #include <linux/debugfs.h>
 #include <linux/slab.h>
 #include <linux/input.h>
@@ -633,6 +634,31 @@ struct wmab_ret
  * A secao critica e uma chamada so, de proposito: nada aqui dentro chama
  * de volta para o driver, entao nao ha como aninhar e travar.
  */
+/*
+ * Dois mutexes, com papeis diferentes.
+ *
+ *   acer_op_lock   serializa OPERACOES ler-modificar-escrever
+ *   acer_wmi_lock  serializa cada AVALIACAO de metodo WMI
+ *
+ * O de baixo sozinho nao basta: ele garante que duas chamadas nao se
+ * atropelem, mas nao que a SEQUENCIA leitura-escrita seja atomica. Entre
+ * ler o valor atual e escrever o modificado, outro escritor entra e a
+ * atualizacao de um dos dois se perde. Ver armadilhas 3 e 24.
+ *
+ * Ha dois escritores de verdade nesta maquina, em PROCESSOS separados:
+ * o agente (nexus-sense-agent) e a janela/bandeja (nexus-sense).
+ *
+ * ORDEM OBRIGATORIA: acer_op_lock antes de acer_wmi_lock, nunca o
+ * contrario. Nao ha ciclo possivel porque o caminho interno --
+ * acer_wmi_evaluate_method -- nunca toma o acer_op_lock.
+ *
+ * So as duas funcoes RMW tomam o de cima. Travar os pontos de entrada em
+ * geral NAO funciona, e a tentativa travaria a maquina no carregamento:
+ * acer_platform_probe registra rfkill, backlight, platform_profile e
+ * hwmon, e o kernel chama os callbacks de volta de dentro dele.
+ */
+static DEFINE_MUTEX(acer_op_lock);
+
 static DEFINE_MUTEX(acer_wmi_lock);
 
 static acpi_status acer_wmi_evaluate_method(const char *guid, u8 instance,
@@ -1912,6 +1938,14 @@ acer_predator_v4_platform_profile_set(struct device *dev,
     acpi_status status;
     u64 on_AC;
 
+    /*
+     * Le a fonte de energia, decide, talvez baixe as ventoinhas e so
+     * entao escreve o perfil: quatro passos que tem de ser um so. Sem
+     * isto, o agente trocando perfil na queda do cabo e voce clicando na
+     * bandeja se intercalam.
+     */
+    guard(mutex)(&acer_op_lock);
+
     /* Check Power Source */
     status = WMI_gaming_execute_u64(
         ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
@@ -2891,6 +2925,9 @@ static ssize_t predator_usb_charging_store(struct device *dev, struct device_att
     if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
         return -EINVAL;
     pr_info("usb charging set value: %d\n", val);
+
+    /* Ler-modificar-escrever: a sequencia inteira e uma operacao so. */
+    guard(mutex)(&acer_op_lock);
 
     /*
      * Ler o estado atual antes de escrever. A versao anterior montava o
