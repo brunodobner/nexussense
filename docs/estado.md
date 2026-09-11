@@ -332,13 +332,13 @@ manter. Ela é substituída pela spec da GUI e pela renomeação.
 
 Coisas verdadeiras hoje que alguém pode estranhar:
 
-- **`SCRIPT_VERSION` e `release.txt` ainda dizem `1.0.2`.** A base é
-  `1.0.2-h1`. O README já foi corrigido; estes dois são trabalho da fase G
-  (spec §7).
-- **As armadilhas 15 a 18 não estão escritas** em `docs/armadilhas.md`. Os
-  textos estão na §9 da spec de melhorias, prontos para transcrever na fase
-  G. A 18 é a mais importante: a tabela de quirks **não** diz o que o modelo
-  usa, e enxugar por ela removeria o rfkill do wifi.
+- **As armadilhas 15 a 18 foram escritas em 2026-09-11**, recuperadas da spec
+  de melhorias antes de ela ser apagada. A 15 documenta **um defeito vivo** no
+  driver: `if (!file)` depois de `filp_open` em `:3867` e `:4494`, mais um
+  `filp_close` duplicado no mesmo bloco. Não foi corrigido ainda.
+- **`SCRIPT_VERSION` e as versões foram alinhadas em `1.0.0`** e o
+  `release.txt` do upstream foi removido — a pendência antiga sobre eles
+  deixou de existir.
 - **O bitmask de capabilities nunca foi medido.** É o passo zero da fase F
   (spec §4.4) e nada pode ser removido do driver antes dele.
 - **Os testes em shell são quase todos `grep` sobre o fonte.** É adequado ao

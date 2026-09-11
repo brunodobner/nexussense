@@ -312,6 +312,81 @@ de aprovar.
 
 ---
 
+## 15. `filp_open` devolve `ERR_PTR`, nunca `NULL`
+
+**Há dois locais com este defeito no driver agora** — `:3867` e `:4494`, os
+dois caminhos de **escrita** do estado.
+
+```c
+file = filp_open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+if (!file)                 /* ERRADO: nunca e verdadeiro */
+    return -1;
+len = kernel_write(file, ...);   /* escreve atraves do ponteiro de erro */
+```
+
+`filp_open` devolve `ERR_PTR(-errno)` em falha — um ponteiro pequeno e
+negativo, tipo `0xFFFFFFFFFFFFFFE2`, que **não é NULL**. A guarda passa, e o
+`kernel_write` seguinte dereferencia aquilo: oops de kernel.
+
+Só não morde hoje porque `/etc` é gravável. Um sistema de arquivos em
+somente-leitura, disco cheio ou `/etc` num tmpfs cheio derrubam a máquina no
+desligamento, que é quando `acer_predator_state_save()` roda.
+
+**A forma certa** — e os outros dois locais do mesmo arquivo (`:3803`, `:4526`)
+já a usam:
+
+```c
+if (IS_ERR(file))
+    return PTR_ERR(file);
+```
+
+### 15b. E o mesmo bloco fecha o arquivo duas vezes
+
+```c
+len = kernel_write(file, ...);
+if (len < 0) {
+    pr_info(...);
+    filp_close(file, NULL);    /* fecha */
+}
+filp_close(file, NULL);        /* fecha de novo, sempre */
+```
+
+No caminho de erro, `filp_close` roda duas vezes sobre o mesmo `struct file`.
+O `if` deveria sair da função, ou não fechar.
+
+Os dois defeitos vivem juntos nos mesmos dois blocos e se consertam juntos.
+
+---
+
+## 16. Release do upstream se identifica por commit, não por número
+
+`1.0.2` e `1.0.2-h1` distribuem tarballs de mesmo nome. A base deste projeto é
+o commit `1f88341` (o hotfix), não `c1a4292`. Registrado no README, seção
+"Licença e origem".
+
+Sem consequência prática hoje — o projeto não puxa mais releases — mas a
+confusão existe e custou tempo uma vez.
+
+---
+
+## 17. `set -e` e função que depende de retorno não-zero
+
+`packaging/scripts/nitro-key-detection.sh` e `packaging/icons/gerar.sh` usam
+`set -euo pipefail`. Sob `set -e`, uma função que devolve não-zero **por
+projeto** — para dizer "não achei", "não aplicável" — mata o script em vez de
+ser tratada.
+
+O `setup.sh` não usa `set -e` de propósito: ele é feito de funções que
+reportam por código de retorno (`install_drivers`, `driver_version`,
+`bind_button_to_nexus`), e o chamador decide o que fazer. Ligar `set -e` nele
+transformaria cada "não" em abortar no meio da instalação.
+
+Ao acrescentar `set -e` a um script existente, procure antes por
+`|| true`, `if funcao; then` e `$?` — são os sinais de que alguém está
+tratando retorno não-zero como informação.
+
+---
+
 ## 19. O índice do `hwmon` muda entre boots
 
 `/sys/class/hwmon/hwmonN` é numerado pela ordem em que os módulos
