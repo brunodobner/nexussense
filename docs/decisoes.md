@@ -155,8 +155,54 @@ o quirk não as liga. **A medição refutou**, e o erro teria arrancado o contro
 por hardware do wifi e do bluetooth — sem que nada acusasse, porque os seis
 atributos do `nitro_sense` continuariam presentes.
 
-Antes de remover subsistema, instrumentar o driver para imprimir o bitmask real
-de `interface->capability` e comparar. Esse passo continua pendente.
+O passo zero foi feito em 2026-09-11: `acer_dump_capabilities()` imprime o
+bitmask real no carregamento. **O corte de subsistema continua pendente**, mas
+agora tem critério: medir antes, medir depois, e exigir que o número não mude.
+
+## 6b. Por que não usar o `acer_wmi` nativo do kernel
+
+A pergunta certa a fazer sobre qualquer fork de driver, e a resposta não é
+"o nativo não serve" — é mais matizada que isso.
+
+**O que o `acer_wmi` do kernel já faz**, medido extraindo símbolos do módulo
+instalado (`/lib/modules/<kver>/kernel/drivers/platform/x86/acer-wmi.ko.zst`):
+
+| | |
+|---|---|
+| perfis térmicos | ✅ `devm_platform_profile_register`, `acer_predator_v4_platform_profile_get/set` |
+| leitura de ventoinha e temperatura | ✅ `acer_wmi_hwmon_init`, `ACER_WMID_SENSOR_CPU/GPU_FAN_SPEED` |
+| rfkill, backlight, teclas | ✅ |
+
+Não é um driver pobre. **Troca de perfil e telemetria já vêm do kernel** — e
+este projeto as reimplementa.
+
+**O que ele não faz.** Dos nove atributos de controle, expõe **zero**:
+
+```
+fan_speed  battery_limiter  usb_charging  backlight_timeout
+battery_calibration  boot_animation_sound  lcd_override
+nitro_sense  predator_sense          →  0 de 9
+```
+
+Ele **lê** a rotação da ventoinha; não a **define**. Não tem limitador de
+bateria nem calibração. E não reconhece o ANV15-52: zero aliases DMI com `ANV`,
+sendo o `AN515-58` o único Nitro na tabela dele.
+
+**A decisão:** manter o fork, porque os cinco atributos em uso aqui —
+`fan_speed`, `battery_limiter`, `usb_charging`, `backlight_timeout`,
+`battery_calibration` — só existem nele. É exatamente o conjunto que motiva o
+projeto.
+
+**A consequência que vale encarar:** há duplicação real. Perfil térmico e
+telemetria são funcionalidade que o kernel já entrega e o fork refaz. Se o
+mainline ganhar os atributos de controle, o fork perde a razão de ser.
+
+E o blacklist do `acer_wmi` não é preferência: os dois disputam os mesmos GUIDs
+WMI, e sem ele o nativo ganha a corrida no boot — o `nexus_sense` carrega e
+nunca vincula.
+
+Ver [estado.md](estado.md), "Projeto futuro", para o caminho que encerraria o
+fork.
 
 ## 7. A versão do driver vem do fonte, nunca cravada
 

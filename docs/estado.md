@@ -40,6 +40,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
 [x] Poda para um modelo so           v1.1.0: 32 entradas DMI -> 1, bitmask identico
 [ ] Podar os subsistemas             precisa de medicao por subsistema, como a tabela precisou
+[ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
 
 ### Concluído
@@ -326,6 +327,51 @@ G. documentacao                  spec 9
 
 A **fase D perdeu o objeto**: não haverá binário a versionar nem manifesto a
 manter. Ela é substituída pela spec da GUI e pela renomeação.
+
+---
+
+## Projeto futuro: levar os atributos para o mainline
+
+**O caminho que encerraria o fork.** Decidido investir tempo nisso em
+2026-09-11, sem data.
+
+O `acer_wmi` do kernel já entrega perfis térmicos, leitura de ventoinha e
+temperatura, rfkill e backlight. O que falta nele são os **atributos de
+controle** — e é só por eles que este fork existe:
+
+| | o nativo tem? |
+|---|---|
+| `fan_speed` (definir, não só ler) | ❌ |
+| `battery_limiter` | ❌ |
+| `usb_charging` | ❌ |
+| `backlight_timeout` | ❌ |
+| `battery_calibration` | ❌ |
+| entrada DMI do ANV15-52 | ❌ |
+
+Enviar esses para o mainline faria o driver deixar de ser manutenção sua: o
+kernel passaria a carregá-lo sozinho, sem DKMS, sem blacklist, sem recompilar a
+cada atualização de kernel. Ver [decisoes.md](decisoes.md) seção 6b para a
+medição que sustenta este quadro.
+
+**O que o trabalho envolve, sem romantizar:**
+
+- é a lista `platform-driver-x86@vger.kernel.org`, com revisão pública e
+  provavelmente várias rodadas
+- o estilo do código teria de virar o do kernel (o fonte atual tem chaves em
+  linha própria, comentários em português e `pr_info` em excesso)
+- a decodificação por campos das armadilhas 3 e 3b é a parte mais defensável:
+  conserta defeito real e vale para qualquer Acer, não só para este modelo
+- o mesmo para as armadilhas 15 (`filp_open` devolve `ERR_PTR`) e 24
+  (chamadas WMI sem serialização) — são bugs do upstream, não nossos
+- o que provavelmente **não** passa como está: a entrada DMI de um modelo só,
+  e o `predator_sense`/`nitro_sense` como grupo sysfs próprio em vez das
+  interfaces padrão do kernel (`power_supply` para o limitador de bateria,
+  `hwmon` `pwm*` para as ventoinhas)
+
+**Ordem sugerida, do mais fácil de aceitar para o mais difícil:** primeiro as
+correções de bug (15, 24, 3, 3b) como patches isolados contra o `acer-wmi`
+atual; depois a entrada DMI do modelo; e só então os atributos de controle,
+já traduzidos para as interfaces padrão.
 
 ---
 
