@@ -589,6 +589,70 @@ runtime. O cache foi povoado pelo mundo de antes da limpeza.
 
 ---
 
+## 24. Chamada WMI concorrente colide, e o erro é esporádico
+
+Sintoma no journal, algumas vezes por hora, sem dano visível:
+
+```
+platform_profile: Failed to get profile for handler acer-wmi
+```
+
+O driver não serializava **nada** — zero `mutex_lock` em 4728 linhas. Quando
+dois leitores caem na mesma janela, o firmware devolve status não-zero,
+`WMID_gaming_get_misc_setting` traduz para `-EIO`, e o núcleo do
+`platform_profile` registra a linha acima.
+
+Nesta máquina há três leitores: o agente a cada 2 s, a bandeja a cada 5 s e a
+janela quando visível.
+
+**Por que passou meses despercebido:** é esporádico e não quebra nada que o
+usuário veja. Uma leitura falha, a próxima funciona. O erro vira paisagem no
+journal.
+
+### Como provar que é concorrência, e não outra coisa
+
+Leitura sequencial **não** reproduz. O teste que separa as duas hipóteses é
+pressão paralela:
+
+```bash
+P=$(echo /sys/devices/platform/acer-wmi/platform-profile/platform-profile-*/profile)
+F=/sys/devices/platform/acer-wmi/nitro_sense/fan_speed
+antes=$(journalctl -k --no-pager | grep -c 'Failed to get profile')
+for i in $(seq 8); do
+  ( for j in $(seq 150); do cat "$P" >/dev/null; cat "$F" >/dev/null; done ) &
+done; wait; sleep 2
+echo "novos: $(( $(journalctl -k --no-pager | grep -c 'Failed to get profile') - antes ))"
+```
+
+Medido: **200 leituras sequenciais → 0 erros. 8 leitores paralelos → 2 erros.**
+Depois do mutex, 16 leitores × 200 leituras → 0.
+
+### A correção
+
+Um `mutex` no nível da folha, em `acer_wmi_evaluate_method()`, por onde passam
+as 14 chamadas a `wmi_evaluate_method`.
+
+**Mutex e não spinlock:** `wmi_evaluate_method` dorme. Todos os chamadores
+estão em contexto de processo — handlers de sysfs, `probe`, `remove`, e o
+notify do ACPI, que roda na workqueue de eventos, não em interrupção.
+
+**A seção crítica é uma chamada só, de propósito.** Nada dentro de
+`wmi_evaluate_method` chama de volta para o driver, então não há como aninhar
+e travar. Pôr o lock em nível mais alto — nos helpers `WMID_*` — criaria esse
+risco, porque alguns chamam outros.
+
+### O que isto NÃO resolve
+
+Sequências ler-modificar-escrever continuam sem atomicidade. A armadilha 3
+manda partir do valor atual ao escrever num atributo de campos
+(`usb_charging`, por exemplo); entre a leitura e a escrita, outro escritor
+ainda pode entrar. Cada chamada é serializada, a sequência não.
+
+Não foi observado na prática — só há um escritor por vez na interface — mas
+está aqui para quando alguém acrescentar o segundo.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

@@ -106,4 +106,30 @@ for fn in acer_predator_state_save four_zone_kb_state_save \
   fi
 done
 
+# --- toda chamada WMI e serializada (armadilha 24)
+#
+# O driver nao tinha lock nenhum: leitores concorrentes colidiam no
+# firmware e o journal enchia de "Failed to get profile for handler
+# acer-wmi". Sequencial nao reproduz; 8 leitores paralelos reproduzem.
+if grep -q 'DEFINE_MUTEX(acer_wmi_lock)' "$S"; then
+  echo "  OK   existe mutex para as chamadas WMI"
+else
+  echo "  FALHA sem mutex: chamadas WMI concorrentes colidem"; fail=1
+fi
+
+# Fora do proprio wrapper, ninguem pode chamar wmi_evaluate_method direto.
+direto=$(grep -c '[^_]wmi_evaluate_method(' "$S" || true)
+if [ "$direto" -eq 1 ]; then
+  echo "  OK   so o wrapper chama wmi_evaluate_method direto"
+else
+  echo "  FALHA $direto chamadas diretas a wmi_evaluate_method (esperado 1)"; fail=1
+fi
+
+n_wrap=$(grep -c 'acer_wmi_evaluate_method(' "$S" || true)
+if [ "$n_wrap" -ge 14 ]; then
+  echo "  OK   $n_wrap usos do wrapper serializado"
+else
+  echo "  FALHA so $n_wrap usos do wrapper: alguem escapou"; fail=1
+fi
+
 exit $fail

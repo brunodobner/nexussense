@@ -45,6 +45,7 @@
 #include <linux/i8042.h>
 #include <linux/rfkill.h>
 #include <linux/workqueue.h>
+#include <linux/mutex.h>
 #include <linux/debugfs.h>
 #include <linux/slab.h>
 #include <linux/input.h>
@@ -610,6 +611,44 @@ struct wmab_ret
     u32 eex;
 };
 
+/*
+ * Toda avaliacao de metodo WMI deste driver passa por aqui, serializada.
+ *
+ * Sem isto, leitores concorrentes colidem no firmware: ele devolve
+ * status nao-zero, WMID_gaming_get_misc_setting vira -EIO, e o journal
+ * registra "platform_profile: Failed to get profile for handler
+ * acer-wmi". Esporadico, sem dano visivel, e por isso ficou meses sem
+ * ser notado.
+ *
+ * Nesta maquina ha dois leitores periodicos -- o agente a cada 2 s e a
+ * bandeja a cada 5 s -- mais a janela quando visivel.
+ *
+ * Medido: 200 leituras SEQUENCIAIS nao falham nenhuma vez; 8 leitores em
+ * PARALELO reproduzem o erro. Ver docs/armadilhas.md, armadilha 24.
+ *
+ * Mutex e nao spinlock porque wmi_evaluate_method dorme. Todos os
+ * chamadores estao em contexto de processo: handlers de sysfs, probe,
+ * remove, e o notify do ACPI, que roda na workqueue de eventos.
+ *
+ * A secao critica e uma chamada so, de proposito: nada aqui dentro chama
+ * de volta para o driver, entao nao ha como aninhar e travar.
+ */
+static DEFINE_MUTEX(acer_wmi_lock);
+
+static acpi_status acer_wmi_evaluate_method(const char *guid, u8 instance,
+                                            u32 method_id,
+                                            const struct acpi_buffer *in,
+                                            struct acpi_buffer *out)
+{
+    acpi_status status;
+
+    mutex_lock(&acer_wmi_lock);
+    status = wmi_evaluate_method(guid, instance, method_id, in, out);
+    mutex_unlock(&acer_wmi_lock);
+
+    return status;
+}
+
 static acpi_status wmab_execute(struct wmab_args *regbuf,
                                 struct acpi_buffer *result)
 {
@@ -618,7 +657,7 @@ static acpi_status wmab_execute(struct wmab_args *regbuf,
     input.length = sizeof(struct wmab_args);
     input.pointer = (u8 *)regbuf;
 
-    status = wmi_evaluate_method(AMW0_GUID1, 0, 1, &input, result);
+    status = acer_wmi_evaluate_method(AMW0_GUID1, 0, 1, &input, result);
 
     return status;
 }
@@ -898,7 +937,7 @@ WMI_execute_u32(u32 method_id, u32 in, u32 *out)
     u32 tmp = 0;
     acpi_status status;
 
-    status = wmi_evaluate_method(WMID_GUID1, 0, method_id, &input, &result);
+    status = acer_wmi_evaluate_method(WMID_GUID1, 0, method_id, &input, &result);
 
     if (ACPI_FAILURE(status))
         return status;
@@ -1025,7 +1064,7 @@ static acpi_status wmid3_get_device_status(u32 *value, u16 device)
         &params};
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
 
-    status = wmi_evaluate_method(WMID_GUID3, 0, 0x2, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x2, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -1105,7 +1144,7 @@ static acpi_status wmid3_set_device_status(u32 value, u16 device)
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
     struct acpi_buffer output2 = {ACPI_ALLOCATE_BUFFER, NULL};
 
-    status = wmi_evaluate_method(WMID_GUID3, 0, 0x2, &get_input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x2, &get_input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -1139,7 +1178,7 @@ static acpi_status wmid3_set_device_status(u32 value, u16 device)
     devices = return_value.devices;
     set_params.devices = (value) ? (devices | device) : (devices & ~device);
 
-    status = wmi_evaluate_method(WMID_GUID3, 0, 0x1, &set_input, &output2);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x1, &set_input, &output2);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -1289,7 +1328,7 @@ WMI_apgeaction_execute_u64(u32 method_id, u64 in, u64 *out)
     union acpi_object *obj;
     u64 tmp = 0;
     acpi_status status;
-    status = wmi_evaluate_method(WMID_GUID3, 0, method_id, &input, &result);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, method_id, &input, &result);
 
     if (ACPI_FAILURE(status))
         return status;
@@ -1330,7 +1369,7 @@ WMI_gaming_execute_u64(u32 method_id, u64 in, u64 *out)
     u64 tmp = 0;
     acpi_status status;
 
-    status = wmi_evaluate_method(WMID_GUID4, 0, method_id, &input, &result);
+    status = acer_wmi_evaluate_method(WMID_GUID4, 0, method_id, &input, &result);
 
     if (ACPI_FAILURE(status))
         return status;
@@ -1370,7 +1409,7 @@ static int WMI_gaming_execute_u32_u64(u32 method_id, u32 in, u64 *out)
     acpi_status status;
     int ret = 0;
 
-    status = wmi_evaluate_method(WMID_GUID4, 0, method_id, &input, &result);
+    status = acer_wmi_evaluate_method(WMID_GUID4, 0, method_id, &input, &result);
     if (ACPI_FAILURE(status))
         return -EIO;
 
@@ -2227,7 +2266,7 @@ static void acer_kbd_dock_get_initial_state(void)
     acpi_status status;
     int sw_tablet_mode;
 
-    status = wmi_evaluate_method(WMID_GUID3, 0, 0x2, &input_buf, &output_buf);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x2, &input_buf, &output_buf);
     if (ACPI_FAILURE(status))
     {
         pr_err("Error getting keyboard-dock initial status: %s\n",
@@ -2566,7 +2605,7 @@ wmid3_set_function_mode(struct func_input_params *params,
     struct acpi_buffer input = {sizeof(struct func_input_params), params};
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
 
-    status = wmi_evaluate_method(WMID_GUID3, 0, 0x1, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x1, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -2946,7 +2985,7 @@ static acpi_status battery_health_query(int mode, int *enabled)
 
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
 
-    status = wmi_evaluate_method(WMID_GUID5, 0, ACER_WMID_GET_BATTERY_HEALTH_CONTROL_STATUS_METHODID, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID5, 0, ACER_WMID_GET_BATTERY_HEALTH_CONTROL_STATUS_METHODID, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -3002,7 +3041,7 @@ static acpi_status battery_health_set(u8 function, u8 function_status)
 
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
 
-    status = wmi_evaluate_method(WMID_GUID5, 0, ACER_WMID_SET_BATTERY_HEALTH_CONTROL_METHODID, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID5, 0, ACER_WMID_SET_BATTERY_HEALTH_CONTROL_METHODID, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -3664,7 +3703,7 @@ static acpi_status set_kb_status(int mode, int speed, int brightness,
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
     struct acpi_buffer input = {(acpi_size)sizeof(gmInput), (void *)(gmInput)};
 
-    status = wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_SET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_SET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
@@ -3704,7 +3743,7 @@ static acpi_status get_kb_status(struct get_four_zoned_kb_output *out)
     struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
     struct acpi_buffer input = {(acpi_size)sizeof(u64), (void *)(&in)};
 
-    status = wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_GET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
+    status = acer_wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_GET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
     if (ACPI_FAILURE(status))
         return status;
 
