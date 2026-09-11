@@ -375,6 +375,42 @@ já traduzidos para as interfaces padrão.
 
 ---
 
+## O erro WMI: o que está provado e o que não está
+
+O `platform_profile: Failed to get profile for handler acer-wmi` aparecia
+algumas vezes por hora. Diagnosticado e corrigido em 2026-09-11 (v1.1.1 e
+v1.1.2), com dois mutexes — um para as chamadas, outro para as sequências.
+
+**A evidência forte é o teste de estresse**, porque isola a variável:
+
+| | leituras | erros |
+|---|---|---|
+| 200 sequenciais, antes | 200 | 0 |
+| 8 leitores paralelos, antes | 2.400 | **2** |
+| 8 paralelos, depois | 2.400 | 0 |
+| 16 paralelos, depois | 6.400 | 0 |
+
+Sequencial não reproduzir foi o que descartou "firmware instável" e apontou
+concorrência.
+
+**A observação em uso é consistente, mas curta:** no boot de 2026-09-11 18:45,
+após 5 minutos e ~247 leituras concorrentes (agente a cada 2 s, bandeja a cada
+5 s), zero erros. Antes eram ~4 por hora, ou seja um a cada ~15 min — 5 minutos
+fica **abaixo** do intervalo médio, então esse número sozinho não conclui nada.
+
+Quem quiser fechar a conta: deixe a máquina em uso algumas horas e rode
+
+```bash
+journalctl -k -b | grep -c 'Failed to get profile'
+```
+
+Se continuar em zero, a correção está confirmada em campo também. Se subir, o
+diagnóstico estava incompleto — e o próximo passo seria instrumentar
+`WMID_gaming_get_misc_setting` para registrar qual dos dois caminhos de falha
+disparou (erro da chamada, ou valor fora das cinco constantes).
+
+---
+
 ## Pendências conhecidas
 
 Coisas verdadeiras hoje que alguém pode estranhar:
