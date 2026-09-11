@@ -151,9 +151,9 @@ novas do DAMX não são incorporadas.
 
 ## Histórico
 
-`docs/superpowers/specs/` e `docs/superpowers/plans/` guardam a spec e o
-plano do port, com o raciocínio por trás de cada decisão — incluindo as que
-contrariaram a intuição inicial.
+O raciocínio por trás de cada decisão está em
+[docs/decisoes.md](docs/decisoes.md), e as armadilhas que custaram tempo em
+[docs/armadilhas.md](docs/armadilhas.md).
 
 A pasta `versaopessoal/`, fork local de 2025 que originou este trabalho, foi
 **removida do histórico** no expurgo de 2026-09-05, depois que suas

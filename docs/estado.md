@@ -44,8 +44,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 ### Concluído
 
 **Port do ANV15-52** (2026-09-04) — driver reconhecendo o modelo, DKMS,
-instalador multi-distro, botão N vinculável. Ver
-`docs/superpowers/specs/2026-09-04-damx-anv15-52-port-design.md`.
+instalador multi-distro, botão N vinculável.
 
 **Fase A — expurgo do histórico** (2026-09-05) — `.git` de 147.171.205 para
 ~290.000 bytes. Removidos do histórico os dois binários do upstream e a
@@ -53,12 +52,11 @@ pasta `versaopessoal/` inteira. Tag renomeada de `upstream/1.0.2` para
 `upstream/1.0.2-h1`, porque o commit `1f88341` é o hotfix, não a `1.0.2`
 (que é `c1a4292`) — essa tag foi removida na v1.0.0, junto com o histórico
 de desenvolvimento. Ver
-`docs/superpowers/plans/2026-09-05-fase-a-expurgo-historico.md`, seção
-"Executado em 2026-09-05".
+o expurgo da fase A.
 
 **Spec da GUI e do agente** (2026-09-05) — brainstorm concluído e spec
 escrita em
-`docs/superpowers/specs/2026-09-05-nexus-sense-gui-agente-design.md`.
+a spec da GUI e do agente.
 
 O resultado principal veio de medição: **o daemon não é necessário.** `sysfs`
 honra permissão de grupo, e escrita como uid 1000 nos seis atributos passou
@@ -80,7 +78,7 @@ próprio N, com duas polaridades para o tema; ver `docs/interface.md`.
 
 **Plano 1 — núcleo e agente** (2026-09-05) — as dez tarefas executadas e
 mescladas em `master`. Ver
-`docs/superpowers/plans/2026-09-05-nexus-sense-nucleo-e-agente.md`.
+o plano 1.
 
 ```
 [x] Task 1  camada Sysfs                 13 testes   0b3e0a3
@@ -114,7 +112,7 @@ driver recusa `quiet` e `balanced-performance` e aceita `balanced` e
 `low-power`.
 
 **Plano 2 — GUI e bandeja** (2026-09-05, escrito) — doze tarefas em
-`docs/superpowers/plans/2026-09-05-nexus-sense-gui-e-bandeja.md`.
+o plano 2.
 
 A ordem é uma fatia vertical, não camadas: a Task 3 já entrega uma janela
 que abre com uma página real dentro, e cada tarefa seguinte registra a sua

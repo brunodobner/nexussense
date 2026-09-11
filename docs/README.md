@@ -12,12 +12,7 @@ Nada aqui vai junto numa instalação — é tudo ferramenta de manutenção.
 
 ## Histórico
 
-[`superpowers/specs/`](superpowers/) e [`superpowers/plans/`](superpowers/)
-guardam as specs e os planos, com o raciocínio por trás de cada decisão.
-
-**Os caminhos citados neles não foram atualizados na reorganização de
-2026-09-10, de propósito.** Eles descrevem a árvore como ela era quando cada
-documento foi escrito — `original/`, `original/Linuwu-Sense/`, `tests/test-*.sh`
-soltos. Reescrever caminhos em registro histórico transformaria o registro em
-ficção. Para traduzir um caminho antigo para o de hoje, use a tabela de-para no
-[README da raiz](../README.md#licença-e-origem).
+O desenvolvimento aconteceu em 111 commits entre 2026-09-04 e 2026-09-11. Esse
+histórico foi descartado na v1.0.0, e as specs e planos daquele período saíram
+junto — mas **não sem antes serem lidos**: a razão que vivia neles está em
+[decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md).
