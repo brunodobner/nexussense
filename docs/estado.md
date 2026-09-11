@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-10 (reorganização da árvore; instalação real verificada)
+**Última atualização:** 2026-09-11 (v1.0.0: identidade própria, histórico resetado, remoto publicado)
 
 ---
 
@@ -12,9 +12,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | funcional no ANV15-52, ~3% divergente do upstream |
-| ramo | **`master`** — planos 1 e 2, reparos e a reorganização da árvore mesclados |
-| layout | reorganizado em 2026-09-10: só `setup.sh` na raiz |
+| driver | funcional no ANV15-52; ~200 linhas divergentes da base do DAMX |
+| versão | **v1.0.0** — primeira estável; `master` em github.com/brunodobner/nexussense (privado) |
+| layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
+| histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
 | suíte Python | 333 passaram (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang |
