@@ -72,4 +72,38 @@ else
   echo "  FALHA caminho nitro_sense nao salva o estado"; fail=1
 fi
 
+# --- filp_open devolve ERR_PTR, nunca NULL (armadilha 15)
+#
+# "if (!file)" nunca dispara, e o kernel_write seguinte dereferencia o
+# ponteiro de erro. Dois dos quatro locais tinham o defeito, e eram os
+# dois caminhos de ESCRITA -- os que rodam no desligamento.
+n_bang=$(grep -c 'if (!file)' "$S" || true)
+if [ "$n_bang" -eq 0 ]; then
+  echo "  OK   nenhum 'if (!file)' apos filp_open"
+else
+  echo "  FALHA $n_bang guarda(s) 'if (!file)': filp_open devolve ERR_PTR"; fail=1
+fi
+
+n_open=$(grep -c 'filp_open' "$S" || true)
+n_iserr=$(grep -A1 'filp_open' "$S" | grep -c 'IS_ERR(file)' || true)
+if [ "$n_open" -eq "$n_iserr" ]; then
+  echo "  OK   os $n_open filp_open sao testados com IS_ERR"
+else
+  echo "  FALHA $n_open filp_open mas so $n_iserr com IS_ERR"; fail=1
+fi
+
+# --- um filp_close por funcao (armadilha 15b)
+#
+# O caminho de erro fechava dentro do if e de novo depois dele: dois
+# filp_close sobre o mesmo struct file.
+for fn in acer_predator_state_save four_zone_kb_state_save \
+          acer_predator_state_load four_zone_kb_state_load; do
+  n=$(awk "/^static int ${fn}\(void\)/,/^}/" "$S" | grep -c 'filp_close' || true)
+  if [ "$n" -eq 1 ]; then
+    echo "  OK   ${fn} fecha o arquivo uma vez"
+  else
+    echo "  FALHA ${fn} tem $n filp_close (esperado 1)"; fail=1
+  fi
+done
+
 exit $fail

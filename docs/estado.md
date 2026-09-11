@@ -334,8 +334,9 @@ Coisas verdadeiras hoje que alguém pode estranhar:
 
 - **As armadilhas 15 a 18 foram escritas em 2026-09-11**, recuperadas da spec
   de melhorias antes de ela ser apagada. A 15 documenta **um defeito vivo** no
-  driver: `if (!file)` depois de `filp_open` em `:3867` e `:4494`, mais um
-  `filp_close` duplicado no mesmo bloco. Não foi corrigido ainda.
+  driver: guarda contra `NULL` depois de `filp_open`, mais um `filp_close`
+  duplicado no mesmo bloco. **Corrigido em 2026-09-11**, com teste que
+  reprova as duas regressões.
 - **`SCRIPT_VERSION` e as versões foram alinhadas em `1.0.0`** e o
   `release.txt` do upstream foi removido — a pendência antiga sobre eles
   deixou de existir.

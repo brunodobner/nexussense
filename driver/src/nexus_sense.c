@@ -3863,21 +3863,30 @@ static int acer_predator_state_save(void)
         return -1;
     }
 
+    /*
+     * A guarda testa ERR_PTR, nao NULL: em falha vem um ponteiro de erro,
+     * e a versao anterior seguia direto para o kernel_write com ele.
+     * Ver docs/armadilhas.md, armadilha 15.
+     */
     file = filp_open(STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (!file)
+    if (IS_ERR(file))
     {
-        pr_info("state_access - Error opening file\n");
+        pr_err("state_access - Error opening file: %ld\n", PTR_ERR(file));
         return -1;
     }
 
     len = kernel_write(file, (char *)&current_states, sizeof(current_states), &file->f_pos);
+
+    /* Fecha uma vez so. A versao anterior fechava dentro do tratamento de
+     * erro e de novo depois dele, entao o caminho de falha fechava o
+     * mesmo struct file duas vezes. Ver docs/armadilhas.md, 15b. */
+    filp_close(file, NULL);
+
     if (len < 0)
     {
-        pr_info("state_access - Error writing to file: %ld\n", len);
-        filp_close(file, NULL);
+        pr_err("state_access - Error writing to file: %ld\n", len);
+        return -1;
     }
-
-    filp_close(file, NULL);
 
     if (len != sizeof(current_states))
     {
@@ -4490,21 +4499,22 @@ static int four_zone_kb_state_save(void)
 
     four_zone_kb_state_update();
 
+    /* Mesmo defeito do acer_predator_state_save; ver armadilhas 15 e 15b. */
     file = filp_open(KB_STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (!file)
+    if (IS_ERR(file))
     {
-        pr_err("kb_state_access - Error opening file\n");
+        pr_err("kb_state_access - Error opening file: %ld\n", PTR_ERR(file));
         return -1;
     }
 
     len = kernel_write(file, (char *)&current_kb_state, sizeof(current_kb_state), &file->f_pos);
+    filp_close(file, NULL);
+
     if (len < 0)
     {
         pr_err("kb_state_access - Error writing to file: %ld\n", len);
-        filp_close(file, NULL);
+        return -1;
     }
-
-    filp_close(file, NULL);
 
     if (len != sizeof(current_kb_state))
     {
