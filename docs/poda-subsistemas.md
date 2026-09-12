@@ -48,6 +48,10 @@ journalctl -k -b | grep 'capability bitmask'
 ls /sys/devices/platform/acer-wmi/nitro_sense/   # 6 arquivos
 cat /sys/firmware/acpi/platform_profile_choices  # low-power quiet balanced balanced-performance
 cat /sys/class/rfkill/*/name | grep acer         # acer-wireless, acer-bluetooth
+# O critério é que as DUAS entradas existam -- nao que um bloqueio grude.
+# O firmware nao honra soft-block no wireless, e o poll o desfaz em 1 s.
+# Ver armadilha 25; e nao rode 'rfkill block' se a rede desta maquina
+# for o seu caminho ate aqui.
 ls /sys/devices/platform/acer-wmi/hwmon/         # existe
 
 # 5. as duas suítes
@@ -123,6 +127,12 @@ do quirk, que num driver de um modelo só é mais estreita, não menos.
 os seis atributos, `acer-wireless` e `acer-bluetooth` presentes, `hwmon`
 presente, `Thermal states loaded/restored` no log, zero avisos, `W=1` limpo,
 333 Python e 15/0/2 shell com e sem root.
+
+**O caminho de escrita do rfkill também foi exercitado**, já que `set_u32` foi
+reescrito nesta camada: `rfkill block` devolveu 0 nos dois rádios e o bluetooth
+segurou o bloqueio através do poll. O wireless voltou sozinho — e o driver
+**anterior**, compilado num worktree e carregado por `insmod`, fez exatamente o
+mesmo. Não é regressão; é a armadilha 25.
 
 **Confirmação por outro caminho:** o log mostra
 `Function bitmap for Communication Button: 0x801` *antes* do bitmask, o que

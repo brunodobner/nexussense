@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-11 (camada A da poda: -641 linhas)
+**Última atualização:** 2026-09-12 (camada A da poda: -641 linhas)
 
 ---
 
@@ -43,7 +43,6 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Classificar a poda               docs/poda-subsistemas.md: camadas A/B/C/D e o portao
 [x] Executar a camada A              v1.1.4: -641 linhas, bitmask identico
 [ ] Executar a camada B              ~765 linhas, prova de construcao (quirk unico)
-[ ] Provar o rfkill na mao           o unico item do portao que exige gesto humano
 [ ] Enxugar o log do kernel          ~50 linhas/minuto; pr_debug no lugar de pr_info
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
