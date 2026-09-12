@@ -54,11 +54,15 @@ esperar_ausente 'gpu_fan_config2 |= 1 << (i + 3);' \
 esperar_ausente 'capable(CAP_SYS_ADMIN)' \
   'capable(CAP_SYS_ADMIN) nao foi portado'
 
-# O caminho do Nitro puro (nitro_sense sem nitro_v4) criava o grupo sysfs
-# sem nunca carregar nem salvar o estado -- perfil termico e curvas de
-# ventoinha por fonte de energia se perdiam a cada reinicio. E o remove
-# nem removia o grupo. Ambos corrigidos.
-probe=$(awk '/has_cap\(ACER_CAP_NITRO_SENSE\) && !has_cap\(ACER_CAP_NITRO_SENSE_V4\)/,/^    \}/' "$S" | head -20)
+# O caminho do Nitro puro criava o grupo sysfs sem nunca carregar nem
+# salvar o estado -- perfil termico e curvas de ventoinha por fonte de
+# energia se perdiam a cada reinicio. E o remove nem removia o grupo.
+# Ambos corrigidos. Ver armadilha 4.
+#
+# A guarda era "NITRO_SENSE && !NITRO_SENSE_V4". A camada B da poda
+# (2026-09-12) removeu NITRO_SENSE_V4 do driver, entao sobrou a metade de
+# cima -- o comportamento nao mudou, so a condicao ficou mais curta.
+probe=$(awk '/if \(has_cap\(ACER_CAP_NITRO_SENSE\)\)/,/^    \}/' "$S" | head -20)
 if printf '%s' "$probe" | grep -q 'acer_predator_state_load'; then
   echo "  OK   caminho nitro_sense carrega o estado no probe"
 else
@@ -96,8 +100,9 @@ fi
 #
 # O caminho de erro fechava dentro do if e de novo depois dele: dois
 # filp_close sobre o mesmo struct file.
-for fn in acer_predator_state_save four_zone_kb_state_save \
-          acer_predator_state_load four_zone_kb_state_load; do
+# four_zone_kb_state_save/load estavam nesta lista ate a camada B da poda
+# (2026-09-12) remover o subsistema de teclado RGB inteiro.
+for fn in acer_predator_state_save acer_predator_state_load; do
   n=$(awk "/^static int ${fn}\(void\)/,/^}/" "$S" | grep -c 'filp_close' || true)
   if [ "$n" -eq 1 ]; then
     echo "  OK   ${fn} fecha o arquivo uma vez"
@@ -125,16 +130,19 @@ else
   echo "  FALHA $direto chamadas diretas a wmi_evaluate_method (esperado 1)"; fail=1
 fi
 
-# Piso, nao numero exato: ele cai quando codigo morto e removido, e isso
-# e legitimo. Era 14 ate a camada A da poda (2026-09-11) levar junto
-# wmab_execute e WMI_execute_u32, que chamavam o wrapper. Quem garante a
-# regra de verdade e a checagem acima, de chamada direta; este piso so
-# pega o caso de alguem esvaziar o wrapper sem mexer nela.
-n_wrap=$(grep -c 'acer_wmi_evaluate_method(' "$S" || true)
-if [ "$n_wrap" -ge 12 ]; then
-  echo "  OK   $n_wrap usos do wrapper serializado"
+# Aqui havia um piso de usos do wrapper -- 14, depois 12. Ele caiu duas
+# vezes em duas podas, sempre por remocao legitima de codigo morto, e
+# nunca pegou nada: a checagem de chamada direta acima ja garante a regra
+# inteira, porque qualquer fuga aparece la como um segundo wmi_evaluate_method.
+#
+# No lugar dele, o que um numero nao verificava: que o wrapper realmente
+# serializa. Esta checagem nao envelhece com a poda.
+corpo=$(awk '/^static acpi_status acer_wmi_evaluate_method\(/,/^}/' "$S")
+if printf '%s' "$corpo" | grep -q 'mutex_lock(&acer_wmi_lock)' \
+   && printf '%s' "$corpo" | grep -q 'mutex_unlock(&acer_wmi_lock)'; then
+  echo "  OK   o wrapper toma e devolve o acer_wmi_lock"
 else
-  echo "  FALHA so $n_wrap usos do wrapper: alguem escapou"; fail=1
+  echo "  FALHA o wrapper nao serializa: mutex ausente no corpo"; fail=1
 fi
 
 # --- as sequencias ler-modificar-escrever sao atomicas (armadilha 24)

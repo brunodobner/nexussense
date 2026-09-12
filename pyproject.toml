@@ -1,6 +1,6 @@
 [project]
 name = "nexus-sense"
-version = "1.1.4"
+version = "1.1.5"
 description = "Controle e monitoramento para laptops Acer Nitro e Predator no Linux"
 authors = [{ name = "Bruno Dobner", email = "contato@brunodobner.com" }]
 license = "GPL-3.0-or-later"

@@ -37,8 +37,6 @@
  * comentarios de "substituida por". */
 #include <linux/string.h>
 #include <linux/dmi.h>
-#include <linux/backlight.h>
-#include <linux/leds.h>
 #include <linux/platform_device.h>
 #include <linux/platform_profile.h>
 #include <linux/acpi.h>
@@ -50,7 +48,6 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
-#include <acpi/video.h>
 #include <linux/hwmon.h>
 #include <linux/fs.h>
 #include <linux/units.h>
@@ -122,7 +119,6 @@ MODULE_LICENSE("GPL");
  * Predator State
  */
 #define STATE_FILE "/etc/predator_state"
-#define KB_STATE_FILE "/etc/four_zone_kb_state"
 /*
  * Acer ACPI event GUIDs
  */
@@ -341,8 +337,6 @@ struct hotkey_function_type_aa
 #define ACER_CAP_NITRO_SENSE BIT(13)
 #define ACER_CAP_NITRO_SENSE_V4 BIT(14)
 
-static int mailled = -1;
-static int brightness = -1;
 static int threeg = -1;
 static int force_caps = -1;
 static bool ec_raw_mode;
@@ -352,26 +346,15 @@ static u8 commun_fn_key_number;
 static bool cycle_gaming_thermal_profile = true;
 static u64 supported_sensors;
 
-module_param(mailled, int, 0444);
-module_param(brightness, int, 0444);
 module_param(threeg, int, 0444);
 module_param(force_caps, int, 0444);
 module_param(ec_raw_mode, bool, 0444);
 module_param(cycle_gaming_thermal_profile, bool, 0644);
-MODULE_PARM_DESC(mailled, "Set initial state of Mail LED");
-MODULE_PARM_DESC(brightness, "Set initial LCD backlight brightness");
 MODULE_PARM_DESC(threeg, "Set initial state of 3G hardware");
 MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
 MODULE_PARM_DESC(ec_raw_mode, "Enable EC raw mode");
 MODULE_PARM_DESC(cycle_gaming_thermal_profile,
                  "Set thermal mode key in cycle mode. Disabling it sets the mode key in turbo toggle mode");
-
-struct acer_data
-{
-    int mailled;
-    int threeg;
-    int brightness;
-};
 
 static struct rfkill *wireless_rfkill;
 static struct rfkill *bluetooth_rfkill;
@@ -383,9 +366,6 @@ struct wmi_interface
 {
     /* The capabilities this interface provides */
     u32 capability;
-
-    /* Private data for the current interface */
-    struct acer_data data;
 };
 
 /* The static interface pointer, points to the currently detected interface */
@@ -400,29 +380,14 @@ static struct wmi_interface *interface;
 struct quirk_entry
 {
     u8 wireless;
-    u8 mailled;
-    s8 brightness;
     u8 bluetooth;
-    u8 turbo;
-    u8 cpu_fans;
-    u8 gpu_fans;
     u8 nitro_sense;
-    u8 four_zone_kb;
 };
 
 static struct quirk_entry *quirks;
 
 static void __init set_quirks(void)
 {
-    if (quirks->mailled)
-        interface->capability |= ACER_CAP_MAILLED;
-
-    if (quirks->brightness)
-        interface->capability |= ACER_CAP_BRIGHTNESS;
-
-    if (quirks->turbo)
-        interface->capability |= ACER_CAP_TURBO_OC | ACER_CAP_TURBO_LED | ACER_CAP_TURBO_FAN;
-
     if (quirks->nitro_sense)
         interface->capability |= ACER_CAP_PLATFORM_PROFILE | ACER_CAP_FAN_SPEED_READ | ACER_CAP_NITRO_SENSE;
 }
@@ -919,54 +884,6 @@ static int WMI_gaming_execute_u32_u64(u32 method_id, u32 in, u64 *out)
     return ret;
 }
 
-static acpi_status WMID_gaming_set_u64(u64 value, u32 cap)
-{
-    u32 method_id = 0;
-
-    if (!(interface->capability & cap))
-        return AE_BAD_PARAMETER;
-
-    switch (cap)
-    {
-    case ACER_CAP_TURBO_LED:
-        method_id = ACER_WMID_SET_GAMING_LED_METHODID;
-        break;
-    case ACER_CAP_TURBO_FAN:
-        method_id = ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID;
-        break;
-    default:
-        return AE_BAD_PARAMETER;
-    }
-
-    return WMI_gaming_execute_u64(method_id, value, NULL);
-}
-
-static acpi_status WMID_gaming_get_u64(u64 *value, u32 cap)
-{
-    acpi_status status;
-    u64 result;
-    u64 input;
-    u32 method_id;
-
-    if (!(interface->capability & cap))
-        return AE_BAD_PARAMETER;
-
-    switch (cap)
-    {
-    case ACER_CAP_TURBO_LED:
-        method_id = ACER_WMID_GET_GAMING_LED_METHODID;
-        input = 0x1;
-        break;
-    default:
-        return AE_BAD_PARAMETER;
-    }
-    status = WMI_gaming_execute_u64(method_id, input, &result);
-    if (ACPI_SUCCESS(status))
-        *value = (u64)result;
-
-    return status;
-}
-
 static int WMID_gaming_get_sys_info(u32 command, u64 *out)
 {
     acpi_status status;
@@ -983,27 +900,6 @@ static int WMID_gaming_get_sys_info(u32 command, u64 *out)
     *out = result;
 
     return 0;
-}
-
-static void WMID_gaming_set_fan_mode(u8 fan_mode)
-{
-    /* fan_mode = 1 is used for auto, fan_mode = 2 used for turbo*/
-    u64 gpu_fan_config1 = 0, gpu_fan_config2 = 0;
-    int i;
-
-    if (quirks->cpu_fans > 0)
-        gpu_fan_config2 |= 1;
-    for (i = 0; i < (quirks->cpu_fans + quirks->gpu_fans); ++i)
-        gpu_fan_config2 |= 1ULL << (i + 1);
-    for (i = 0; i < quirks->gpu_fans; ++i)
-        gpu_fan_config2 |= 1ULL << (i + 3);
-    if (quirks->cpu_fans > 0)
-        gpu_fan_config1 |= fan_mode;
-    for (i = 0; i < (quirks->cpu_fans + quirks->gpu_fans); ++i)
-        gpu_fan_config1 |= fan_mode << (2 * i + 2);
-    for (i = 0; i < quirks->gpu_fans; ++i)
-        gpu_fan_config1 |= fan_mode << (2 * i + 6);
-    WMID_gaming_set_u64(gpu_fan_config2 | gpu_fan_config1 << 16, ACER_CAP_TURBO_FAN);
 }
 
 static int WMID_gaming_set_misc_setting(enum acer_wmi_gaming_misc_setting setting, u8 value)
@@ -1082,101 +978,10 @@ static void __init acer_commandline_init(void)
      * These will all fail silently if the value given is invalid, or the
      * capability isn't available on the given interface
      */
-    if (mailled >= 0)
-        set_u32(mailled, ACER_CAP_MAILLED);
     if (!has_type_aa && threeg >= 0)
         set_u32(threeg, ACER_CAP_THREEG);
-    if (brightness >= 0)
-        set_u32(brightness, ACER_CAP_BRIGHTNESS);
 }
 
-/*
- * LED device (Mail LED only, no other LEDs known yet)
- */
-static void mail_led_set(struct led_classdev *led_cdev,
-                         enum led_brightness value)
-{
-    set_u32(value, ACER_CAP_MAILLED);
-}
-
-static struct led_classdev mail_led = {
-    .name = "acer-wmi::mail",
-    .brightness_set = mail_led_set,
-};
-
-static int acer_led_init(struct device *dev)
-{
-    return led_classdev_register(dev, &mail_led);
-}
-
-static void acer_led_exit(void)
-{
-    set_u32(LED_OFF, ACER_CAP_MAILLED);
-    led_classdev_unregister(&mail_led);
-}
-
-/*
- * Backlight device
- */
-static struct backlight_device *acer_backlight_device;
-
-static int read_brightness(struct backlight_device *bd)
-{
-    u32 value;
-    get_u32(&value, ACER_CAP_BRIGHTNESS);
-    return value;
-}
-
-static int update_bl_status(struct backlight_device *bd)
-{
-    int intensity = backlight_get_brightness(bd);
-
-    set_u32(intensity, ACER_CAP_BRIGHTNESS);
-
-    return 0;
-}
-
-/*
- * Era variavel: WMID_set_capabilities() o baixava para 0x9 conforme o
- * bitmap do WMID_GUID2. Esse GUID nao existe neste firmware e a funcao
- * saiu na camada A, entao o valor nunca muda -- e agora diz isso.
- */
-static const int max_brightness = 0xF;
-
-static const struct backlight_ops acer_bl_ops = {
-    .get_brightness = read_brightness,
-    .update_status = update_bl_status,
-};
-
-static int acer_backlight_init(struct device *dev)
-{
-    struct backlight_properties props;
-    struct backlight_device *bd;
-
-    memset(&props, 0, sizeof(struct backlight_properties));
-    props.type = BACKLIGHT_PLATFORM;
-    props.max_brightness = max_brightness;
-    bd = backlight_device_register("acer-wmi", dev, NULL, &acer_bl_ops,
-                                   &props);
-    if (IS_ERR(bd))
-    {
-        pr_err("Could not register Acer backlight device\n");
-        acer_backlight_device = NULL;
-        return PTR_ERR(bd);
-    }
-
-    acer_backlight_device = bd;
-
-    bd->props.power = BACKLIGHT_POWER_ON;
-    bd->props.brightness = read_brightness(bd);
-    backlight_update_status(bd);
-    return 0;
-}
-
-static void acer_backlight_exit(void)
-{
-    backlight_device_unregister(acer_backlight_device);
-}
 
 /*
  * Accelerometer device
@@ -1252,54 +1057,6 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed);
 //      }
 //      return -EOPNOTSUPP;
 //  }
-
-/*
- *  Predator series turbo button
- */
-static int acer_toggle_turbo(void)
-{
-    u64 turbo_led_state;
-
-    /* Get current state from turbo button */
-    if (ACPI_FAILURE(WMID_gaming_get_u64(&turbo_led_state, ACER_CAP_TURBO_LED)))
-        return -1;
-
-    if (turbo_led_state)
-    {
-        /* Turn off turbo led */
-        WMID_gaming_set_u64(0x1, ACER_CAP_TURBO_LED);
-
-        /* Set FAN mode to auto */
-        WMID_gaming_set_fan_mode(0x1);
-
-        /* Set OC to normal */
-        if (has_cap(ACER_CAP_TURBO_OC))
-        {
-            WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_OC_1,
-                                         ACER_WMID_OC_NORMAL);
-            WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_OC_2,
-                                         ACER_WMID_OC_NORMAL);
-        }
-    }
-    else
-    {
-        /* Turn on turbo led */
-        WMID_gaming_set_u64(0x10001, ACER_CAP_TURBO_LED);
-
-        /* Set FAN mode to turbo */
-        WMID_gaming_set_fan_mode(0x2);
-
-        /* Set OC to turbo mode */
-        if (has_cap(ACER_CAP_TURBO_OC))
-        {
-            WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_OC_1,
-                                         ACER_WMID_OC_TURBO);
-            WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_OC_2,
-                                         ACER_WMID_OC_TURBO);
-        }
-    }
-    return turbo_led_state;
-}
 
 static int
 acer_predator_v4_platform_profile_get(struct device *dev,
@@ -1662,79 +1419,6 @@ static int acer_thermal_profile_change(void)
 /*
  * Switch series keyboard dock status
  */
-static int acer_kbd_dock_state_to_sw_tablet_mode(u8 kbd_dock_state)
-{
-    switch (kbd_dock_state)
-    {
-    case 0x01: /* Docked, traditional clamshell laptop mode */
-        return 0;
-    case 0x04: /* Stand-alone tablet */
-    case 0x40: /* Docked, tent mode, keyboard not usable */
-        return 1;
-    default:
-        pr_warn("Unknown kbd_dock_state 0x%02x\n", kbd_dock_state);
-    }
-
-    return 0;
-}
-
-static void acer_kbd_dock_get_initial_state(void)
-{
-    u8 *output, input[8] = {
-                    0x05,
-                    0x00,
-                };
-    struct acpi_buffer input_buf = {sizeof(input), input};
-    struct acpi_buffer output_buf = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-    acpi_status status;
-    int sw_tablet_mode;
-
-    status = acer_wmi_evaluate_method(WMID_GUID3, 0, 0x2, &input_buf, &output_buf);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error getting keyboard-dock initial status: %s\n",
-               acpi_format_exception(status));
-        return;
-    }
-
-    obj = output_buf.pointer;
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 8)
-    {
-        pr_err("Unexpected output format getting keyboard-dock initial status\n");
-        goto out_free_obj;
-    }
-
-    output = obj->buffer.pointer;
-    if (output[0] != 0x00 || (output[3] != 0x05 && output[3] != 0x45))
-    {
-        pr_err("Unexpected output [0]=0x%02x [3]=0x%02x getting keyboard-dock initial status\n",
-               output[0], output[3]);
-        goto out_free_obj;
-    }
-
-    sw_tablet_mode = acer_kbd_dock_state_to_sw_tablet_mode(output[4]);
-    input_report_switch(acer_wmi_input_dev, SW_TABLET_MODE, sw_tablet_mode);
-
-out_free_obj:
-    kfree(obj);
-}
-
-static void acer_kbd_dock_event(const struct event_return_value *event)
-{
-    int sw_tablet_mode;
-
-    if (!has_cap(ACER_CAP_KBD_DOCK))
-        return;
-
-    sw_tablet_mode = acer_kbd_dock_state_to_sw_tablet_mode(event->kbd_dock_state);
-    input_report_switch(acer_wmi_input_dev, SW_TABLET_MODE, sw_tablet_mode);
-    input_sync(acer_wmi_input_dev);
-}
-
-/*
- * Rfkill devices
- */
 static void acer_rfkill_update(struct work_struct *ignored);
 static DECLARE_DELAYED_WORK(acer_rfkill_work, acer_rfkill_update);
 static void acer_rfkill_update(struct work_struct *ignored)
@@ -1969,48 +1653,20 @@ static void acer_wmi_notify(union acpi_object *obj, void *context)
         break;
     case WMID_ACCEL_OR_KBD_DOCK_EVENT:
         acer_gsensor_event();
-        acer_kbd_dock_event(&return_value);
         break;
     case WMID_GAMING_TURBO_KEY_EVENT:
         pr_info("pressed turbo button - %d\n", return_value.key_num);
-        if (return_value.key_num == 0x4 && !has_cap(ACER_CAP_NITRO_SENSE_V4))
-            acer_toggle_turbo();
-        if ((return_value.key_num == 0x5 || (return_value.key_num == 0x4 && has_cap(ACER_CAP_NITRO_SENSE_V4))) && has_cap(ACER_CAP_PLATFORM_PROFILE))
+        if (return_value.key_num == 0x5 && has_cap(ACER_CAP_PLATFORM_PROFILE))
             acer_thermal_profile_change();
         break;
     case WMID_AC_EVENT:
-        if (has_cap(ACER_CAP_PREDATOR_SENSE))
-        {
-            if (return_value.key_num == 0)
-            {
-                /* store the current state when it is connected to AC*/
-                acer_predator_state_update(1);
-                /* restore to the state when it was disconnected from AC*/
-                acer_predator_state_restore(0);
-            }
-            else if (return_value.key_num == 1)
-            {
-                /* store the current state when it is disconnected from AC*/
-                acer_predator_state_update(0);
-                /* restore to the state when it was connected to AC*/
-                acer_predator_state_restore(1);
-            }
-            else
-            {
-                pr_info("Unknown key number - %d\n", return_value.key_num);
-            }
-        }
-        break;
     case WMID_BATTERY_BOOST_EVENT:
-        break;
     case WMID_CALIBRATION_EVENT:
-        if (has_cap(ACER_CAP_PREDATOR_SENSE))
-        {
-            if (battery_health_set(CALIBRATION_MODE, return_value.key_num) != AE_OK)
-            {
-                pr_err("Error changing calibration state\n");
-            }
-        }
+        /*
+         * Os tres so tinham corpo sob ACER_CAP_PREDATOR_SENSE, que este
+         * modelo nao liga. Quem cuida da troca de fonte de energia aqui
+         * e o agente, em espaco de usuario.
+         */
         break;
     default:
         pr_warn("Unknown function number - %d - %d\n",
@@ -2177,9 +1833,6 @@ static int __init acer_wmi_input_setup(void)
     if (err)
         goto err_free_dev;
 
-    if (has_cap(ACER_CAP_KBD_DOCK))
-        input_set_capability(acer_wmi_input_dev, EV_SW, SW_TABLET_MODE);
-
     status = wmi_install_notify_handler(ACERWMID_EVENT_GUID,
                                         acer_wmi_notify, NULL);
     if (ACPI_FAILURE(status))
@@ -2187,9 +1840,6 @@ static int __init acer_wmi_input_setup(void)
         err = -EIO;
         goto err_free_dev;
     }
-
-    if (has_cap(ACER_CAP_KBD_DOCK))
-        acer_kbd_dock_get_initial_state();
 
     err = input_register_device(acer_wmi_input_dev);
     if (err)
@@ -2897,57 +2547,6 @@ static int acer_predator_state_save(void)
 }
 
 /*
- *LCD OVERRIDE CONTROLS
- */
-static ssize_t predator_lcd_override_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    acpi_status status;
-    u64 result;
-    status = WMI_gaming_execute_u64(ACER_WMID_GET_GAMING_PROFILE_METHODID, 0x00, &result);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error getting lcd override status: %s\n", acpi_format_exception(status));
-        return -ENODEV;
-    }
-    pr_info("lcd override get status: %llu\n", result);
-    /*
-     * Os bits 48-55 carregam o estado: 0x00 desligado, 0x01 ligado.
-     * O restante (0x1000000) e base constante.
-     *
-     * 0xFF nesse campo significa "funcao nao implementada" -- e o que o
-     * ANV15-52 devolve (0x00FF000001000000, capturado no journal). Tratar
-     * o campo como flag de um bit reportaria "ligado" para hardware que
-     * nao tem o recurso, o que e pior que admitir desconhecimento: -1 e a
-     * resposta honesta.
-     */
-    {
-        u8 state = (result >> 48) & 0xFF;
-
-        return sprintf(buf, "%d\n", state > 1 ? -1 : state);
-    }
-}
-
-static ssize_t predator_lcd_override_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    acpi_status status;
-    u64 result;
-    u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
-        return -EINVAL;
-    if ((val != 0) && (val != 1))
-        return -EINVAL;
-    pr_info("lcd_override set value: %d\n", val);
-    status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_PROFILE_METHODID, val == 1 ? 0x1000000000010 : 0x10, &result);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error setting lcd override status: %s\n", acpi_format_exception(status));
-        return -ENODEV;
-    }
-    pr_info("lcd override set status: %llu\n", result);
-    return count;
-}
-
-/*
  * BACKLIGHT 30 SEC TIMEOUT
  */
 
@@ -3002,73 +2601,17 @@ static ssize_t predator_backlight_timeout_store(struct device *dev, struct devic
 }
 
 /*
- * System Boot Animation & Sound
+ * Os seis atributos do grupo nitro_sense. O prefixo "predator_" nas
+ * funcoes e da linhagem do driver; os grupos predator_sense e
+ * nitro_sense_v4 sairam na camada B da poda.
  */
-static ssize_t predator_boot_animation_sound_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    acpi_status status;
-    u64 result;
-    status = WMI_gaming_execute_u64(ACER_WMID_GET_GAMING_MISC_SETTING_METHODID, 0x6, &result);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error getting boot_animation_sound status: %s\n", acpi_format_exception(status));
-        return -ENODEV;
-    }
-    pr_info("boot_animation_sound get status: %llu\n", result);
-    return sprintf(buf, "%d\n", result == 0x100 ? 1 : result == 0 ? 0
-                                                                  : -1);
-}
-
-static ssize_t predator_boot_animation_sound_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    acpi_status status;
-    u64 result;
-    u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
-        return -EINVAL;
-    if ((val != 0) && (val != 1))
-        return -EINVAL;
-    pr_info("boot_animation_sound set value: %d\n", val);
-    status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_MISC_SETTING_METHODID, val == 1 ? 0x106 : 0x6, &result);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error setting boot_animation_sound status: %s\n", acpi_format_exception(status));
-        return -ENODEV;
-    }
-    pr_info("boot_animation_sound set status: %llu\n", result);
-    return count;
-}
-
-/*
- * predator sense attributes
- */
-static struct device_attribute boot_animation_sound = __ATTR(boot_animation_sound, 0644, predator_boot_animation_sound_show, predator_boot_animation_sound_store);
 static struct device_attribute backlight_timeout = __ATTR(backlight_timeout, 0644, predator_backlight_timeout_show, predator_backlight_timeout_store);
 static struct device_attribute usb_charging = __ATTR(usb_charging, 0644, predator_usb_charging_show, predator_usb_charging_store);
 static struct device_attribute battery_calibration = __ATTR(battery_calibration, 0644, predator_battery_calibration_show, preadtor_battery_calibration_store);
 static struct device_attribute battery_limiter = __ATTR(battery_limiter, 0644, predator_battery_limit_show, predator_battery_limit_store);
 static struct device_attribute fan_speed = __ATTR(fan_speed, 0644, predator_fan_speed_show, predator_fan_speed_store);
-static struct device_attribute lcd_override = __ATTR(lcd_override, 0644, predator_lcd_override_show, predator_lcd_override_store);
-static struct attribute *predator_sense_attrs[] = {
-    &dev_attr_version.attr,
-    &lcd_override.attr,
-    &fan_speed.attr,
-    &battery_limiter.attr,
-    &battery_calibration.attr,
-    &usb_charging.attr,
-    &backlight_timeout.attr,
-    &boot_animation_sound.attr,
-    NULL};
-
-static struct attribute_group preadtor_sense_attr_group = {
-    .name = "predator_sense", .attrs = predator_sense_attrs};
-
-static struct attribute_group nitro_sense_v4_attr_group = {
-    .name = "nitro_sense", .attrs = predator_sense_attrs};
-/* nitro sense attributes */
 static struct attribute *nitro_sense_attrs[] = {
     &dev_attr_version.attr,
-    //&lcd_override.attr,
     &fan_speed.attr,
     &battery_limiter.attr,
     &battery_calibration.attr,
@@ -3078,515 +2621,6 @@ static struct attribute *nitro_sense_attrs[] = {
 static struct attribute_group nitro_sense_attr_group = {
     .name = "nitro_sense", .attrs = nitro_sense_attrs};
 
-/* Four Zoned Keyboard  */
-
-struct get_four_zoned_kb_output
-{
-    u8 gmReturn;
-    u8 gmOutput[15];
-} __packed;
-
-static acpi_status set_kb_status(int mode, int speed, int brightness,
-                                 int direction, int red, int green, int blue)
-{
-    u64 resp = 0;
-    u8 gmInput[16] = {mode, speed, brightness, 0, direction, red, green, blue, 3, 1, 0, 0, 0, 0, 0, 0};
-
-    acpi_status status;
-    union acpi_object *obj;
-    struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
-    struct acpi_buffer input = {(acpi_size)sizeof(gmInput), (void *)(gmInput)};
-
-    status = acer_wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_SET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = (union acpi_object *)output.pointer;
-
-    if (obj)
-    {
-        if (obj->type == ACPI_TYPE_BUFFER)
-        {
-            if (obj->buffer.length == sizeof(u32))
-                resp = *((u32 *)obj->buffer.pointer);
-            else if (obj->buffer.length == sizeof(u64))
-                resp = *((u64 *)obj->buffer.pointer);
-        }
-        else if (obj->type == ACPI_TYPE_INTEGER)
-        {
-            resp = (u64)obj->integer.value;
-        }
-    }
-
-    if (resp != 0)
-    {
-        pr_err("failed to set keyboard rgb: %llu\n", resp);
-        kfree(obj);
-        return AE_ERROR;
-    }
-
-    kfree(obj);
-    return status;
-}
-
-static acpi_status get_kb_status(struct get_four_zoned_kb_output *out)
-{
-    u64 in = 1;
-    acpi_status status;
-    union acpi_object *obj;
-    struct acpi_buffer output = {ACPI_ALLOCATE_BUFFER, NULL};
-    struct acpi_buffer input = {(acpi_size)sizeof(u64), (void *)(&in)};
-
-    status = acer_wmi_evaluate_method(WMID_GUID4, 0, ACER_WMID_GET_GAMING_KB_BACKLIGHT_METHODID, &input, &output);
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = output.pointer;
-
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 16)
-    {
-        pr_err("Unexpected output format getting kb zone status, buffer "
-               "length:%d\n",
-               obj->buffer.length);
-        goto failed;
-    }
-
-    *out = *((struct get_four_zoned_kb_output *)obj->buffer.pointer);
-
-    kfree(obj);
-    return AE_OK;
-
-failed:
-    kfree(obj);
-    return AE_ERROR;
-}
-
-/* KB Backlight State  */;
-
-struct per_zone_color
-{
-    u64 zone1, zone2, zone3, zone4;
-    int brightness;
-} __packed;
-
-struct kb_state
-{
-    u8 per_zone;
-    u8 mode;
-    u8 speed;
-    u8 brightness;
-    u8 direction;
-    u8 red;
-    u8 green;
-    u8 blue;
-    struct per_zone_color zones;
-} __packed;
-
-static struct kb_state current_kb_state;
-
-/* four zone mode */
-static ssize_t four_zoned_rgb_kb_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    acpi_status status;
-    struct get_four_zoned_kb_output output;
-    status = get_kb_status(&output);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error getting kb status: %s\n", acpi_format_exception(status));
-        return -ENODEV;
-    }
-    return sprintf(buf, "%d,%d,%d,%d,%d,%d,%d\n", output.gmOutput[0], output.gmOutput[1], output.gmOutput[2], output.gmOutput[4], output.gmOutput[5], output.gmOutput[6], output.gmOutput[7]);
-}
-
-static ssize_t four_zoned_rgb_kb_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    acpi_status status;
-
-    int mode, speed, brightness, direction, red, green, blue;
-    char input_buf[30];
-    char *token;
-    char *input_ptr = input_buf;
-    size_t len = min(count, sizeof(input_buf) - 1);
-
-    /* Uma escrita de zero bytes em sysfs faria input_buf[len - 1] ler
-     * fora dos limites logo abaixo. */
-    if (!len)
-        return -EINVAL;
-
-    memcpy(input_buf, buf, len);
-
-    if (input_buf[len - 1] == '\n')
-    {
-        input_buf[len - 1] = '\0';
-    }
-    else
-    {
-        input_buf[len] = '\0';
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &mode) || mode < 0 || mode > 7)
-    {
-        pr_err("Invalid mode value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &speed) || speed < 0 || speed > 9)
-    {
-        pr_err("Invalid speed value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &brightness) || brightness < 0 || brightness > 100)
-    {
-        pr_err("Invalid brightness value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &direction) || ((direction <= 0) && (mode == 0x3 || mode == 0x4)) || direction < 0 || direction > 2)
-    {
-        pr_err("Invalid direction value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &red) || red < 0 || red > 255)
-    {
-        pr_err("Invalid red value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &green) || green < 0 || green > 255)
-    {
-        pr_err("Invalid green value.\n");
-        return -EINVAL;
-    }
-
-    token = strsep(&input_ptr, ",");
-    if (!token || kstrtoint(token, 10, &blue) || blue < 0 || blue > 255)
-    {
-        pr_err("Invalid blue value.\n");
-        return -EINVAL;
-    }
-
-    switch (mode)
-    {
-    case 0x0: // Static mode: Ignore speed and direction
-        speed = 0;
-        direction = 0;
-        break;
-    case 0x1: // Breathing mode: Ignore speed
-        speed = 0;
-        direction = 0;
-        break;
-    case 0x2: // Neon mode: Ignore red, green, blue, and direction
-        red = 0;
-        green = 0;
-        blue = 0;
-        direction = 0;
-        break;
-    case 0x3: // Wave mode: Ignore red, green, and blue
-        red = 0;
-        green = 0;
-        blue = 0;
-        break;
-    case 0x4: // Shifting mode: No restrictions (all values allowed)
-        break;
-    case 0x5: // Zoom mode: Ignore direction
-        direction = 0;
-        break;
-    case 0x6: // Meteor mode: Ignore direction
-        direction = 0;
-        break;
-    case 0x7: // Twinkling mode: Ignore direction
-        direction = 0;
-        break;
-    default:
-        pr_err("Invalid mode value.\n");
-        return -EINVAL;
-    }
-
-    status = set_kb_status(mode, speed, brightness, direction, red, green, blue);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error setting RGB KB status.\n");
-        return -ENODEV;
-    }
-
-    /* Set per_zone to 0 */
-    current_kb_state.per_zone = 0;
-
-    return count;
-}
-
-/* Per Zone Mode */
-
-static acpi_status get_per_zone_color(struct per_zone_color *output)
-{
-    acpi_status status;
-    u64 *zones[] = {&output->zone1, &output->zone2, &output->zone3, &output->zone4};
-    u8 zone_ids[] = {0x1, 0x2, 0x4, 0x8};
-
-    for (int i = 0; i < 4; i++)
-    {
-        status = WMI_gaming_execute_u64(ACER_WMID_GET_GAMING_RGB_KB_METHODID, zone_ids[i], zones[i]);
-        if (ACPI_FAILURE(status))
-        {
-            pr_err("Error getting kb status (zone %d): %s\n", i + 1, acpi_format_exception(status));
-            return status;
-        }
-        *zones[i] = cpu_to_be64(*zones[i]) >> 32;
-    }
-
-    /* Fetching Brighness Value */
-    struct get_four_zoned_kb_output out;
-    status = get_kb_status(&out);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("get kb status failed!");
-        return status;
-    }
-    output->brightness = out.gmOutput[2];
-
-    return AE_OK;
-}
-
-static acpi_status set_per_zone_color(struct per_zone_color *input)
-{
-    acpi_status status;
-    u64 *zones[] = {&input->zone1, &input->zone2, &input->zone3, &input->zone4};
-    u8 zone_ids[] = {0x1, 0x2, 0x4, 0x8};
-
-    status = set_kb_status(0, 0, input->brightness, 0, 0, 0, 0);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error setting KB status.\n");
-        return -ENODEV;
-    }
-
-    for (int i = 0; i < 4; i++)
-    {
-        *zones[i] = (cpu_to_be64(*zones[i]) >> 32) | zone_ids[i];
-        status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_RGB_KB_METHODID, *zones[i], NULL);
-        if (ACPI_FAILURE(status))
-        {
-            pr_err("Error setting KB color (zone %d): %s\n", i + 1, acpi_format_exception(status));
-            return status;
-        }
-    }
-    /* set per_zone to 1*/
-
-    current_kb_state.per_zone = 1;
-
-    return status;
-}
-
-static ssize_t per_zoned_rgb_kb_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    struct per_zone_color output;
-    acpi_status status;
-    status = get_per_zone_color(&output);
-    if (ACPI_FAILURE(status))
-    {
-        return -ENODEV;
-    }
-    return sprintf(buf, "%06llx,%06llx,%06llx,%06llx,%d\n", output.zone1, output.zone2, output.zone3, output.zone4, output.brightness);
-}
-
-static ssize_t per_zoned_rgb_kb_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-    int i = 0;
-    size_t len;
-    char *token;
-    char str_buf[34];
-    struct per_zone_color colors;
-    char *input_ptr = str_buf;
-    len = min(count, sizeof(str_buf) - 1);
-
-    /* Uma escrita de zero bytes em sysfs faria str_buf[len - 1] ler fora
-     * dos limites logo abaixo. */
-    if (!len)
-        return -EINVAL;
-
-    memcpy(str_buf, buf, len);
-    if (str_buf[len - 1] == '\n')
-    {
-        str_buf[len - 1] = '\0';
-    }
-    else
-    {
-        str_buf[len] = '\0';
-    }
-
-    acpi_status status;
-
-    /* zone1,zone2,zone3,zone4 */
-
-    while ((token = strsep(&input_ptr, ",")) && i < 4)
-    {
-        if (strlen(token) != 6)
-        {
-            pr_err("Invalid rgb length: %s (%lu) (must be 3 bytes)\n", token, strlen(token));
-            return -EINVAL;
-        }
-        if (kstrtoull(token, 16, &((u64 *)&colors)[i]))
-        {
-            pr_err("Invalid hex value: %s\n", token);
-            return -EINVAL;
-        }
-        i++;
-    }
-
-    if (!token || kstrtoint(token, 10, &colors.brightness) || colors.brightness < 0 || colors.brightness > 100)
-    {
-        pr_err("Invalid brightness value.\n");
-        return -EINVAL;
-    }
-
-    /* set per zone colors */
-    status = set_per_zone_color(&colors);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("Error setting RGB KB status.\n");
-        return -ENODEV;
-    }
-    return count;
-}
-
-/* BackLight State */
-
-static int four_zone_kb_state_update(void)
-{
-    acpi_status status;
-    struct get_four_zoned_kb_output out;
-
-    // Get keyboard status
-    status = get_kb_status(&out);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("get kb status failed!");
-        return -1;
-    }
-
-    current_kb_state.mode = out.gmOutput[0];
-    current_kb_state.speed = out.gmOutput[1];
-    current_kb_state.brightness = out.gmOutput[2];
-    current_kb_state.direction = out.gmOutput[4];
-    current_kb_state.red = out.gmOutput[5];
-    current_kb_state.green = out.gmOutput[6];
-    current_kb_state.blue = out.gmOutput[7];
-
-    // Get per-zone color data
-    status = get_per_zone_color(&current_kb_state.zones);
-    if (ACPI_FAILURE(status))
-    {
-        pr_err("get_per_zone_color failed!");
-        return -1;
-    }
-    return 0;
-}
-
-static int four_zone_kb_state_save(void)
-{
-    struct file *file;
-    ssize_t len;
-
-    four_zone_kb_state_update();
-
-    /* Mesmo defeito do acer_predator_state_save; ver armadilhas 15 e 15b. */
-    file = filp_open(KB_STATE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (IS_ERR(file))
-    {
-        pr_err("kb_state_access - Error opening file: %ld\n", PTR_ERR(file));
-        return -1;
-    }
-
-    len = kernel_write(file, (char *)&current_kb_state, sizeof(current_kb_state), &file->f_pos);
-    filp_close(file, NULL);
-
-    if (len < 0)
-    {
-        pr_err("kb_state_access - Error writing to file: %ld\n", len);
-        return -1;
-    }
-
-    if (len != sizeof(current_kb_state))
-    {
-        pr_err("Failed to write complete state to file\n");
-        return -1;
-    }
-
-    pr_info("kb states saved successfully\n");
-    return 0;
-}
-
-static int four_zone_kb_state_load(void)
-{
-    struct file *file;
-    ssize_t len;
-    acpi_status status;
-
-    file = filp_open(KB_STATE_FILE, O_RDONLY, 0);
-    if (!IS_ERR(file))
-    {
-
-        len = kernel_read(file, (char *)&current_kb_state, sizeof(current_kb_state), &file->f_pos);
-        filp_close(file, NULL);
-
-        if (len != sizeof(current_kb_state))
-        {
-            pr_err("Incomplete state read\n");
-            return -1;
-        }
-        else
-        {
-            pr_info("KB states loaded\n");
-        }
-    }
-    else
-    {
-        pr_info("KB state file not found!\n");
-        return -1;
-    }
-
-    if (current_kb_state.per_zone)
-    {
-        status = set_per_zone_color(&current_kb_state.zones);
-        if (ACPI_FAILURE(status))
-        {
-            pr_err("Error setting RGB KB status.\n");
-            return -1;
-        }
-    }
-    else
-    {
-        status = set_kb_status(current_kb_state.mode, current_kb_state.speed, current_kb_state.brightness, current_kb_state.direction, current_kb_state.red, current_kb_state.green, current_kb_state.blue);
-        if (ACPI_FAILURE(status))
-        {
-            pr_err("Error setting KB status.\n");
-            return -1;
-        }
-    }
-
-    pr_info("KB states restored successfully\n");
-    return 0;
-}
-
-/* Four Zoned Keyboard Attributes */
-static struct device_attribute four_zoned_rgb_mode = __ATTR(four_zone_mode, 0644, four_zoned_rgb_kb_show, four_zoned_rgb_kb_store);
-static struct device_attribute per_zoned_rgb_mode = __ATTR(per_zone_mode, 0644, per_zoned_rgb_kb_show, per_zoned_rgb_kb_store);
-static struct attribute *four_zoned_kb_attrs[] = {
-    &four_zoned_rgb_mode.attr,
-    &per_zoned_rgb_mode.attr,
-    NULL};
-
-/* Four Zoned RGB Keyboard */
-static struct attribute_group four_zoned_kb_attr_group = {
-    .name = "four_zoned_kb", .attrs = four_zoned_kb_attrs};
 /*
  * Platform device
  */
@@ -3594,20 +2628,6 @@ static struct attribute_group four_zoned_kb_attr_group = {
 static int acer_platform_probe(struct platform_device *device)
 {
     int err;
-
-    if (has_cap(ACER_CAP_MAILLED))
-    {
-        err = acer_led_init(&device->dev);
-        if (err)
-            goto error_mailled;
-    }
-
-    if (has_cap(ACER_CAP_BRIGHTNESS))
-    {
-        err = acer_backlight_init(&device->dev);
-        if (err)
-            goto error_brightness;
-    }
 
     err = acer_rfkill_init(&device->dev);
     if (err)
@@ -3620,29 +2640,15 @@ static int acer_platform_probe(struct platform_device *device)
             goto error_platform_profile;
     }
 
-    if (has_cap(ACER_CAP_PREDATOR_SENSE) && !has_cap(ACER_CAP_NITRO_SENSE_V4))
-    {
-        err = sysfs_create_group(&device->dev.kobj, &preadtor_sense_attr_group);
-        if (err)
-            goto error_predator_sense;
-        acer_predator_state_load();
-    }
-    if (has_cap(ACER_CAP_PREDATOR_SENSE) && has_cap(ACER_CAP_NITRO_SENSE_V4))
-    {
-        err = sysfs_create_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
-        if (err)
-            goto error_predator_sense;
-        acer_predator_state_load();
-    }
-    if (has_cap(ACER_CAP_NITRO_SENSE) && !has_cap(ACER_CAP_NITRO_SENSE_V4))
+    if (has_cap(ACER_CAP_NITRO_SENSE))
     {
         err = sysfs_create_group(&device->dev.kobj, &nitro_sense_attr_group);
         if (err)
             goto error_nitro_sense;
-        /* Os dois caminhos Predator acima restauram o estado salvo; este
-         * nao restaurava, entao perfil termico e curvas de ventoinha por
-         * fonte de energia se perdiam a cada reinicio nos modelos Nitro
-         * classificados como nitro_sense puro. */
+        /* Os caminhos Predator do upstream restauravam o estado salvo;
+         * o nitro_sense puro nao restaurava, entao perfil termico e
+         * curvas de ventoinha por fonte de energia se perdiam a cada
+         * reinicio. Ver docs/armadilhas.md, armadilha 4. */
         acer_predator_state_load();
     }
 
@@ -3653,102 +2659,34 @@ static int acer_platform_probe(struct platform_device *device)
             goto error_hwmon;
     }
 
-    if (quirks->four_zone_kb) {
-        err = sysfs_create_group(&device->dev.kobj, &four_zoned_kb_attr_group);
-        if (err)
-            goto error_four_zone;
-        four_zone_kb_state_load();
-     }
-
     return 0;
 
 error_hwmon:
 error_platform_profile:
     acer_rfkill_exit();
 error_rfkill:
-    if (has_cap(ACER_CAP_BRIGHTNESS))
-        acer_backlight_exit();
-error_brightness:
-    if (has_cap(ACER_CAP_MAILLED))
-        acer_led_exit();
-error_four_zone:
-    return err;
 error_nitro_sense:
-    return err;
-error_predator_sense:
-    return err;
-error_mailled:
     return err;
 }
 
 static void acer_platform_remove(struct platform_device *device)
 {
-    if (has_cap(ACER_CAP_MAILLED))
-        acer_led_exit();
-    if (has_cap(ACER_CAP_BRIGHTNESS))
-        acer_backlight_exit();
-    if (has_cap(ACER_CAP_PREDATOR_SENSE) && !has_cap(ACER_CAP_NITRO_SENSE_V4))
-    {
-        sysfs_remove_group(&device->dev.kobj, &preadtor_sense_attr_group);
-        acer_predator_state_save();
-    }
-    if (has_cap(ACER_CAP_PREDATOR_SENSE) && has_cap(ACER_CAP_NITRO_SENSE_V4))
-    {
-        sysfs_remove_group(&device->dev.kobj, &nitro_sense_v4_attr_group);
-        acer_predator_state_save();
-    }
-    if (has_cap(ACER_CAP_NITRO_SENSE) && !has_cap(ACER_CAP_NITRO_SENSE_V4))
+    if (has_cap(ACER_CAP_NITRO_SENSE))
     {
         sysfs_remove_group(&device->dev.kobj, &nitro_sense_attr_group);
         acer_predator_state_save();
     }
-    if (quirks->four_zone_kb)
-    {
-        sysfs_remove_group(&device->dev.kobj, &four_zoned_kb_attr_group);
-        four_zone_kb_state_save();
-    }
-
     acer_rfkill_exit();
 }
 
 #ifdef CONFIG_PM_SLEEP
 static int acer_suspend(struct device *dev)
 {
-    u32 value;
-    struct acer_data *data = &interface->data;
-
-    if (!data)
-        return -ENOMEM;
-
-    if (has_cap(ACER_CAP_MAILLED))
-    {
-        get_u32(&value, ACER_CAP_MAILLED);
-        set_u32(LED_OFF, ACER_CAP_MAILLED);
-        data->mailled = value;
-    }
-
-    if (has_cap(ACER_CAP_BRIGHTNESS))
-    {
-        get_u32(&value, ACER_CAP_BRIGHTNESS);
-        data->brightness = value;
-    }
-
     return 0;
 }
 
 static int acer_resume(struct device *dev)
 {
-    struct acer_data *data = &interface->data;
-
-    if (!data)
-        return -ENOMEM;
-
-    if (has_cap(ACER_CAP_MAILLED))
-        set_u32(data->mailled, ACER_CAP_MAILLED);
-
-    if (has_cap(ACER_CAP_BRIGHTNESS))
-        set_u32(data->brightness, ACER_CAP_BRIGHTNESS);
-
     if (acer_wmi_accel_dev)
         acer_gsensor_init();
 
@@ -3761,17 +2699,6 @@ static int acer_resume(struct device *dev)
 
 static SIMPLE_DEV_PM_OPS(acer_pm, acer_suspend, acer_resume);
 
-static void acer_platform_shutdown(struct platform_device *device)
-{
-    struct acer_data *data = &interface->data;
-
-    if (!data)
-        return;
-
-    if (has_cap(ACER_CAP_MAILLED))
-        set_u32(LED_OFF, ACER_CAP_MAILLED);
-}
-
 static struct platform_driver acer_platform_driver = {
     .driver = {
         .name = "acer-wmi",
@@ -3779,7 +2706,6 @@ static struct platform_driver acer_platform_driver = {
     },
     .probe = acer_platform_probe,
     .remove = acer_platform_remove,
-    .shutdown = acer_platform_shutdown,
 };
 
 static struct platform_device *acer_platform_device;
@@ -3992,9 +2918,6 @@ static int __init acer_wmi_init(void)
     }
 
     set_quirks();
-
-    if (acpi_video_get_backlight_type() != acpi_backlight_vendor)
-        interface->capability &= ~ACER_CAP_BRIGHTNESS;
 
     if (wmi_has_guid(WMID_GUID3))
         interface->capability |= ACER_CAP_SET_FUNCTION_MODE;

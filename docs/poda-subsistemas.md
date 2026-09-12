@@ -3,8 +3,8 @@
 O que pode ser cortado do driver, o que **não** pode, e como provar a
 diferença antes de apagar qualquer linha.
 
-**Escrito em:** 2026-09-11. **Estado:** camada A executada e verificada na
-máquina; camada B pendente.
+**Escrito em:** 2026-09-11. **Estado:** camadas A e B executadas e verificadas
+na máquina. Resta a camada D, que é caso a caso e não tem prazo.
 
 A decisão que governa este documento é a
 [seção 6 de decisoes.md](decisoes.md): podar a tabela de modelos é seguro,
@@ -148,7 +148,7 @@ tabela DMI já aceitou, e o portão o detecta no boot seguinte.
 
 ---
 
-### Camada B — morto pela tabela de um quirk só
+### Camada B — morto pela tabela de um quirk só — **feita em 2026-09-12**
 
 **A prova:** `quirk_acer_anv15_52 = { .nitro_sense = 1 }` é a única entrada, e
 desde a remoção dos parâmetros inertes (2026-09-11) **não existe mais nenhum
@@ -158,26 +158,62 @@ de quirk. `set_quirks()` tem quatro ramos e três deles são inalcançáveis.
 Prova mais fraca que a camada A — depende de ler o nosso código, não o
 firmware — mas fechada por construção, não por acaso.
 
-| o que sai | linhas | por quê |
-|---|---|---|
-| `four_zone_kb` inteiro `:3685-4190` | **~505** | `quirks->four_zone_kb` é 0, sempre |
-| grupos `predator_sense` e `nitro_sense_v4` `:3648-3665` | ~20 | `ACER_CAP_PREDATOR_SENSE` e `_NITRO_SENSE_V4` inalcançáveis |
-| `acer_led_init/exit` `:1677-1690` | ~15 | `quirks->mailled` é 0 |
-| backlight `:1693-1745` | ~55 | `quirks->brightness` é 0 |
-| `acer_toggle_turbo` `:1822` e os três `ACER_CAP_TURBO_*` | ~60 | `quirks->turbo` é 0 |
-| `acer_kbd_dock_*` `:2228-2300` | ~75 | `ACER_CAP_KBD_DOCK` nunca é setada |
-| ramos `WMID_AC_EVENT` e `WMID_CALIBRATION_EVENT` guardados por `PREDATOR_SENSE` | ~35 | idem |
+**O que saiu**, em quatro estágios com build entre cada um. Previa ~765
+linhas; saíram **1077** — a estimativa errou por baixo pela segunda vez, e pelo
+mesmo motivo: contou os blocos, não o que eles arrastam.
+
+| estágio | linhas |
+|---|---|
+| `four_zone_kb` inteiro | −526 |
+| `MAILLED` e `BRIGHTNESS` | −185 |
+| turbo e `kbd_dock` | −205 |
+| grupos `predator_sense` e `nitro_sense_v4` | −158 |
+| includes órfãos (`leds`, `backlight`, `acpi/video`) | −3 |
+
+`MAILLED` e `BRIGHTNESS` arrastaram junto o `struct acer_data`, o campo `.data`
+do `wmi_interface` e o `acer_platform_shutdown`, que só apagava o LED de e-mail.
+`acer_suspend` ficou vazio; `acer_resume` só cuida do gsensor.
+
+#### Duas coisas que esta classificação errava
+
+**1. O turbo não morre "porque a capability está apagada".** A chamada de
+`acer_toggle_turbo()` no tratador de teclas não consulta capability nenhuma —
+só o `key_num`. Se a tecla disparasse, a função rodaria.
+
+O que o torna morto de verdade é outra coisa: `WMID_gaming_get_u64` e
+`set_u64` começam com `if (!(interface->capability & cap)) return
+AE_BAD_PARAMETER`, e os únicos caps que recebem são `TURBO_LED` e `TURBO_FAN`,
+ambos fora do bitmask. `acer_toggle_turbo` falha na primeira linha e devolve
+`-EIO` sempre, dispare a tecla ou não.
+
+**A lição:** guarda no *sítio de chamada* e guarda *dentro da função* provam
+coisas diferentes. Esta classificação só olhou a primeira.
+
+**2. `WMID_gaming_get_sys_info` quase foi junto**, por estar entre duas funções
+mortas. Ela é viva — o `hwmon` a usa. O build apontou, como apontou as três
+dependências da camada A.
+
+**E uma armadilha adjacente que a medição desfez:** o controle de ventoinha que
+*funciona* não passa por nada disso. `acer_set_fan_speed()` chama
+`WMI_gaming_execute_u64` direto, sem checagem de capability — é ele que produz
+`AUTO FAN MODE!` no log. `WMID_gaming_set_fan_mode()`, que parece ser o
+caminho das ventoinhas, era chamado só pelo turbo e já falhava calado.
 
 **O erro que esta camada quase teve.** Uma leitura anterior classificou
-`acer_predator_state_load/save()` `:3374-...` como morta aqui, porque o nome diz
-"predator" e `ACER_CAP_PREDATOR_SENSE` está apagada. **Está errado.** O ramo
-`ACER_CAP_NITRO_SENSE && !ACER_CAP_NITRO_SENSE_V4` também a chama, de propósito,
-e é ela que preserva perfil térmico e curvas de ventoinha entre reinícios — a
-correção descrita na armadilha 4. O log de boot confirma:
-`Thermal states loaded` / `Thermal states restored successfully`.
+`acer_predator_state_load/save()` como morta aqui, porque o nome diz "predator"
+e `ACER_CAP_PREDATOR_SENSE` está apagada. **Está errado.** O ramo
+`ACER_CAP_NITRO_SENSE` também a chama, de propósito, e é ela que preserva perfil
+térmico e curvas de ventoinha entre reinícios — a correção descrita na
+armadilha 4. O log de boot confirma: `Thermal states loaded` /
+`Thermal states restored successfully`.
 
-**Ela vai para a camada C.** Fica registrada aqui como o exemplo de por que
-nome de função não é prova.
+**Ela ficou na camada C.** Fica registrada aqui como o exemplo de por que nome
+de função não é prova.
+
+**O portão, medido depois:** bitmask `0x00002c26` idêntico, os quatro perfis, os
+seis atributos, `acer-wireless` e `acer-bluetooth` presentes, `hwmon` presente,
+`Thermal states loaded/restored` no log, zero avisos, `W=1` limpo, 333 Python e
+15/0/2 shell com e sem root. Agente ativo, sem avisos no journal.
 
 ---
 
@@ -232,21 +268,22 @@ Um commit por camada, portão entre cada um. A camada A vem antes da B porque
 tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 
 ```
-[x] Camada A    641 linhas   prova de firmware      2026-09-11
-[ ] Camada B   ~765 linhas   prova de construção
+[x] Camada A    641 linhas   prova de firmware       2026-09-11
+[x] Camada B   1077 linhas   prova de construção     2026-09-12
 [ ] Camada D   caso a caso, sem prazo
 ```
 
 | | linhas |
 |---|---|
 | v1.1.2 | 4734 |
-| depois de A | **4093** |
-| depois de B | ~3330 |
+| depois de A | 4093 |
+| depois de B | **3016** |
 
-A estimativa de A errou por baixo — previa ~290 e saíram 641 — porque contava
-só o que tinha `AMW0` no nome. A de B pode errar do mesmo jeito, e para o mesmo
-lado: o `four_zone_kb` tem estado próprio e funções de load/save que a conta não
-separou.
+**As duas estimativas erraram por baixo, e para o mesmo lado:** A previa ~290 e
+saíram 641; B previa ~765 e saíram 1077. Em ambos os casos a conta somou o
+tamanho dos blocos e esqueceu o que eles arrastam — structs, campos, includes,
+funções que ficam sem chamador. **Numa poda, a estimativa é piso, não teto**, e
+só o compilador sabe o número de verdade.
 
 **Compilar entre cada estágio** foi o que tornou a poda da tabela administrável:
 os três primeiros builds falharam, cada um apontando exatamente o que tinha
