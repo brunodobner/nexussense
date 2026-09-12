@@ -177,8 +177,15 @@ do `wmi_interface` e o `acer_platform_shutdown`, que só apagava o LED de e-mail
 #### Duas coisas que esta classificação errava
 
 **1. O turbo não morre "porque a capability está apagada".** A chamada de
-`acer_toggle_turbo()` no tratador de teclas não consulta capability nenhuma —
-só o `key_num`. Se a tecla disparasse, a função rodaria.
+`acer_toggle_turbo()` no tratador de eventos WMI não consulta capability
+nenhuma — só o `key_num`. Se aquele `key_num` chegasse, a função rodaria.
+
+> **Cuidado com a palavra "turbo" neste arquivo.** Aqui ela é sempre o turbo de
+> *firmware* do upstream — a tecla dedicada dos Predator e o quinto perfil
+> térmico. **Este modelo não tem nem um nem outro**, e o evento que o driver
+> chamava de `pressed turbo button` é, nele, o **botão N**. O "Desempenho
+> máximo" do Nexus Sense é outra coisa: um modo composto do aplicativo,
+> acionado pela janela ou pela bandeja. Ver decisões 19.
 
 O que o torna morto de verdade é outra coisa: `WMID_gaming_get_u64` e
 `set_u64` começam com `if (!(interface->capability & cap)) return

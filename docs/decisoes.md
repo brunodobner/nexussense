@@ -434,6 +434,20 @@ Isso explica o desenho inteiro, e é o que faltava. Sem essa frase, o modo
 parece uma coleção arbitrária de três ajustes; com ela, os três são a resposta
 a uma restrição do firmware.
 
+### Duas coisas chamadas "turbo", e só uma existe aqui
+
+Antes de tudo, porque o nome confunde e o código do upstream piora:
+
+| | o que é | existe neste modelo? |
+|---|---|---|
+| turbo de **firmware** | tecla dedicada dos Predator + o quinto perfil térmico `TURBO` | **não** — o bitmap é `0x53`, sem o bit, e não há tecla |
+| **Desempenho máximo** | modo composto do Nexus Sense, acionado pela janela ou pela bandeja | sim — é o assunto desta seção |
+
+O driver herdou do upstream um evento chamado `WMID_GAMING_TURBO_KEY_EVENT`,
+que logava `pressed turbo button`. Nesta máquina quem dispara esse evento é o
+**botão N**, e ele percorre os perfis térmicos. A mensagem foi corrigida em
+2026-09-12; o nome do evento ficou, porque é do protocolo.
+
 ### A restrição: não existe quinto perfil para selecionar
 
 O firmware anuncia `0x53` no bitmap de perfis suportados — **medido**, no log
