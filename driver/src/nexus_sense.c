@@ -382,13 +382,7 @@ static bool has_type_aa;
 static u16 commun_func_bitmap;
 static u8 commun_fn_key_number;
 static bool cycle_gaming_thermal_profile = true;
-static bool predator_v4;
-static bool nitro_v4;
 static u64 supported_sensors;
-
-static bool enable_all;
-module_param(enable_all, bool, 0444);
-MODULE_PARM_DESC(enable_all, "Enable all available features");
 
 module_param(mailled, int, 0444);
 module_param(brightness, int, 0444);
@@ -396,8 +390,6 @@ module_param(threeg, int, 0444);
 module_param(force_caps, int, 0444);
 module_param(ec_raw_mode, bool, 0444);
 module_param(cycle_gaming_thermal_profile, bool, 0644);
-module_param(predator_v4, bool, 0444);
-module_param(nitro_v4, bool, 0444);
 MODULE_PARM_DESC(mailled, "Set initial state of Mail LED");
 MODULE_PARM_DESC(brightness, "Set initial LCD backlight brightness");
 MODULE_PARM_DESC(threeg, "Set initial state of 3G hardware");
@@ -405,10 +397,6 @@ MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
 MODULE_PARM_DESC(ec_raw_mode, "Enable EC raw mode");
 MODULE_PARM_DESC(cycle_gaming_thermal_profile,
                  "Set thermal mode key in cycle mode. Disabling it sets the mode key in turbo toggle mode");
-MODULE_PARM_DESC(predator_v4,
-                 "Enable features for predator laptops that use predator sense v4");
-MODULE_PARM_DESC(nitro_v4,
-                 "Enable features for nitro laptops that use nitro sense v4");
 
 struct acer_data
 {
@@ -462,8 +450,6 @@ struct quirk_entry
     u8 turbo;
     u8 cpu_fans;
     u8 gpu_fans;
-    u8 predator_v4;
-    u8 nitro_v4;
     u8 nitro_sense;
     u8 four_zone_kb;
 };
@@ -483,26 +469,6 @@ static void __init set_quirks(void)
 
     if (quirks->nitro_sense)
         interface->capability |= ACER_CAP_PLATFORM_PROFILE | ACER_CAP_FAN_SPEED_READ | ACER_CAP_NITRO_SENSE;
-
-    if (quirks->predator_v4)
-        interface->capability |= ACER_CAP_PLATFORM_PROFILE |
-                                 ACER_CAP_FAN_SPEED_READ | ACER_CAP_PREDATOR_SENSE;
-
-    if (quirks->nitro_v4)
-        interface->capability |= ACER_CAP_PLATFORM_PROFILE |
-                                 ACER_CAP_FAN_SPEED_READ | ACER_CAP_PREDATOR_SENSE | ACER_CAP_NITRO_SENSE_V4;
-
-       if (enable_all) {
-        quirks->four_zone_kb = 1;  // Enable four-zone keyboard
-        interface->capability |= ACER_CAP_PLATFORM_PROFILE |
-                               ACER_CAP_FAN_SPEED_READ | 
-                               ACER_CAP_PREDATOR_SENSE |
-                               ACER_CAP_NITRO_SENSE |
-                               ACER_CAP_NITRO_SENSE_V4 |
-                               ACER_CAP_TURBO_OC |
-                               ACER_CAP_TURBO_LED |
-                               ACER_CAP_TURBO_FAN;
-    }
 }
 
 static int __init dmi_matched(const struct dmi_system_id *dmi)
@@ -515,11 +481,14 @@ static int __init dmi_matched(const struct dmi_system_id *dmi)
  * Dois quirks, e mais nada. Os outros doze sairam na poda de
  * 2026-09-11, junto com os modelos que os usavam.
  *
- * O ANV15-52 usa nitro_sense, nao nitro_v4: os dois criam um diretorio
- * de mesmo nome, mas nitro_v4 seta tambem ACER_CAP_PREDATOR_SENSE, e e
- * essa capability que liga acer_predator_state_load/save(). Escolher
- * errado levaria junto a persistencia do perfil termico entre
- * reinicios. Ver docs/decisoes.md, secao 5.
+ * O ANV15-52 usa nitro_sense. O upstream tinha tambem predator_v4 e
+ * nitro_v4, que criavam um diretorio sysfs de mesmo nome mas setavam
+ * ACER_CAP_PREDATOR_SENSE junto -- e e essa capability que governa
+ * acer_predator_state_load/save(). Escolher errado levaria junto, sem
+ * avisar, a persistencia do perfil termico entre reinicios. Os dois
+ * campos sairam em 2026-09-11 com os parametros de modulo inertes;
+ * o caminho nitro_sense puro restaura estado por conta propria.
+ * Ver docs/decisoes.md, secao 5, e docs/armadilhas.md, armadilha 4.
  */
 static struct quirk_entry quirk_unknown = {};
 
@@ -2011,22 +1980,6 @@ acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
     unsigned long supported_profiles = 0;
     int err;
 
-    // If enable_all, predator_v4 or nitro_v4 is set, provide all profiles
-    if (enable_all || predator_v4 || nitro_v4)
-    {
-        pr_info("Forcing all platform profiles due to parameter override\n");
-        set_bit(PLATFORM_PROFILE_LOW_POWER, choices);
-        set_bit(PLATFORM_PROFILE_QUIET, choices);
-        set_bit(PLATFORM_PROFILE_BALANCED, choices);
-        set_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, choices);
-        set_bit(PLATFORM_PROFILE_PERFORMANCE, choices);
-
-        // Set defaults
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-        return 0;
-    }
-
     err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_SUPPORTED_PROFILES,
                                        (u8 *)&supported_profiles);
     if (err)
@@ -2124,7 +2077,7 @@ static int acer_platform_profile_setup(struct platform_device *device)
     int retry_delay_ms = 100;
     //int err;
 
-    if (quirks->predator_v4 || quirks->nitro_sense || quirks->nitro_v4 || enable_all)
+    if (quirks->nitro_sense)
     {
         pr_info("Setting up platform profile for gaming laptop\n");
 
@@ -2187,7 +2140,7 @@ static int acer_thermal_profile_change(void)
      * This mode key can rotate each mode or toggle turbo mode.
      * On battery, only ECO and BALANCED mode are available.
      */
-    if (quirks->predator_v4 || quirks->nitro_sense || quirks->nitro_v4)
+    if (quirks->nitro_sense)
     {
         u8 current_tp;
         int tp, err;
@@ -4296,7 +4249,7 @@ static int acer_platform_probe(struct platform_device *device)
             goto error_hwmon;
     }
 
-    if(quirks->four_zone_kb || enable_all){
+    if (quirks->four_zone_kb) {
         err = sysfs_create_group(&device->dev.kobj, &four_zoned_kb_attr_group);
         if (err)
             goto error_four_zone;
@@ -4605,12 +4558,6 @@ static int __init acer_wmi_init(void)
 
     pr_info("Detected model type: %s\n", dmi_get_system_info(DMI_PRODUCT_NAME));
 
-    if (enable_all || predator_v4 || nitro_v4)
-    {
-        pr_info("Input parameters - enable_all: %d, predator_v4: %d, nitro_v4: %d\n",
-                enable_all, predator_v4, nitro_v4);
-    }
-
     /*
      * AMW0_GUID1 nao e exclusivo da Acer: outros fabricantes o expoem, e
      * o acer-wmi do kernel carregava em qualquer maquina que o tivesse.
@@ -4685,18 +4632,6 @@ static int __init acer_wmi_init(void)
 
     if (wmi_has_guid(WMID_GUID3))
         interface->capability |= ACER_CAP_SET_FUNCTION_MODE;
-
-    if (enable_all || predator_v4 || nitro_v4)
-    {
-        interface->capability |= ACER_CAP_PLATFORM_PROFILE |
-                                 ACER_CAP_FAN_SPEED_READ |
-                                 ACER_CAP_PREDATOR_SENSE |
-                                 ACER_CAP_NITRO_SENSE |
-                                 ACER_CAP_NITRO_SENSE_V4 |
-                                 ACER_CAP_TURBO_OC |
-                                 ACER_CAP_TURBO_LED |
-                                 ACER_CAP_TURBO_FAN;
-    }
 
     if (force_caps != -1)
         interface->capability = force_caps;
