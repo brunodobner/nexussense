@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-12 (camada A da poda: -641 linhas)
+**Última atualização:** 2026-09-12 (camadas A e B da poda: -1718 linhas)
 
 ---
 
@@ -12,8 +12,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 4093 linhas (eram 5167) |
-| versão | **v1.1.4** — `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 3016 linhas (eram 5167) |
+| versão | **v1.1.5** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
@@ -42,7 +42,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Parametros inertes fora          v1.1.3: bitmask identico, verificado na maquina
 [x] Classificar a poda               docs/poda-subsistemas.md: camadas A/B/C/D e o portao
 [x] Executar a camada A              v1.1.4: -641 linhas, bitmask identico
-[ ] Executar a camada B              ~765 linhas, prova de construcao (quirk unico)
+[x] Executar a camada B              v1.1.5: -1077 linhas, bitmask identico
+[ ] Camada D, caso a caso            THREEG, force_caps, ec_raw_mode; sem prazo
 [ ] Enxugar o log do kernel          ~50 linhas/minuto; pr_debug no lugar de pr_info
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
