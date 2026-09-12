@@ -3,8 +3,8 @@
 O que pode ser cortado do driver, o que **não** pode, e como provar a
 diferença antes de apagar qualquer linha.
 
-**Escrito em:** 2026-09-11. **Estado:** camadas A e B executadas e verificadas
-na máquina. Resta a camada D, que é caso a caso e não tem prazo.
+**Escrito em:** 2026-09-11. **Estado:** camadas A, B e D executadas e
+verificadas na máquina. O driver saiu de 4734 para 2912 linhas.
 
 A decisão que governa este documento é a
 [seção 6 de decisoes.md](decisoes.md): podar a tabela de modelos é seguro,
@@ -244,34 +244,49 @@ cada corte, não depois.
 
 ---
 
-### Camada D — decidir um a um, sem lote — **parcial, 2026-09-12**
+### Camada D — decidir um a um, sem lote — **feita em 2026-09-12**
 
-Cada um tem argumento nos dois sentidos, e por isso nenhum entrou em lote.
-Duas decisões foram tomadas; duas ficaram, com o motivo escrito.
+Cada um tem argumento nos dois sentidos, e por isso nenhum entrou em lote:
+são cinco decisões, não uma. Três removeram, duas mantiveram — e uma das
+mantidas ficou diferente do que era.
 
 | candidato | decisão |
 |---|---|
 | `ec_raw_mode` | **removido.** Nasce `false` e ninguém o passa; o caminho que ele abria (`acer_wmi_enable_ec_raw`) nunca rodou. Sai também das duas condições de agendamento do trabalho de rfkill, onde era o primeiro termo de um `\|\|` cujo segundo termo já era falso. |
 | `force_caps` | **fica, mascarado.** Continua sendo a válvula de escape se o bitmask mudar num firmware novo. Mas depois das camadas A e B ele podia ligar bits sem código atrás, e o bitmask impresso no carregamento — que é o instrumento deste documento — anunciaria algo inexistente. Agora é mascarado por `ACER_CAP_IMPLEMENTED` e avisa o que ignorou. |
 | `cycle_gaming_thermal_profile` | **fica.** Não é inerte: governa se o botão N percorre os perfis ou alterna. Botão em uso. |
-| `THREEG` | **adiado**, e não por tamanho. Ver abaixo. |
-| o trabalho periódico de `rfkill` | **adiado.** Descoberto nesta sessão que ele **nunca é agendado** nesta máquina, porque `ACERWMID_EVENT_GUID` existe. Mesmo motivo do `THREEG`. |
+| `THREEG` | **removido.** O descritor AA desta máquina não a anuncia (bitmap `0x801`, sem o bit 6) e não há rádio 3G no aparelho. Sai o rfkill `acer-threeg`, o parâmetro, o mapeamento cap→device e a capability de `ACER_CAP_IMPLEMENTED` — o `#define` fica, como os outros bits sem código, para ler bitmask de outra máquina. |
+| o trabalho periódico de `rfkill` | **removido.** `acer_rfkill_update()` e o `delayed_work` nunca eram agendados aqui, porque `ACERWMID_EVENT_GUID` existe. Com o `ec_raw_mode` fora, a condição virou só `!wmi_has_guid(...)` — falsa sempre. |
 | os `pr_info` | saíram do escopo da poda e viraram item próprio; feito na v1.1.6. |
 
-#### Por que `THREEG` e o poll de rfkill ficaram
+#### Estes dois quase não saíram, e o motivo errado merece registro
 
-Não é o tamanho — seriam ~80 linhas. É que ambos vivem no caminho do `rfkill`,
-e **há um comportamento observado ali que ninguém explicou ainda**: o bloqueio
-do wireless volta sozinho, o do bluetooth não, e a causa que a armadilha 25
-atribuía ao poll de 1 Hz está errada — esse poll não roda aqui.
+A primeira redação adiou os dois. O argumento era: ambos vivem no caminho do
+`rfkill`, onde há um efeito não explicado (armadilha 25), e **testar o wireless
+derruba a rede desta máquina** — então não haveria como verificar o caminho de
+escrita depois de mexer nele.
 
-Mexer num caminho onde existe um efeito não explicado tem um custo específico:
-se algo mudar depois, não dá para separar o que você fez do que já estava lá. E
-aqui a verificação é limitada de propósito, porque **testar o wireless derruba a
-rede desta máquina** e não é para ser repetido.
+**O argumento tem um furo.** `acer_rfkill_set()` chama `set_u32()` com o `cap`
+como parâmetro: wireless e bluetooth passam pela **mesma** função, pelo **mesmo**
+ramo. Testar o bluetooth testa a escrita do wireless — e o teste de bluetooth é
+seguro, já tinha sido feito sem derrubar sequer o fone conectado.
 
-**A ordem certa é inversa:** primeiro entender o mecanismo, depois cortar. O
-roteiro de instrumentação está na armadilha 25.
+Some-se a isso que nenhuma das duas remoções toca a lógica do efeito não
+explicado: o `THREEG` nunca casa no bitmask, então tirá-lo de um `|` é neutro
+por construção, e o poll nunca era agendado.
+
+Feito, e verificado: bitmask idêntico, as duas entradas de rfkill no lugar, e o
+`block`/`unblock` do bluetooth exercitando `set_u32` — `rc=0`, estado `0→1`,
+segurou, voltou a `0`, fone conectado o tempo todo.
+
+**A lição não é "corte sempre".** É que "não consigo verificar" precisa ser
+conferido como qualquer outra afirmação técnica: aqui bastava seguir o `cap` até
+a função para ver que a verificação existia. Cautela sem medição é palpite com
+outro nome.
+
+**O que continua em aberto é o mecanismo**, não o corte: a causa da armadilha 25
+segue não estabelecida, e o roteiro para fechá-la está lá — agora mais curto,
+porque sobraram dois chamadores de `rfkill_set_sw_state` em vez de três.
 
 ---|---|---|
 | `THREEG` (rfkill, parâmetro, capability) | capability apagada, nenhum rfkill 3G na máquina | compartilha `acer_rfkill_init/exit` com wireless e bluetooth — errar aqui é o erro original de novo |
@@ -301,15 +316,16 @@ tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 ```
 [x] Camada A    641 linhas   prova de firmware       2026-09-11
 [x] Camada B   1077 linhas   prova de construção     2026-09-12
-[~] Camada D     14 linhas   ec_raw_mode fora, force_caps mascarado;
-                             THREEG e o poll de rfkill adiados
+[x] Camada D    110 linhas   ec_raw_mode, THREEG e o poll de rfkill
+                             fora; force_caps mascarado e honesto
 ```
 
 | | linhas |
 |---|---|
 | v1.1.2 | 4734 |
 | depois de A | 4093 |
-| depois de B | **3016** |
+| depois de B | 3016 |
+| depois de D | **2912** |
 
 *(O fonte tem 3022 linhas hoje: o commit do log do kernel, posterior a esta
 camada, acrescentou um comentário de seis linhas explicando o botão N.)*

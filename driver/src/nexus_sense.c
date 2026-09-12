@@ -77,8 +77,6 @@ MODULE_LICENSE("GPL");
 #define ACER_WMID_SET_WIRELESS_METHODID 4
 #define ACER_WMID_SET_BLUETOOTH_METHODID 5
 #define ACER_WMID_SET_BRIGHTNESS_METHODID 6
-#define ACER_WMID_GET_THREEG_METHODID 10
-#define ACER_WMID_SET_THREEG_METHODID 11
 #define ACER_WMID_SET_FUNCTION 1
 #define ACER_WMID_GET_FUNCTION 2
 
@@ -244,7 +242,6 @@ struct event_return_value
  * GUID3 Get Device Status device flags
  */
 #define ACER_WMID3_GDS_WIRELESS (1 << 0)   /* WiFi */
-#define ACER_WMID3_GDS_THREEG (1 << 6)     /* 3G */
 #define ACER_WMID3_GDS_WIMAX (1 << 7)      /* WiMAX */
 #define ACER_WMID3_GDS_BLUETOOTH (1 << 11) /* BT */
 #define ACER_WMID3_GDS_RFBTN (1 << 14)     /* RF Button */
@@ -325,6 +322,7 @@ struct hotkey_function_type_aa
 #define ACER_CAP_WIRELESS BIT(1)
 #define ACER_CAP_BLUETOOTH BIT(2)
 #define ACER_CAP_BRIGHTNESS BIT(3)
+/* Sem codigo neste driver; fica para ler bitmask de outra maquina. */
 #define ACER_CAP_THREEG BIT(4)
 #define ACER_CAP_SET_FUNCTION_MODE BIT(5)
 #define ACER_CAP_KBD_DOCK BIT(6)
@@ -349,13 +347,11 @@ struct hotkey_function_type_aa
  */
 #define ACER_CAP_IMPLEMENTED (ACER_CAP_WIRELESS |          \
                               ACER_CAP_BLUETOOTH |         \
-                              ACER_CAP_THREEG |            \
                               ACER_CAP_SET_FUNCTION_MODE | \
                               ACER_CAP_PLATFORM_PROFILE |  \
                               ACER_CAP_FAN_SPEED_READ |    \
                               ACER_CAP_NITRO_SENSE)
 
-static int threeg = -1;
 static int force_caps = -1;
 static bool has_type_aa;
 static u16 commun_func_bitmap;
@@ -363,17 +359,14 @@ static u8 commun_fn_key_number;
 static bool cycle_gaming_thermal_profile = true;
 static u64 supported_sensors;
 
-module_param(threeg, int, 0444);
 module_param(force_caps, int, 0444);
 module_param(cycle_gaming_thermal_profile, bool, 0644);
-MODULE_PARM_DESC(threeg, "Set initial state of 3G hardware");
 MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
 MODULE_PARM_DESC(cycle_gaming_thermal_profile,
                  "Set thermal mode key in cycle mode. Disabling it sets the mode key in turbo toggle mode");
 
 static struct rfkill *wireless_rfkill;
 static struct rfkill *bluetooth_rfkill;
-static struct rfkill *threeg_rfkill;
 static bool rfkill_inited;
 
 /* Each low-level interface must define at least some of the following */
@@ -394,8 +387,6 @@ static struct wmi_interface *interface;
 
 struct quirk_entry
 {
-    u8 wireless;
-    u8 bluetooth;
     u8 nitro_sense;
 };
 
@@ -621,9 +612,6 @@ static acpi_status wmid_v2_get_u32(u32 *value, u32 cap)
     case ACER_CAP_BLUETOOTH:
         device = ACER_WMID3_GDS_BLUETOOTH;
         break;
-    case ACER_CAP_THREEG:
-        device = ACER_WMID3_GDS_THREEG;
-        break;
     default:
         return AE_ERROR;
     }
@@ -732,9 +720,6 @@ static acpi_status wmid_v2_set_u32(u32 value, u32 cap)
     case ACER_CAP_BLUETOOTH:
         device = ACER_WMID3_GDS_BLUETOOTH;
         break;
-    case ACER_CAP_THREEG:
-        device = ACER_WMID3_GDS_THREEG;
-        break;
     default:
         return AE_ERROR;
     }
@@ -758,8 +743,6 @@ static void __init type_aa_dmi_decode(const struct dmi_header *header, void *d)
 
     if (type_aa->commun_func_bitmap & ACER_WMID3_GDS_WIRELESS)
         interface->capability |= ACER_CAP_WIRELESS;
-    if (type_aa->commun_func_bitmap & ACER_WMID3_GDS_THREEG)
-        interface->capability |= ACER_CAP_THREEG;
     if (type_aa->commun_func_bitmap & ACER_WMID3_GDS_BLUETOOTH)
         interface->capability |= ACER_CAP_BLUETOOTH;
     if (type_aa->commun_func_bitmap & ACER_WMID3_GDS_RFBTN)
@@ -964,13 +947,15 @@ static int WMID_gaming_get_misc_setting(enum acer_wmi_gaming_misc_setting settin
  */
 
 /*
- * Sobrou um caminho so. As tres capabilities que chegam aqui --
- * WIRELESS, BLUETOOTH e THREEG -- sao as unicas que o WMID v2 atende;
- * qualquer outra e erro de chamador, nao interface faltando.
+ * Sobrou um caminho so. As duas capabilities que chegam aqui --
+ * WIRELESS e BLUETOOTH -- sao as unicas que o WMID v2 atende neste
+ * driver; qualquer outra e erro de chamador, nao interface faltando.
+ * THREEG saiu na camada D: o descritor AA desta maquina nao a anuncia
+ * (bitmap 0x801) e nao ha radio 3G no aparelho.
  */
 static acpi_status get_u32(u32 *value, u32 cap)
 {
-    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
+    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH))
         return wmid_v2_get_u32(value, cap);
 
     return AE_ERROR;
@@ -981,22 +966,11 @@ static acpi_status set_u32(u32 value, u32 cap)
     if (!(interface->capability & cap))
         return AE_BAD_PARAMETER;
 
-    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
+    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH))
         return wmid_v2_set_u32(value, cap);
 
     return AE_BAD_PARAMETER;
 }
-
-static void __init acer_commandline_init(void)
-{
-    /*
-     * These will all fail silently if the value given is invalid, or the
-     * capability isn't available on the given interface
-     */
-    if (!has_type_aa && threeg >= 0)
-        set_u32(threeg, ACER_CAP_THREEG);
-}
-
 
 /*
  * Accelerometer device
@@ -1434,42 +1408,6 @@ static int acer_thermal_profile_change(void)
 /*
  * Switch series keyboard dock status
  */
-static void acer_rfkill_update(struct work_struct *ignored);
-static DECLARE_DELAYED_WORK(acer_rfkill_work, acer_rfkill_update);
-static void acer_rfkill_update(struct work_struct *ignored)
-{
-    u32 state;
-    acpi_status status;
-
-    if (has_cap(ACER_CAP_WIRELESS))
-    {
-        status = get_u32(&state, ACER_CAP_WIRELESS);
-        if (ACPI_SUCCESS(status))
-        {
-            if (quirks->wireless == 3)
-                rfkill_set_hw_state(wireless_rfkill, !state);
-            else
-                rfkill_set_sw_state(wireless_rfkill, !state);
-        }
-    }
-
-    if (has_cap(ACER_CAP_BLUETOOTH))
-    {
-        status = get_u32(&state, ACER_CAP_BLUETOOTH);
-        if (ACPI_SUCCESS(status))
-            rfkill_set_sw_state(bluetooth_rfkill, !state);
-    }
-
-    if (has_cap(ACER_CAP_THREEG) && wmi_has_guid(WMID_GUID3))
-    {
-        status = get_u32(&state, ACER_WMID3_GDS_THREEG);
-        if (ACPI_SUCCESS(status))
-            rfkill_set_sw_state(threeg_rfkill, !state);
-    }
-
-    schedule_delayed_work(&acer_rfkill_work, round_jiffies_relative(HZ));
-}
-
 static int acer_rfkill_set(void *data, bool blocked)
 {
     acpi_status status;
@@ -1546,28 +1484,10 @@ static int acer_rfkill_init(struct device *dev)
         }
     }
 
-    if (has_cap(ACER_CAP_THREEG))
-    {
-        threeg_rfkill = acer_rfkill_register(dev,
-                                             RFKILL_TYPE_WWAN, "acer-threeg",
-                                             ACER_CAP_THREEG);
-        if (IS_ERR(threeg_rfkill))
-        {
-            err = PTR_ERR(threeg_rfkill);
-            goto error_threeg;
-        }
-    }
-
     rfkill_inited = true;
-
-    if (!wmi_has_guid(ACERWMID_EVENT_GUID) &&
-        has_cap(ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
-        schedule_delayed_work(&acer_rfkill_work,
-                              round_jiffies_relative(HZ));
 
     return 0;
 
-error_threeg:
     if (has_cap(ACER_CAP_BLUETOOTH))
     {
         rfkill_unregister(bluetooth_rfkill);
@@ -1585,10 +1505,6 @@ error_wireless:
 
 static void acer_rfkill_exit(void)
 {
-    if (!wmi_has_guid(ACERWMID_EVENT_GUID) &&
-        has_cap(ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
-        cancel_delayed_work_sync(&acer_rfkill_work);
-
     if (has_cap(ACER_CAP_WIRELESS))
     {
         rfkill_unregister(wireless_rfkill);
@@ -1599,12 +1515,6 @@ static void acer_rfkill_exit(void)
     {
         rfkill_unregister(bluetooth_rfkill);
         rfkill_destroy(bluetooth_rfkill);
-    }
-
-    if (has_cap(ACER_CAP_THREEG))
-    {
-        rfkill_unregister(threeg_rfkill);
-        rfkill_destroy(threeg_rfkill);
     }
 }
 
@@ -1653,9 +1563,6 @@ static void acer_wmi_notify(union acpi_object *obj, void *context)
                 if (has_cap(ACER_CAP_WIRELESS))
                     rfkill_set_sw_state(wireless_rfkill,
                                         !(device_state & ACER_WMID3_GDS_WIRELESS));
-                if (has_cap(ACER_CAP_THREEG))
-                    rfkill_set_sw_state(threeg_rfkill,
-                                        !(device_state & ACER_WMID3_GDS_THREEG));
                 if (has_cap(ACER_CAP_BLUETOOTH))
                     rfkill_set_sw_state(bluetooth_rfkill,
                                         !(device_state & ACER_WMID3_GDS_BLUETOOTH));
@@ -2904,9 +2811,9 @@ static int __init acer_wmi_init(void)
     dmi_walk(type_aa_dmi_decode, NULL);
 
     /*
-     * WIRELESS, BLUETOOTH e THREEG vem do descritor AA do firmware, em
-     * runtime. Sem ele e sem force_caps nao ha de onde tirar capability
-     * nenhuma, e carregar seria carregar cego.
+     * WIRELESS e BLUETOOTH vem do descritor AA do firmware, em runtime.
+     * Sem ele e sem force_caps nao ha de onde tirar capability nenhuma,
+     * e carregar seria carregar cego.
      */
     if (!has_type_aa && force_caps == -1)
     {
@@ -2971,9 +2878,6 @@ static int __init acer_wmi_init(void)
     err = platform_device_add(acer_platform_device);
     if (err)
         goto error_device_add;
-
-    /* Override any initial settings with values from the commandline */
-    acer_commandline_init();
 
     return 0;
 
