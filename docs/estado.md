@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-12 (poda A+B: -1718 linhas; log do kernel silenciado)
+**Última atualização:** 2026-09-12 (poda completa, log silenciado, roteiro sem pendências)
 
 ---
 
@@ -34,7 +34,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Plano 2 -- GUI e bandeja         plano 2026-09-05, escrito
 [x] Executar o plano 2               concluido: 12 de 12, virada verificada
 [x] Renomeacao do driver             carregamento e permissoes verificados apos boot
-[~] Reparo da bandeja                autostart provado no login; falta so o gesto humano
+[x] Reparo da bandeja                menu confirmado pelo usuario apos reinicio
 [x] Ajustes visuais e de resposta    Diagnóstico, ventoinhas e cliques sem atraso
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
@@ -299,11 +299,13 @@ na bateria, fan auto/máximo, scroll, clique do meio e instância única.
 única. A entrada `/etc/xdg/autostart/nexus-sense-autostart.desktop` está no
 lugar.
 
-**Falta só o gesto humano:** clicar com o botão direito no ícone da bandeja e
-confirmar que o menu aparece. Isso nenhum comando verifica — as chamadas DBus
-provam que o menu está exportado, não que ele desenha na tela. Uma afirmação
-anterior de que esse menu estava verificado foi incorreta, e é por isso que a
-pendência continua aberta em vez de ser encerrada por dedução.
+**O gesto humano foi feito em 2026-09-12**, após reinício: o usuário clicou com
+o botão direito no ícone e o menu abriu. Isso nenhum comando verifica — as
+chamadas DBus provam que o menu está exportado, não que ele desenha na tela. Uma
+afirmação anterior de que esse menu estava verificado foi incorreta, e por isso
+a pendência só fechou com olho humano, não por dedução.
+
+**A pendência está encerrada.**
 
 O boot confirmou `nexus_sense`, banner 25.701 e modelo ANV15-52. DKMS
 registra apenas o nome novo nos três kernels instalados. Unit e
@@ -399,28 +401,48 @@ Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
 5. **As duas estimativas de poda erraram por baixo** — A previa ~290 e saíram
    641; B previa ~765 e saíram 1077. Numa poda a estimativa é piso, não teto.
 
+### A partida a frio, que fecha a conta
+
+O reinício de **2026-09-12 04:11** foi a primeira partida do zero com toda a
+poda aplicada. Tudo no lugar:
+
+```
+capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+                                PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+perfis      low-power quiet balanced balanced-performance
+perfil      balanced-performance      <- restaurado do estado salvo
+atributos   os seis
+rfkill      acer-wireless, acer-bluetooth
+hwmon       presente
+agente      ativo
+bandeja     subiu sozinha; menu do botao direito confirmado pelo usuario
+```
+
+E o número que fecha a etapa do log: **20 linhas de kernel no boot inteiro** —
+só o registro de carga, zero ruído. Antes seriam ~150 nos mesmos três minutos.
+
 ### Onde o próximo trabalho começa
 
-Nada está pela metade. As três frentes abertas são independentes:
+**O roteiro não tem mais pendências.** As duas frentes abaixo são projetos
+novos, independentes entre si, e nenhuma continua trabalho interrompido.
 
-- **O `rfkill` do wireless: encerrado, sem defeito.** Chegou a ser uma frente
-  aberta, com a armadilha 25 afirmando que o bloqueio se desfazia sozinho.
-  Medido de novo, e a segunda vez em condição limpa — usuário com o wifi
-  desligado e saindo só pela cabeada, o que tirou a pessoa do caminho da
-  medição. Ciclo inteiro num comando só: `unblock` leva a 0 e segura, `block`
-  leva a 1 e segura por 10 s, e o driver não registra nada. O que
-  desfazia era o usuário religando o wifi à mão entre uma medição e outra. A
-  armadilha foi retratada.
+- **Gatilho por programa aberto** — pedido nesta sessão. **Começa por
+  brainstorm**, não por código: o agente hoje não observa processos, decide só
+  por fonte de energia num laço de 2 s. As seis perguntas de desenho em aberto
+  estão na seção "Projeto futuro" deste arquivo, e duas delas são espinhosas: o
+  que casar (um jogo por Proton aparece como `wine` ou `reaper`, não pelo nome) e
+  quem ganha quando o usuário desliga à mão com o jogo ainda aberto.
+- **Mainline** — o caminho que encerraria o fork. A poda ajudou: 2912 linhas,
+  uma interface WMI, dois parâmetros, log limpo. A ordem sugerida e o que
+  provavelmente não passa estão na seção "Projeto futuro: levar os atributos
+  para o mainline". Sem data.
 
-  **O que fica é operacional:** não bloquear o `acer-wireless` desta máquina —
-  a sessão do Claude Code cai junto, **mesmo com a cabeada como rota padrão**.
-  Para exercitar a escrita do rfkill, use o bluetooth: mesmo `set_u32`, e não
-  derruba nem o fone conectado.
-- **Gatilho por programa aberto** — pedido nesta sessão, com as seis perguntas
-  de desenho abertas logo abaixo. **Começa por brainstorm**, não por código: o
-  agente hoje não observa processos.
-- **Mainline** — o caminho que encerraria o fork. A poda ajudou: o driver está
-  menor e com uma interface só. Continua sem data.
+**O `rfkill` do wireless saiu desta lista.** Chegou a figurar como frente
+aberta, com a armadilha 25 afirmando que o bloqueio se desfazia sozinho. Não
+havia defeito: o que desfazia era o usuário religando o wifi à mão entre uma
+medição e outra. Medido de novo em condição limpa — ciclo inteiro num comando
+só, com o usuário fora do caminho — os dois sentidos funcionam e grudam. A
+armadilha foi retratada.
 
 ### Uma coisa a não repetir
 
