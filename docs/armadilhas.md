@@ -723,13 +723,24 @@ bluetooth teria voltado junto — e não voltou.
 | bluetooth | bloqueia e **fica** bloqueado |
 | wireless | bloqueia e volta sozinho em ~1 s |
 | driver anterior à camada A | comporta-se exatamente igual |
-| o poll de 1 Hz | **não roda nesta máquina** |
+| o poll de 1 Hz | **não rodava nesta máquina**, e foi removido em 2026-09-12 |
+
+**O campo estreitou desde então.** O trabalho periódico foi removido na camada
+D, junto com o `THREEG`, então hoje só dois lugares chamam
+`rfkill_set_sw_state`: o tratador de `WMID_HOTKEY_EVENT` e o núcleo do `rfkill`.
+Isso torna a investigação mais curta do que era.
 
 **Para fechar a conta**, quem for investigar: instrumentar `acer_rfkill_set()` e
 `wmid3_set_device_status()` com `pr_debug`, ligar o dynamic debug, e olhar quem
-chama `rfkill_set_sw_state` depois do bloqueio. A hipótese que sobra é o
-próprio firmware recusar o soft-block do wireless e algum caminho relê-lo — mas
-isso é hipótese, não medição.
+chama `rfkill_set_sw_state` depois do bloqueio. A hipótese que sobra é o próprio
+firmware recusar o soft-block do wireless e algum caminho relê-lo — mas isso é
+hipótese, não medição.
+
+**O que a camada D já descartou como causa:** o caminho de escrita. Com o
+`THREEG` fora, o `set_u32` foi exercitado de novo pelo bluetooth — mesmo código,
+mesmo ramo — e funcionou: `block` devolveu 0, o estado foi para 1 e ficou,
+`unblock` voltou a 0. Se a escrita estivesse quebrada, o bluetooth quebraria
+junto.
 
 **Como verificar que é pré-existente, e não sua.** Compile a revisão anterior
 num worktree e carregue o `.ko` direto, sem mexer no DKMS:
