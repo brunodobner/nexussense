@@ -698,24 +698,30 @@ também não fechava: ele sincroniza os três rádios de uma vez, do mesmo
 `device_state`. Se tivesse disparado, o bluetooth teria voltado junto. A
 armadilha passou a dizer "causa não estabelecida".
 
-**Retratação (2026-09-12, com rede cabeada de reserva).** O teste foi refeito
-dentro de um único comando, com desbloqueio garantido e leitura a cada segundo:
+**Retratação (2026-09-12).** Refeito duas vezes, a segunda em condição limpa: o
+usuário desligou o wifi pela interface e passou a sair só pela rede cabeada, o
+que tirou a pessoa do caminho da medição. O ciclo inteiro num comando só, com
+estado devolvido por `trap`:
 
 ```
-antes:      0
+estado inicial (usuario havia desligado):  1   <- ja estava segurando
+unblock rc=0  ->  0
+apos  2s desbloqueado:                     0
 block rc=0
-apos 1s:    1
-apos 2s:    1
-apos 3s:    1
-apos 4s:    1
-apos 5s:    1
-apos 6s:    1
+apos  1s bloqueado:                        1
+apos  2s bloqueado:                        1
+   ...                                     1
+apos 10s bloqueado:                        1
 ```
 
-**O bloqueio segurou.** E entre os marcos gravados em `/dev/kmsg` o driver não
-registrou uma linha — com o dynamic debug ligado e a sonda comprovada
-funcionando na mesma sessão (`usb charging get status` e `battery health query`
-apareceram ao ler os atributos).
+**Os dois sentidos funcionam e grudam.** E entre os marcos gravados em
+`/dev/kmsg` o driver não registrou **nada** — com o dynamic debug ligado e a
+sonda comprovada funcionando na mesma sessão (ler os atributos produziu os
+`pr_debug` esperados, então não é teste por vácuo; ver armadilha 14).
+
+Detalhe que sozinho já bastava: ao começar o teste o `acer-wireless` **estava em
+`soft=1` havia minutos**, porque o usuário tinha desligado o wifi. Um bloqueio
+que "não gruda" não teria sobrevivido a isso.
 
 **O que realmente acontecia:** o usuário estava religando o wifi à mão. Ele
 precisava disso para voltar a falar com a sessão, e disse exatamente isso na
