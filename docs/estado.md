@@ -39,7 +39,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
 [x] Poda para um modelo so           v1.1.0: 32 entradas DMI -> 1, bitmask identico
-[x] Parametros inertes fora          enable_all, predator_v4, nitro_v4 e os dois campos de quirk
+[x] Parametros inertes fora          v1.1.3: bitmask identico, verificado na maquina
 [x] Classificar a poda               docs/poda-subsistemas.md: camadas A/B/C/D e o portao
 [ ] Executar a camada A              ~290 linhas, prova de firmware (GUID ausente)
 [ ] Executar a camada B              ~765 linhas, prova de construcao (quirk unico)
@@ -443,19 +443,19 @@ v1.1.2), com dois mutexes — um para as chamadas, outro para as sequências.
 Sequencial não reproduzir foi o que descartou "firmware instável" e apontou
 concorrência.
 
-**A observação em uso é consistente, mas curta:** no boot de 2026-09-11 18:45,
-após 5 minutos e ~247 leituras concorrentes (agente a cada 2 s, bandeja a cada
-5 s), zero erros. Antes eram ~4 por hora, ou seja um a cada ~15 min — 5 minutos
-fica **abaixo** do intervalo médio, então esse número sozinho não conclui nada.
+**A conta foi fechada em campo.** A primeira observação, de 5 minutos, não
+concluía nada — ficava abaixo do intervalo médio entre erros. Às 22:49 do mesmo
+dia, com **4 horas e 4 minutos** de uso contínuo no mesmo boot:
 
-Quem quiser fechar a conta: deixe a máquina em uso algumas horas e rode
-
-```bash
-journalctl -k -b | grep -c 'Failed to get profile'
+```
+$ journalctl -k -b | grep -c 'Failed to get profile'
+0
 ```
 
-Se continuar em zero, a correção está confirmada em campo também. Se subir, o
-diagnóstico estava incompleto — e o próximo passo seria instrumentar
+Na taxa anterior (~4 por hora) seriam ~16 erros esperados nesse intervalo.
+Zero. Somado ao teste de estresse, a correção está confirmada nas duas frentes.
+
+Se o erro voltar algum dia, o próximo passo seria instrumentar
 `WMID_gaming_get_misc_setting` para registrar qual dos dois caminhos de falha
 disparou (erro da chamada, ou valor fora das cinco constantes).
 
