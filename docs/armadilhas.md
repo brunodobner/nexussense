@@ -676,92 +676,77 @@ arquivo" passa, e mente.
 
 ---
 
-## 25. O bloqueio do wifi não gruda — e isso não é defeito seu
+## 25. Um fenômeno que não existia — e três revisões até admitir isso
 
-> **Antes de rodar este teste:** bloquear o `acer-wireless` derruba a rede, e o
-> NetworkManager pode não reconectar sozinho — foi preciso religar à mão. Se
-> você estiver trabalhando por SSH, ou com alguém dependendo dessa máquina para
-> chegar até aqui, **não rode**. A resposta já está escrita abaixo; o teste só
-> precisa ser repetido se o comportamento mudar.
+Esta armadilha nasceu errada e foi corrigida duas vezes antes de ser
+**retratada**. Fica escrita porque o modo como ela se sustentou por horas é
+mais instrutivo que o conteúdo que ela teve.
 
-**Sintoma.** Ao verificar que o `rfkill` ainda funciona depois de mexer no
-driver, o bluetooth se comporta e o wifi não:
+### O que se afirmou, e o que era
+
+**Afirmação original (2026-09-12).** "Bloquear o `acer-wireless` não gruda: o
+estado volta a 0 sozinho em ~1 s, enquanto o bluetooth fica bloqueado. Causa:
+`acer_rfkill_update()` roda a 1 Hz, relê o firmware e desfaz."
+
+**Primeira correção.** A causa estava errada. A condição que agenda esse
+trabalho é `(ec_raw_mode || !wmi_has_guid(ACERWMID_EVENT_GUID)) && has_cap(...)`;
+o GUID de evento existe nesta máquina e `ec_raw_mode` era falso, então **o
+trabalho nunca era agendado**. Ele não podia ter desfeito nada.
+
+**Segunda correção.** O outro candidato — o tratador de `WMID_HOTKEY_EVENT` —
+também não fechava: ele sincroniza os três rádios de uma vez, do mesmo
+`device_state`. Se tivesse disparado, o bluetooth teria voltado junto. A
+armadilha passou a dizer "causa não estabelecida".
+
+**Retratação (2026-09-12, com rede cabeada de reserva).** O teste foi refeito
+dentro de um único comando, com desbloqueio garantido e leitura a cada segundo:
 
 ```
-rfkill block  <acer-bluetooth>   ->  soft=1, e fica em 1
-rfkill block  <acer-wireless>    ->  soft=1, e volta para 0 sozinho
+antes:      0
+block rc=0
+apos 1s:    1
+apos 2s:    1
+apos 3s:    1
+apos 4s:    1
+apos 5s:    1
+apos 6s:    1
 ```
 
-O comando **retorna sucesso** nos dois casos. Um segundo depois, só o
-bluetooth continua bloqueado. A leitura fácil — e errada — é "eu quebrei o
-caminho de escrita do wireless".
+**O bloqueio segurou.** E entre os marcos gravados em `/dev/kmsg` o driver não
+registrou uma linha — com o dynamic debug ligado e a sonda comprovada
+funcionando na mesma sessão (`usb charging get status` e `battery health query`
+apareceram ao ler os atributos).
 
-**Causa: não estabelecida.** A primeira redação desta armadilha dizia que
-`acer_rfkill_update()`, rodando a 1 Hz, relia o firmware e desfazia o bloqueio.
-**Está errado, e a correção importa mais que o erro:**
+**O que realmente acontecia:** o usuário estava religando o wifi à mão. Ele
+precisava disso para voltar a falar com a sessão, e disse exatamente isso na
+época — *"tenho que ativar manualmente para voltar a você"*. Esse religar
+aparecia, na leitura seguinte, como `soft=0`, e foi lido como o driver desfazendo
+o bloqueio.
 
-```c
-/* acer_rfkill_init() */
-if ((ec_raw_mode || !wmi_has_guid(ACERWMID_EVENT_GUID)) && has_cap(...))
-    schedule_delayed_work(&acer_rfkill_work, ...);
-```
+### A lição, que é a única coisa aproveitável aqui
 
-`ACERWMID_EVENT_GUID` **existe** nesta máquina (conferido em
-`/sys/bus/wmi/devices/`) e `ec_raw_mode` é falso. A condição é falsa: **o
-trabalho periódico nunca é agendado aqui.** Ele não pode ter desfeito nada.
+**Entre a ação e a medição havia um humano, e ele não estava no modelo.** As
+duas leituras vinham de chamadas de ferramenta separadas, com segundos de
+intervalo — tempo em que a pessoa do outro lado, sem rede, agia para restaurá-la.
 
-O outro candidato óbvio também não fecha. O tratador de evento WMI
-(`WMID_HOTKEY_EVENT`, teclas `KEY_WLAN`/`KEY_BLUETOOTH`) sincroniza os **três**
-rádios de uma vez, do mesmo `device_state`. Se ele tivesse disparado, o
-bluetooth teria voltado junto — e não voltou.
+Três coisas teriam evitado tudo:
 
-**O que está estabelecido, e só isto:**
+1. **Medir dentro da mesma operação.** Bloqueio e leituras num comando só
+   eliminam a janela onde outro agente interfere. Foi o que finalmente resolveu.
+2. **Desconfiar de assimetria sem mecanismo.** "Bluetooth gruda e wireless não"
+   pedia uma explicação diferencial, e nenhuma das duas propostas explicava a
+   diferença — sinal de que a assimetria era do *ambiente*, não do código.
+3. **Perguntar.** O usuário sabia o que tinha feito. Ninguém perguntou.
 
-| | |
-|---|---|
-| `rfkill block` devolve 0 | nos dois rádios |
-| bluetooth | bloqueia e **fica** bloqueado |
-| wireless | bloqueia e volta sozinho em ~1 s |
-| driver anterior à camada A | comporta-se exatamente igual |
-| o poll de 1 Hz | **não rodava nesta máquina**, e foi removido em 2026-09-12 |
+### O que fica valendo
 
-**O campo estreitou desde então.** O trabalho periódico foi removido na camada
-D, junto com o `THREEG`, então hoje só dois lugares chamam
-`rfkill_set_sw_state`: o tratador de `WMID_HOTKEY_EVENT` e o núcleo do `rfkill`.
-Isso torna a investigação mais curta do que era.
-
-**Para fechar a conta**, quem for investigar: instrumentar `acer_rfkill_set()` e
-`wmid3_set_device_status()` com `pr_debug`, ligar o dynamic debug, e olhar quem
-chama `rfkill_set_sw_state` depois do bloqueio. A hipótese que sobra é o próprio
-firmware recusar o soft-block do wireless e algum caminho relê-lo — mas isso é
-hipótese, não medição.
-
-**O que a camada D já descartou como causa:** o caminho de escrita. Com o
-`THREEG` fora, o `set_u32` foi exercitado de novo pelo bluetooth — mesmo código,
-mesmo ramo — e funcionou: `block` devolveu 0, o estado foi para 1 e ficou,
-`unblock` voltou a 0. Se a escrita estivesse quebrada, o bluetooth quebraria
-junto.
-
-**Como verificar que é pré-existente, e não sua.** Compile a revisão anterior
-num worktree e carregue o `.ko` direto, sem mexer no DKMS:
-
-```bash
-git worktree add /tmp/antes <revisão-anterior>
-cd /tmp/antes/driver && make
-sudo rmmod nexus_sense && sudo insmod /tmp/antes/driver/src/nexus_sense.ko
-# repita o teste; depois:
-sudo rmmod nexus_sense && sudo modprobe nexus_sense   # volta o instalado
-git worktree remove /tmp/antes --force
-```
-
-Medido assim em 2026-09-12, na camada A da poda: o driver anterior faz
-exatamente o mesmo. **Bisseccionar com `insmod` de um worktree custa dois
-minutos e transforma "acho que quebrei" em fato.**
-
-**O que isso significa para o portão da poda.** Em
-[poda-subsistemas.md](poda-subsistemas.md), o critério do `rfkill` é que as
-duas entradas **existam** e que o `block` **retorne 0** — não que o estado
-grude. Exigir que grudasse reprovaria um driver correto.
+- **Não bloqueie o `acer-wireless` desta máquina.** Não pelo driver — por
+  operação: nas duas vezes a sessão do Claude Code caiu junto, **mesmo com rede
+  cabeada como rota padrão**. A sessão parece presa à interface, não à rota.
+- **O caminho de escrita do rfkill funciona**, nos dois rádios, e foi exercitado
+  depois da poda: `block` devolve 0, o estado vai a 1 e fica, `unblock` volta a
+  0. Bluetooth e wireless usam o mesmo `set_u32` — o `cap` é parâmetro.
+- **Não há defeito conhecido no rfkill deste driver.**
 
 ---
 

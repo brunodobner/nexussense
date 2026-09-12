@@ -48,10 +48,10 @@ journalctl -k -b | grep 'capability bitmask'
 ls /sys/devices/platform/acer-wmi/nitro_sense/   # 6 arquivos
 cat /sys/firmware/acpi/platform_profile_choices  # low-power quiet balanced balanced-performance
 cat /sys/class/rfkill/*/name | grep acer         # acer-wireless, acer-bluetooth
-# O critério é que as DUAS entradas existam -- nao que um bloqueio grude.
-# No wireless o bloqueio volta sozinho em ~1 s, por mecanismo NAO
-# estabelecido, e o driver anterior faz o mesmo. Ver armadilha 25; e nao
-# rode 'rfkill block' se a rede desta maquina for o seu caminho ate aqui.
+# O critério é que as DUAS entradas existam. Para exercitar a ESCRITA, use
+# o bluetooth: block/unblock, que passa pelo mesmo set_u32 do wireless --
+# o cap e parametro. NAO bloqueie o acer-wireless: a sessao do Claude Code
+# cai junto, mesmo com rede cabeada. Ver armadilha 25.
 ls /sys/devices/platform/acer-wmi/hwmon/         # existe
 
 # 5. as duas suítes
@@ -130,10 +130,10 @@ presente, `Thermal states loaded/restored` no log, zero avisos, `W=1` limpo,
 
 **O caminho de escrita do rfkill também foi exercitado**, já que `set_u32` foi
 reescrito nesta camada: `rfkill block` devolveu 0 nos dois rádios e o bluetooth
-segurou o bloqueio através do poll. O wireless voltou sozinho — e o driver
-**anterior**, compilado num worktree e carregado por `insmod`, fez exatamente o
-mesmo. Não é regressão; é a armadilha 25, cuja causa continua **não
-estabelecida**.
+segurou o bloqueio através do poll. O wireless *parecia* voltar sozinho, e o driver
+**anterior**, compilado num worktree e carregado por `insmod`, fazia o mesmo —
+o que já mostrava não ser regressão. Mais tarde se descobriu que não era
+comportamento nenhum: era o usuário religando o wifi à mão. Ver armadilha 25.
 
 **Confirmação por outro caminho:** o log mostra
 `Function bitmap for Communication Button: 0x801` *antes* do bitmask, o que
@@ -284,9 +284,10 @@ conferido como qualquer outra afirmação técnica: aqui bastava seguir o `cap` 
 a função para ver que a verificação existia. Cautela sem medição é palpite com
 outro nome.
 
-**O que continua em aberto é o mecanismo**, não o corte: a causa da armadilha 25
-segue não estabelecida, e o roteiro para fechá-la está lá — agora mais curto,
-porque sobraram dois chamadores de `rfkill_set_sw_state` em vez de três.
+**Nada ficou em aberto.** O que parecia um mecanismo por explicar — a armadilha
+25 — foi medido depois com rede cabeada de reserva: o bloqueio do wireless
+**segura**, e o driver fica calado. Não havia fenômeno. A armadilha foi
+retratada e hoje registra só o erro de método.
 
 ---|---|---|
 | `THREEG` (rfkill, parâmetro, capability) | capability apagada, nenhum rfkill 3G na máquina | compartilha `acer_rfkill_init/exit` com wireless e bluetooth — errar aqui é o erro original de novo |

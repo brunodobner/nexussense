@@ -45,7 +45,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Executar a camada B              v1.1.5: -1077 linhas, bitmask identico
 [x] Enxugar o log do kernel          v1.1.6: ~50 linhas/minuto -> zero em repouso
 [x] Camada D, caso a caso            v1.1.8: ec_raw_mode, THREEG e o poll fora
-[ ] Entender o rfkill do wireless    bloqueio volta sozinho, causa nao estabelecida
+[x] Entender o rfkill do wireless    nao havia defeito; armadilha 25 retratada
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
@@ -393,13 +393,17 @@ Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
 
 Nada está pela metade. As três frentes abertas são independentes:
 
-- **O `rfkill` do wireless** — o bloqueio volta sozinho e **ninguém sabe por
-  quê**. A causa que a armadilha 25 atribuía ao poll de 1 Hz estava errada: esse
-  poll nunca era agendado nesta máquina, e saiu na camada D. O caminho de
-  escrita já foi descartado como suspeito — o bluetooth usa o mesmo `set_u32` e
-  funciona. Restam dois chamadores de `rfkill_set_sw_state` para investigar; o
-  roteiro está na armadilha 25. **Cuidado: o teste que fecharia isso derruba a
-  rede da máquina.**
+- **O `rfkill` do wireless: encerrado, sem defeito.** Chegou a ser uma frente
+  aberta, com a armadilha 25 afirmando que o bloqueio se desfazia sozinho.
+  Medido de novo com rede cabeada de reserva e leitura a cada segundo dentro de
+  um comando só: **o bloqueio segura**, e o driver não registra nada. O que
+  desfazia era o usuário religando o wifi à mão entre uma medição e outra. A
+  armadilha foi retratada.
+
+  **O que fica é operacional:** não bloquear o `acer-wireless` desta máquina —
+  a sessão do Claude Code cai junto, **mesmo com a cabeada como rota padrão**.
+  Para exercitar a escrita do rfkill, use o bluetooth: mesmo `set_u32`, e não
+  derruba nem o fone conectado.
 - **Gatilho por programa aberto** — pedido nesta sessão, com as seis perguntas
   de desenho abertas logo abaixo. **Começa por brainstorm**, não por código: o
   agente hoje não observa processos.
@@ -408,10 +412,16 @@ Nada está pela metade. As três frentes abertas são independentes:
 
 ### Uma coisa a não repetir
 
-**Não rode `rfkill block` no `acer-wireless` desta máquina.** O teste da camada A
-derrubou a rede, o NetworkManager não reconectou sozinho e foi preciso religar à
-mão. A resposta que ele daria já está escrita na armadilha 25 — não precisa ser
-refeito.
+**Não rode `rfkill block` no `acer-wireless` desta máquina.** Não pelo driver —
+ele está correto, e o bloqueio segura. É operacional: nas duas tentativas a
+sessão do Claude Code caiu junto, **mesmo com rede cabeada como rota padrão**,
+e foi preciso religar o wifi à mão para retomar a conversa.
+
+Esse religar manual, entre uma medição e outra, foi o que criou a armadilha 25
+inteira — um "fenômeno" que não existia. Ver a retratação lá.
+
+**Para exercitar a escrita do rfkill, use o bluetooth.** Mesmo `set_u32`, mesmo
+ramo — o `cap` é parâmetro —, e não derruba nem o fone conectado.
 
 ---
 
