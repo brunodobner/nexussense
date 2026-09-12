@@ -529,3 +529,57 @@ critério de regressão de cada uma, está em
 Ela não mora aqui porque é operacional: diz *o que* cortar e *como provar que
 não quebrou*, camada por camada. O que mora aqui é a decisão que a governa — a
 seção 6, que separa podar a tabela (seguro) de podar subsistemas (não).
+
+---
+
+## 21. Abrir mão do mainline, e manter o fork
+
+**Decidido em 2026-09-12, pelo autor.** O projeto de levar os atributos de
+controle para o `acer_wmi` oficial do kernel está **abandonado**. O
+`nexus_sense` continua.
+
+### Por que a pergunta existia
+
+A seção 6b mostra que o `acer_wmi` do kernel não é pobre: ele já entrega perfis
+térmicos, leitura de ventoinha e temperatura, rfkill e backlight. O que falta
+nele são os **controles** — `fan_speed` (definir, não só ler), `battery_limiter`,
+`usb_charging`, `backlight_timeout`, `battery_calibration` — e a entrada DMI do
+ANV15-52. Zero de cinco.
+
+Levá-los ao mainline encerraria o fork: sem DKMS, sem blacklist, sem recompilar
+a cada kernel, e a manutenção passaria para os mantenedores do kernel.
+
+### Por que não
+
+**O custo é desproporcional ao ganho, para um usuário.** É revisão pública na
+`platform-driver-x86@vger.kernel.org`, provavelmente várias rodadas ao longo de
+meses; o estilo do código teria de virar o do kernel; e as partes mais
+específicas — a entrada DMI de um modelo só, e o grupo sysfs `nitro_sense` em
+vez das interfaces padrão (`power_supply`, `hwmon pwm*`) — provavelmente não
+passariam como estão.
+
+**O que se ganharia já está quase todo resolvido por outro caminho.** O DKMS
+reconstrói sozinho a cada kernel, com ganchos do pacman, e desde a v1.1.9 há um
+aviso alto quando não consegue (armadilha 26). A dor que o mainline curaria —
+descobrir no boot que o driver não existe — foi tratada onde doía.
+
+**E a decisão de manter foi informada, não inércia.** A pergunta só foi
+encerrada depois de entender por que o fork existe: não é "o nativo não serve",
+é que os cinco atributos em uso aqui só existem neste driver.
+
+### O que foi descartado junto
+
+A ideia intermediária de **editar o `acer_wmi` do sistema à mão**, em vez de
+manter um módulo separado. Não sobrevive: os módulos vivem em
+`/lib/modules/<versão>/`, e um kernel novo cria a pasta dele do zero, com o
+arquivo original dentro. O remendo fica na pasta velha, sem erro e sem aviso.
+Reinstalar o pacote do kernel também o desfaz. É exatamente o problema que o
+DKMS existe para resolver — e que o arranjo atual já resolve.
+
+### O que isto não fecha
+
+Se um dia o `acer_wmi` nativo ganhar os atributos de controle por outra via, o
+fork perde a razão de ser e a decisão deve ser revista. E as **correções de
+bug** deste driver — armadilhas 15, 24, 3 e 3b, que são defeitos do upstream e
+valem para qualquer Acer — continuam sendo contribuições defensáveis, se algum
+dia houver vontade. Nada impede mandar só elas.

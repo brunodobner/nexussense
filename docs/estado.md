@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-12 (poda completa, log silenciado, roteiro sem pendências)
+**Última atualização:** 2026-09-12 (sessão encerrada: v1.1.9, roteiro sem pendências)
 
 ---
 
@@ -34,7 +34,6 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Plano 2 -- GUI e bandeja         plano 2026-09-05, escrito
 [x] Executar o plano 2               concluido: 12 de 12, virada verificada
 [x] Renomeacao do driver             carregamento e permissoes verificados apos boot
-[x] Reparo da bandeja                menu confirmado pelo usuario apos reinicio
 [x] Ajustes visuais e de resposta    Diagnóstico, ventoinhas e cliques sem atraso
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
@@ -46,8 +45,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Enxugar o log do kernel          v1.1.6: ~50 linhas/minuto -> zero em repouso
 [x] Camada D, caso a caso            v1.1.8: ec_raw_mode, THREEG e o poll fora
 [x] Entender o rfkill do wireless    nao havia defeito; armadilha 25 retratada
+[x] Reparo da bandeja                menu confirmado pelo usuario apos reinicio
+[x] Aviso de DKMS no pacman          v1.1.9: falha de build grita em vez de silenciar
+[-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
-[ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
 
 ### Concluído
@@ -353,8 +354,9 @@ manter. Ela é substituída pela spec da GUI e pela renomeação.
 
 ## A sessão de 2026-09-11/12, e onde ela parou
 
-Catorze commits, `v1.1.2` → **`v1.1.6`**. Entrou por três pendências que o
-`estado.md` listava e terminou com o driver a **36% menos linhas**.
+Vinte e nove commits, `v1.1.2` → **`v1.1.9`**. Entrou por três pendências que o
+`estado.md` listava e terminou com o driver a **38% menos linhas**, o roteiro
+sem nenhuma pendência e uma decisão de escopo tomada.
 
 ```
 driver         4734  ->  2912 linhas
@@ -366,8 +368,9 @@ parametros        9  ->  2
 
 **Cada mudança de código foi ao hardware antes de ir para `master`:** ramo,
 reinstalação por DKMS, recarga do módulo, portão medido, e só então merge. O
-portão é o `capability bitmask` — `0x00002c26` do começo ao fim das quatro
-mudanças — mais perfis, atributos, rfkill, hwmon e persistência de estado.
+portão é o `capability bitmask` — `0x00002c26` do começo ao fim de **todas** as
+mudanças, inclusive na partida a frio do fim — mais perfis, atributos, rfkill,
+hwmon e persistência de estado.
 
 ### O que fechou
 
@@ -379,11 +382,14 @@ mudanças — mais perfis, atributos, rfkill, hwmon e persistência de estado.
 | camada B | −1077 linhas, prova de construção (quirk único) |
 | log do kernel | ~50 linhas/minuto → zero em repouso |
 | camada D | `ec_raw_mode`, `THREEG` e o poll de rfkill fora; `force_caps` mascarado |
+| bandeja | menu do botão direito confirmado após reinício — a última pendência |
+| aviso de DKMS | gancho do pacman: falha de build grita em vez de silenciar |
+| mainline | **abandonado por decisão**, ver [decisões 21](decisoes.md) |
 | razão do modo máximo | [decisões 19](decisoes.md) |
 | erro WMI | conta fechada em campo: 4h04, zero ocorrências |
 | armadilha 25 | o bloqueio do wifi não gruda, e não é defeito nosso |
 
-### Cinco coisas que só apareceram medindo
+### Seis coisas que só apareceram medindo
 
 Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
 
@@ -402,6 +408,11 @@ Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
    direto, sem checar capability.
 5. **As duas estimativas de poda erraram por baixo** — A previa ~290 e saíram
    641; B previa ~765 e saíram 1077. Numa poda a estimativa é piso, não teto.
+6. **A armadilha 25 descrevia um fenômeno que não existia.** O "bloqueio do wifi
+   que não grudava" era o usuário religando o rádio entre uma medição e outra,
+   para recuperar a conexão. Três revisões até admitir. Entre a ação e a medição
+   havia uma pessoa, e ela não estava no modelo — quando a medição depende de
+   duas leituras separadas no tempo, faça tudo num comando só.
 
 ### A partida a frio, que fecha a conta
 
@@ -425,8 +436,8 @@ só o registro de carga, zero ruído. Antes seriam ~150 nos mesmos três minutos
 
 ### Onde o próximo trabalho começa
 
-**O roteiro não tem mais pendências.** As duas frentes abaixo são projetos
-novos, independentes entre si, e nenhuma continua trabalho interrompido.
+**O roteiro não tem mais pendências, e sobrou uma única frente** — um projeto
+novo, que não continua trabalho interrompido.
 
 - **Gatilho por programa aberto** — pedido nesta sessão. **Começa por
   brainstorm**, não por código: o agente hoje não observa processos, decide só
@@ -434,11 +445,6 @@ novos, independentes entre si, e nenhuma continua trabalho interrompido.
   estão na seção "Projeto futuro" deste arquivo, e duas delas são espinhosas: o
   que casar (um jogo por Proton aparece como `wine` ou `reaper`, não pelo nome) e
   quem ganha quando o usuário desliga à mão com o jogo ainda aberto.
-- **Mainline** — o caminho que encerraria o fork. A poda ajudou: 2912 linhas,
-  uma interface WMI, dois parâmetros, log limpo. A ordem sugerida e o que
-  provavelmente não passa estão na seção "Projeto futuro: levar os atributos
-  para o mainline". Sem data.
-
 **O `rfkill` do wireless saiu desta lista.** Chegou a figurar como frente
 aberta, com a armadilha 25 afirmando que o bloqueio se desfazia sozinho. Não
 havia defeito: o que desfazia era o usuário religando o wifi à mão entre uma
@@ -506,48 +512,16 @@ brainstorm.
 
 ---
 
-## Projeto futuro: levar os atributos para o mainline
+## Abandonado: levar os atributos para o mainline
 
-**O caminho que encerraria o fork.** Decidido investir tempo nisso em
-2026-09-11, sem data.
+**Decidido em 2026-09-12 não fazer.** O raciocínio inteiro — o que se ganharia,
+o custo real, e por que o arranjo atual já trata a dor que isso curaria — está
+em [decisões 21](decisoes.md). O `nexus_sense` continua, e a escolha foi
+informada: veio depois de entender por que o fork existe.
 
-O `acer_wmi` do kernel já entrega perfis térmicos, leitura de ventoinha e
-temperatura, rfkill e backlight. O que falta nele são os **atributos de
-controle** — e é só por eles que este fork existe:
-
-| | o nativo tem? |
-|---|---|
-| `fan_speed` (definir, não só ler) | ❌ |
-| `battery_limiter` | ❌ |
-| `usb_charging` | ❌ |
-| `backlight_timeout` | ❌ |
-| `battery_calibration` | ❌ |
-| entrada DMI do ANV15-52 | ❌ |
-
-Enviar esses para o mainline faria o driver deixar de ser manutenção sua: o
-kernel passaria a carregá-lo sozinho, sem DKMS, sem blacklist, sem recompilar a
-cada atualização de kernel. Ver [decisoes.md](decisoes.md) seção 6b para a
-medição que sustenta este quadro.
-
-**O que o trabalho envolve, sem romantizar:**
-
-- é a lista `platform-driver-x86@vger.kernel.org`, com revisão pública e
-  provavelmente várias rodadas
-- o estilo do código teria de virar o do kernel (o fonte atual tem chaves em
-  linha própria, comentários em português e `pr_info` em excesso)
-- a decodificação por campos das armadilhas 3 e 3b é a parte mais defensável:
-  conserta defeito real e vale para qualquer Acer, não só para este modelo
-- o mesmo para as armadilhas 15 (`filp_open` devolve `ERR_PTR`) e 24
-  (chamadas WMI sem serialização) — são bugs do upstream, não nossos
-- o que provavelmente **não** passa como está: a entrada DMI de um modelo só,
-  e o `predator_sense`/`nitro_sense` como grupo sysfs próprio em vez das
-  interfaces padrão do kernel (`power_supply` para o limitador de bateria,
-  `hwmon` `pwm*` para as ventoinhas)
-
-**Ordem sugerida, do mais fácil de aceitar para o mais difícil:** primeiro as
-correções de bug (15, 24, 3, 3b) como patches isolados contra o `acer-wmi`
-atual; depois a entrada DMI do modelo; e só então os atributos de controle,
-já traduzidos para as interfaces padrão.
+A seção 6b de [decisoes.md](decisoes.md) guarda a medição que sustenta o quadro:
+o `acer_wmi` nativo entrega perfis térmicos, telemetria, rfkill e backlight, mas
+**zero dos nove atributos de controle**, e não reconhece o ANV15-52.
 
 ---
 
