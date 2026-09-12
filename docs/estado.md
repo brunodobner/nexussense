@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-11 (v1.1.2: sequências RMW atômicas)
+**Última atualização:** 2026-09-11 (parâmetros inertes fora; poda classificada)
 
 ---
 
@@ -39,7 +39,12 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
 [x] Poda para um modelo so           v1.1.0: 32 entradas DMI -> 1, bitmask identico
-[ ] Podar os subsistemas             precisa de medicao por subsistema, como a tabela precisou
+[x] Parametros inertes fora          enable_all, predator_v4, nitro_v4 e os dois campos de quirk
+[x] Classificar a poda               docs/poda-subsistemas.md: camadas A/B/C/D e o portao
+[ ] Executar a camada A              ~290 linhas, prova de firmware (GUID ausente)
+[ ] Executar a camada B              ~765 linhas, prova de construcao (quirk unico)
+[ ] Enxugar o log do kernel          ~50 linhas/minuto; pr_debug no lugar de pr_info
+[ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
 
@@ -330,6 +335,51 @@ manter. Ela é substituída pela spec da GUI e pela renomeação.
 
 ---
 
+## Projeto futuro: gatilho por programa aberto
+
+**Pedido em 2026-09-11. Precisa de plano próprio — não foi desenhado.**
+
+Um bloco novo na tela **Desempenho**, onde o usuário registra programas que,
+ao serem abertos, ativam o Desempenho máximo sozinhos. O modo passa a ter duas
+formas de ligar: **manual**, como hoje, e **por gatilho**.
+
+O que o pedido diz, literalmente:
+
+- um bloco na tela Desempenho para registrar programas;
+- o modo pode ser ativado manualmente **ou** por gatilho de programa aberto;
+- o bloco precisa permitir **localizar o executável** e adicioná-lo à lista.
+
+Isso encaixa na razão do modo (seção 19 de [decisoes.md](decisoes.md)): se ele
+existe para jogos, ligar sozinho quando o jogo abre é o passo seguinte óbvio.
+
+**Por que é plano próprio, e não um bloco de interface:** o agente hoje não
+observa processos. Ele decide por fonte de energia, num laço de 2 segundos.
+Detectar programa aberto é um subsistema novo, e as perguntas de desenho são
+reais, não formalidade:
+
+- **como detectar** — varrer `/proc` no mesmo laço de 2 s, ou algo com aviso
+  (`cgroups`, `fanotify`)? Varrer `/proc` a cada 2 s é o caminho mais simples e
+  o que já cabe no laço existente;
+- **o que casar** — caminho absoluto do executável, nome do binário, ou linha
+  de comando? Jogos por Steam e por Proton complicam: o binário visível pode
+  ser `reaper` ou `wine`, não o jogo;
+- **desligar quando fecha?** O pedido não diz. Ligar sozinho e não desligar
+  sozinho é uma armadilha de uso; desligar sozinho pode cortar o modo no meio
+  de um alt-tab;
+- **quem ganha** quando o usuário desliga à mão com o jogo ainda aberto — a
+  escolha manual tem de vencer o gatilho, senão o agente a desfaz em 2 s. É o
+  mesmo problema que o setpoint de ventoinha já teve;
+- **a regra da bateria continua acima de tudo:** na tomada o gatilho vale, na
+  bateria o modo fica suspenso, gatilho ou não;
+- **o seletor de executável** é `QFileDialog`, mas a lista precisa de formato
+  no TOML, de remoção, e de decidir o que mostrar quando o caminho registrado
+  deixa de existir.
+
+Nada disso está decidido. **Chamar numa sessão nova**, começando por
+brainstorm.
+
+---
+
 ## Projeto futuro: levar os atributos para o mainline
 
 **O caminho que encerraria o fork.** Decidido investir tempo nisso em
@@ -428,10 +478,19 @@ Coisas verdadeiras hoje que alguém pode estranhar:
   NITRO_SENSE`). `acer_dump_capabilities()` o imprime no carregamento, e é o
   critério de regressão de qualquer poda futura. A pendência antiga — que
   bloqueava a fase F — deixou de existir, e a poda da tabela foi feita.
-- **Os parâmetros `enable_all`, `predator_v4` e `nitro_v4` continuam no
-  driver.** São inertes, mas estão entranhados no provisionamento de perfis.
-  Removê-los é alterar código que roda e merece mudança própria — é o que
-  sobrou da poda.
+- **Os parâmetros `enable_all`, `predator_v4` e `nitro_v4` saíram em
+  2026-09-11**, junto com os campos `predator_v4` e `nitro_v4` do
+  `struct quirk_entry`. Com eles, `ACER_CAP_PREDATOR_SENSE` e
+  `ACER_CAP_NITRO_SENSE_V4` viraram inalcançáveis por construção. **Atenção:**
+  `acer_predator_state_load/save()` **não** morreu com isso — o caminho
+  `nitro_sense` puro também a chama, e é ela que preserva perfil térmico e
+  curvas de ventoinha entre reinícios (armadilha 4).
+- **O driver despeja ~50 linhas por minuto no log do kernel** —
+  `battery health query`, `usb charging get status` e `backlight_timeout get
+  status`, uma trinca a cada sondagem do agente. São ~72 mil linhas por dia, de
+  57 `pr_info` no fonte. O excesso de `pr_info` já estava listado como
+  obstáculo ao mainline; virou item próprio do roteiro, separado da poda,
+  porque a decisão ali é sobre nível de log e não sobre remover código.
 - **Os testes em shell são quase todos `grep` sobre o fonte.** É adequado ao
   propósito declarado — detectar o que a próxima release do upstream
   sobrescreveu — mas não verifica comportamento. A suíte Python nova, em
