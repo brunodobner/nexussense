@@ -138,11 +138,21 @@ Três coisas caíram junto por dependência, e voltaram ou foram ajustadas:
 Compilar entre cada estágio foi o que tornou isso administrável — os três
 primeiros builds falharam, cada um apontando exatamente o que tinha caído junto.
 
-**O que NÃO foi podado, de propósito:** os parâmetros de módulo `enable_all`,
-`predator_v4` e `nitro_v4`. Eles são inertes (nascem `false` e ninguém os
-passa), mas estão entranhados na lógica de provisionamento de perfis —
-`:1933`, `:2046`, `:2109`, `:4524`, `:4608`. Mexer neles é alterar código que
-roda, e merece mudança própria, não carona nesta.
+**O que NÃO foi podado na mesma mudança, de propósito:** os parâmetros de
+módulo `enable_all`, `predator_v4` e `nitro_v4`. Eles eram inertes (nasciam
+`false` e ninguém os passava), mas estavam entranhados na lógica de
+provisionamento de perfis, em sete pontos. Mexer neles era alterar código que
+roda, e mereceu mudança própria em vez de carona.
+
+**Feito em 2026-09-11.** Saíram os três parâmetros e, junto, os campos
+`predator_v4` e `nitro_v4` do `struct quirk_entry` — que eram o último caminho
+para `ACER_CAP_PREDATOR_SENSE` e `ACER_CAP_NITRO_SENSE_V4` serem ligadas. As
+duas capabilities passaram a ser inalcançáveis por construção, não por acaso da
+tabela, e é isso que torna a camada B da spec de poda demonstrável.
+
+Cuidado registrado no commit, porque é contra-intuitivo:
+`acer_predator_state_load/save()` **não** morreu com isso. O caminho
+`nitro_sense` puro também a chama, de propósito — ver armadilha 4.
 
 ### Podar os subsistemas: risco alto, e é o que está bloqueado
 
@@ -156,8 +166,14 @@ por hardware do wifi e do bluetooth — sem que nada acusasse, porque os seis
 atributos do `nitro_sense` continuariam presentes.
 
 O passo zero foi feito em 2026-09-11: `acer_dump_capabilities()` imprime o
-bitmask real no carregamento. **O corte de subsistema continua pendente**, mas
-agora tem critério: medir antes, medir depois, e exigir que o número não mude.
+bitmask real no carregamento. O critério passou a existir — medir antes, medir
+depois, exigir que o número não mude.
+
+Mas o bitmask é o **portão**, não o plano: ele diz se um corte quebrou algo,
+não *o que* pode ser cortado. Essa parte virou spec própria, com as camadas
+classificadas por tipo de prova, em
+[poda-subsistemas.md](poda-subsistemas.md).
+Ver também a seção 20.
 
 ## 6b. Por que não usar o `acer_wmi` nativo do kernel
 
@@ -400,13 +416,102 @@ rodando como root seria pior que não fazer.
 
 ---
 
-## Lacuna conhecida
+## 19. O modo de desempenho máximo simula um turbo que o firmware não tem
 
-**O modo de desempenho máximo não tem razão registrada.** Os commits
-`c475ec7`, `57fe3b9`, `e45daa7` e `22121bb` (2026-09-06/07) entraram só com
-linha de assunto, sem corpo. O que ele faz está no código e em
-[interface.md](interface.md); *por que* foi desenhado assim, e o que foi
-descartado no caminho, não foi gravado em lugar nenhum.
+**Reconstruída em 2026-09-11.** Os commits que criaram o modo — `c475ec7`,
+`57fe3b9`, `e45daa7`, `22121bb`, de 2026-09-06/07 — entraram só com linha de
+assunto e foram levados pelo expurgo da v1.0.0; não existem mais em lugar
+nenhum, nem soltos no `.git`. Esta seção separa, linha a linha, o que foi lido
+do código do que veio da memória do autor.
 
-Se a decisão precisar ser revisitada, ela terá de ser reconstruída lendo
-`src/nexus_sense/maximum.py` e `powermizer.py`.
+### A intenção
+
+**Simular um turbo e extrair 100% da máquina para jogos, sem se importar com o
+custo energético.** *(memória do autor, 2026-09-11 — não há fonte escrita
+anterior.)*
+
+Isso explica o desenho inteiro, e é o que faltava. Sem essa frase, o modo
+parece uma coleção arbitrária de três ajustes; com ela, os três são a resposta
+a uma restrição do firmware.
+
+### A restrição: não existe quinto perfil para selecionar
+
+O firmware anuncia `0x53` no bitmap de perfis suportados — **medido**, no log
+do kernel — e o bit do Turbo não está lá. Os quatro perfis que existem são
+`low-power`, `quiet`, `balanced` e `balanced-performance`. Forçá-lo pela via do
+`nitro_v4` foi cogitado e descartado (seção 18), porque trocaria o conjunto de
+quirks inteiro e levaria junto a persistência de estado (armadilha 4).
+
+Então o turbo não podia ser pedido. Teve de ser **montado**.
+
+### As três alavancas, e por que são essas três
+
+*(lido de `src/nexus_sense/maximum.py` e `powermizer.py`.)*
+
+| alavanca | valor | por quê |
+|---|---|---|
+| perfil térmico | `balanced-performance` | é o mais alto que o firmware anuncia; não há acima |
+| CPU | `power-profiles-daemon` em `performance` | fora do firmware, é a alavanca de CPU que resta |
+| GPU | `GPUPowerMizerMode = 1` | "preferir desempenho máximo": tira a dGPU da escala adaptativa |
+
+São as três que o sistema oferece sem código privilegiado — coerente com a
+decisão 1. Não há uma quarta que este projeto pudesse acionar como uid 1000.
+
+**Dynamic Boost fica de fora**, e isso é escolha, não esquecimento: ele é do
+driver NVIDIA e reparte orçamento térmico entre CPU e GPU sozinho. Mexer nele
+brigaria com o `performance` do PPD em vez de somar.
+
+### Por que só na tomada
+
+Duas razões, e a segunda sozinha já bastaria:
+
+1. o custo energético ser irrelevante é premissa do modo — na bateria ela é
+   falsa por definição;
+2. **o driver recusa `balanced-performance` na bateria** com `-EOPNOTSUPP`,
+   medido escrevendo à força no sysfs com o cabo fora. O modo não poderia
+   existir ali nem se quisesse.
+
+Daí ele ficar **suspenso**, não desligado: a intenção continua gravada em
+`maximum_mode`, e o agente reaplica o conjunto quando a tomada volta. Desligar
+perderia a escolha do usuário num evento que não foi decisão dele.
+
+### O que foi ajustado depois, e por quê
+
+- **As ventoinhas deixaram de ser travadas no automático** (2026-09-07). Ativar
+  ainda começa em Automático, mas Máximo e Manual continuam disponíveis e o
+  agente preserva o setpoint. Travar contradizia a premissa: quem não se
+  importa com custo tem menos motivo ainda para aceitar ventoinha conservadora.
+- **O PowerMizer passou de subprocesso `nvidia-settings` para conexão NVML
+  persistente** (2026-09-07). No driver 610.57.04 o pedido é por cliente: a
+  escrita retornava sucesso e o pedido sumia ao encerrar o processo. Medição e
+  validação em [estado.md](estado.md), seção "Correção PowerMizer".
+
+### O que este modo não promete
+
+Não promete frequência fixa, não promete ganho de FPS medido, e não acrescenta
+perfil ao firmware. Ele empilha três preferências; o quanto cada uma rende é do
+hardware.
+
+### O que não foi recuperado
+
+Honestamente, e sem preencher com suposição:
+
+- se outros valores de `GPUPowerMizerMode` foram testados antes do `1`;
+- se alguma alavanca de CPU além do PPD foi cogitada (governor do `cpufreq`,
+  por exemplo) e por que não entrou;
+- se o modo chegou a existir em alguma forma anterior — travando ventoinhas,
+  ou com outro perfil térmico — antes da forma atual.
+
+Se algum desses voltar à tona, ele terá de ser decidido de novo, não lembrado.
+
+---
+
+## 20. A poda de subsistemas tem documento próprio
+
+A classificação do que pode ser cortado do driver, em quatro camadas, com o
+critério de regressão de cada uma, está em
+[poda-subsistemas.md](poda-subsistemas.md).
+
+Ela não mora aqui porque é operacional: diz *o que* cortar e *como provar que
+não quebrou*, camada por camada. O que mora aqui é a decisão que a governa — a
+seção 6, que separa podar a tabela (seguro) de podar subsistemas (não).

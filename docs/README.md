@@ -8,6 +8,7 @@ Nada aqui vai junto numa instalação — é tudo ferramenta de manutenção.
 | [decisoes.md](decisoes.md) | por que o projeto é como é: o que foi escolhido, a medição que sustenta, e o que foi descartado | antes de mudar uma decisão de desenho |
 | [estado.md](estado.md) | onde o trabalho está e o que ficou pendente | ao retomar o projeto |
 | [interface.md](interface.md) | o sistema visual da janela e da bandeja | ao mexer na GUI |
+| [poda-subsistemas.md](poda-subsistemas.md) | o que pode ser cortado do driver, em quatro camadas, e como provar antes de apagar | antes de remover qualquer subsistema |
 | [verificacao-manual.md](verificacao-manual.md) | o que a suíte automatizada não alcança, e por quê | antes de dar uma versão por boa |
 
 ## Histórico
