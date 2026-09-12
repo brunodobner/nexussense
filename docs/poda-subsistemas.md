@@ -49,9 +49,9 @@ ls /sys/devices/platform/acer-wmi/nitro_sense/   # 6 arquivos
 cat /sys/firmware/acpi/platform_profile_choices  # low-power quiet balanced balanced-performance
 cat /sys/class/rfkill/*/name | grep acer         # acer-wireless, acer-bluetooth
 # O critério é que as DUAS entradas existam -- nao que um bloqueio grude.
-# O firmware nao honra soft-block no wireless, e o poll o desfaz em 1 s.
-# Ver armadilha 25; e nao rode 'rfkill block' se a rede desta maquina
-# for o seu caminho ate aqui.
+# No wireless o bloqueio volta sozinho em ~1 s, por mecanismo NAO
+# estabelecido, e o driver anterior faz o mesmo. Ver armadilha 25; e nao
+# rode 'rfkill block' se a rede desta maquina for o seu caminho ate aqui.
 ls /sys/devices/platform/acer-wmi/hwmon/         # existe
 
 # 5. as duas suítes
@@ -132,7 +132,8 @@ presente, `Thermal states loaded/restored` no log, zero avisos, `W=1` limpo,
 reescrito nesta camada: `rfkill block` devolveu 0 nos dois rádios e o bluetooth
 segurou o bloqueio através do poll. O wireless voltou sozinho — e o driver
 **anterior**, compilado num worktree e carregado por `insmod`, fez exatamente o
-mesmo. Não é regressão; é a armadilha 25.
+mesmo. Não é regressão; é a armadilha 25, cuja causa continua **não
+estabelecida**.
 
 **Confirmação por outro caminho:** o log mostra
 `Function bitmap for Communication Button: 0x801` *antes* do bitmask, o que
@@ -243,13 +244,36 @@ cada corte, não depois.
 
 ---
 
-### Camada D — decidir um a um, sem lote
+### Camada D — decidir um a um, sem lote — **parcial, 2026-09-12**
 
-Cada um destes tem argumento nos dois sentidos. **Não** entram numa camada
-coletiva; cada um é uma decisão própria, e nenhum precisa ser tomado agora.
+Cada um tem argumento nos dois sentidos, e por isso nenhum entrou em lote.
+Duas decisões foram tomadas; duas ficaram, com o motivo escrito.
 
-| candidato | a favor de cortar | contra |
-|---|---|---|
+| candidato | decisão |
+|---|---|
+| `ec_raw_mode` | **removido.** Nasce `false` e ninguém o passa; o caminho que ele abria (`acer_wmi_enable_ec_raw`) nunca rodou. Sai também das duas condições de agendamento do trabalho de rfkill, onde era o primeiro termo de um `\|\|` cujo segundo termo já era falso. |
+| `force_caps` | **fica, mascarado.** Continua sendo a válvula de escape se o bitmask mudar num firmware novo. Mas depois das camadas A e B ele podia ligar bits sem código atrás, e o bitmask impresso no carregamento — que é o instrumento deste documento — anunciaria algo inexistente. Agora é mascarado por `ACER_CAP_IMPLEMENTED` e avisa o que ignorou. |
+| `cycle_gaming_thermal_profile` | **fica.** Não é inerte: governa se o botão N percorre os perfis ou alterna. Botão em uso. |
+| `THREEG` | **adiado**, e não por tamanho. Ver abaixo. |
+| o trabalho periódico de `rfkill` | **adiado.** Descoberto nesta sessão que ele **nunca é agendado** nesta máquina, porque `ACERWMID_EVENT_GUID` existe. Mesmo motivo do `THREEG`. |
+| os `pr_info` | saíram do escopo da poda e viraram item próprio; feito na v1.1.6. |
+
+#### Por que `THREEG` e o poll de rfkill ficaram
+
+Não é o tamanho — seriam ~80 linhas. É que ambos vivem no caminho do `rfkill`,
+e **há um comportamento observado ali que ninguém explicou ainda**: o bloqueio
+do wireless volta sozinho, o do bluetooth não, e a causa que a armadilha 25
+atribuía ao poll de 1 Hz está errada — esse poll não roda aqui.
+
+Mexer num caminho onde existe um efeito não explicado tem um custo específico:
+se algo mudar depois, não dá para separar o que você fez do que já estava lá. E
+aqui a verificação é limitada de propósito, porque **testar o wireless derruba a
+rede desta máquina** e não é para ser repetido.
+
+**A ordem certa é inversa:** primeiro entender o mecanismo, depois cortar. O
+roteiro de instrumentação está na armadilha 25.
+
+---|---|---|
 | `THREEG` (rfkill, parâmetro, capability) | capability apagada, nenhum rfkill 3G na máquina | compartilha `acer_rfkill_init/exit` com wireless e bluetooth — errar aqui é o erro original de novo |
 | `force_caps` | parâmetro de depuração, ninguém passa | é a válvula de escape se o bitmask mudar num firmware novo |
 | `ec_raw_mode` | acesso EC cru, sem uso neste modelo | custo de manter é quase zero; o `acer_debug` que o acompanhava já caiu por dependência na camada A |
@@ -277,7 +301,8 @@ tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 ```
 [x] Camada A    641 linhas   prova de firmware       2026-09-11
 [x] Camada B   1077 linhas   prova de construção     2026-09-12
-[ ] Camada D   caso a caso, sem prazo
+[~] Camada D     14 linhas   ec_raw_mode fora, force_caps mascarado;
+                             THREEG e o poll de rfkill adiados
 ```
 
 | | linhas |

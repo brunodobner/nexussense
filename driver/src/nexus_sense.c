@@ -337,9 +337,26 @@ struct hotkey_function_type_aa
 #define ACER_CAP_NITRO_SENSE BIT(13)
 #define ACER_CAP_NITRO_SENSE_V4 BIT(14)
 
+/*
+ * As capabilities que este driver ainda IMPLEMENTA. As demais continuam
+ * definidas acima porque documentam o layout de bits do firmware -- util
+ * para ler um bitmask de outra maquina --, mas o codigo por tras delas
+ * saiu nas camadas A e B da poda.
+ *
+ * force_caps e mascarado por isto. Sem a mascara ele aceitaria ligar um
+ * bit sem codigo atras, e o bitmask impresso no carregamento -- que e o
+ * instrumento de verificacao da poda -- anunciaria algo que nao existe.
+ */
+#define ACER_CAP_IMPLEMENTED (ACER_CAP_WIRELESS |          \
+                              ACER_CAP_BLUETOOTH |         \
+                              ACER_CAP_THREEG |            \
+                              ACER_CAP_SET_FUNCTION_MODE | \
+                              ACER_CAP_PLATFORM_PROFILE |  \
+                              ACER_CAP_FAN_SPEED_READ |    \
+                              ACER_CAP_NITRO_SENSE)
+
 static int threeg = -1;
 static int force_caps = -1;
-static bool ec_raw_mode;
 static bool has_type_aa;
 static u16 commun_func_bitmap;
 static u8 commun_fn_key_number;
@@ -348,11 +365,9 @@ static u64 supported_sensors;
 
 module_param(threeg, int, 0444);
 module_param(force_caps, int, 0444);
-module_param(ec_raw_mode, bool, 0444);
 module_param(cycle_gaming_thermal_profile, bool, 0644);
 MODULE_PARM_DESC(threeg, "Set initial state of 3G hardware");
 MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
-MODULE_PARM_DESC(ec_raw_mode, "Enable EC raw mode");
 MODULE_PARM_DESC(cycle_gaming_thermal_profile,
                  "Set thermal mode key in cycle mode. Disabling it sets the mode key in turbo toggle mode");
 
@@ -1545,7 +1560,7 @@ static int acer_rfkill_init(struct device *dev)
 
     rfkill_inited = true;
 
-    if ((ec_raw_mode || !wmi_has_guid(ACERWMID_EVENT_GUID)) &&
+    if (!wmi_has_guid(ACERWMID_EVENT_GUID) &&
         has_cap(ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
         schedule_delayed_work(&acer_rfkill_work,
                               round_jiffies_relative(HZ));
@@ -1570,7 +1585,7 @@ error_wireless:
 
 static void acer_rfkill_exit(void)
 {
-    if ((ec_raw_mode || !wmi_has_guid(ACERWMID_EVENT_GUID)) &&
+    if (!wmi_has_guid(ACERWMID_EVENT_GUID) &&
         has_cap(ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
         cancel_delayed_work_sync(&acer_rfkill_work);
 
@@ -1713,30 +1728,6 @@ wmid3_set_function_mode(struct func_input_params *params,
 
     *return_value = *((struct func_return_value *)obj->buffer.pointer);
     kfree(obj);
-
-    return status;
-}
-
-static int __init acer_wmi_enable_ec_raw(void)
-{
-    struct func_return_value return_value;
-    acpi_status status;
-    struct func_input_params params = {
-        .function_num = 0x1,
-        .commun_devices = 0xFFFF,
-        .devices = 0xFFFF,
-        .app_status = 0x00, /* Launch Manager Deactive */
-        .app_mask = 0x01,
-    };
-
-    status = wmid3_set_function_mode(&params, &return_value);
-
-    if (return_value.error_code || return_value.ec_return_value)
-        pr_warn("Enabling EC raw mode failed: 0x%x - 0x%x\n",
-                return_value.error_code,
-                return_value.ec_return_value);
-    else
-        pr_info("Enabled EC raw mode\n");
 
     return status;
 }
@@ -2929,7 +2920,14 @@ static int __init acer_wmi_init(void)
         interface->capability |= ACER_CAP_SET_FUNCTION_MODE;
 
     if (force_caps != -1)
-        interface->capability = force_caps;
+    {
+        u32 pedido = (u32)force_caps;
+
+        interface->capability = pedido & (u32)ACER_CAP_IMPLEMENTED;
+        if (pedido & ~(u32)ACER_CAP_IMPLEMENTED)
+            pr_warn("force_caps: 0x%08x ignorado, sem codigo neste driver\n",
+                    pedido & ~(u32)ACER_CAP_IMPLEMENTED);
+    }
 
     acer_dump_capabilities();
 
@@ -2939,23 +2937,11 @@ static int __init acer_wmi_init(void)
         if (ACPI_FAILURE(acer_wmi_enable_rf_button()))
             pr_warn("Cannot enable RF Button Driver\n");
 
-        if (ec_raw_mode)
-        {
-            if (ACPI_FAILURE(acer_wmi_enable_ec_raw()))
-            {
-                pr_err("Cannot enable EC raw mode\n");
-                return -ENODEV;
-            }
-        }
-        else if (ACPI_FAILURE(acer_wmi_enable_lm()))
+        if (ACPI_FAILURE(acer_wmi_enable_lm()))
         {
             pr_err("Cannot enable Launch Manager mode\n");
             return -ENODEV;
         }
-    }
-    else if (ec_raw_mode)
-    {
-        pr_info("No WMID EC raw mode enable method\n");
     }
 
     if (wmi_has_guid(ACERWMID_EVENT_GUID))
