@@ -34,7 +34,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Plano 2 -- GUI e bandeja         plano 2026-09-05, escrito
 [x] Executar o plano 2               concluido: 12 de 12, virada verificada
 [x] Renomeacao do driver             carregamento e permissoes verificados apos boot
-[~] Reparo da bandeja                instalado; falta gesto humano e novo login
+[~] Reparo da bandeja                autostart provado no login; falta so o gesto humano
 [x] Ajustes visuais e de resposta    Diagnóstico, ventoinhas e cliques sem atraso
 [x] Instalador da aplicação          dependências de execução verificadas e instalação reaplicada
 [x] Modo Desempenho máximo           quinto modo do app; validado e instalado
@@ -292,8 +292,18 @@ A correção do menu está instalada na máquina: SNI anuncia `/MenuBar`,
 `GetLayout` responde com `u(ia{sv}av)` e o watcher registra um único Nexus
 Sense. Os testes em sessão privada verificam ações repetidas, IDs estáveis
 na bateria, fan auto/máximo, scroll, clique do meio e instância única.
-A confirmação visual do usuário está pendente. Não se pediu novo reboot
-antes dessa confirmação.
+
+**O início automático foi confirmado em 2026-09-12.** A bandeja do login de
+2026-09-11 18:45 tem `systemd --user` como pai, foi iniciada às 18:45:46 — não
+à mão — e detém `com.nexussense.NexusSense` no barramento de sessão, instância
+única. A entrada `/etc/xdg/autostart/nexus-sense-autostart.desktop` está no
+lugar.
+
+**Falta só o gesto humano:** clicar com o botão direito no ícone da bandeja e
+confirmar que o menu aparece. Isso nenhum comando verifica — as chamadas DBus
+provam que o menu está exportado, não que ele desenha na tela. Uma afirmação
+anterior de que esse menu estava verificado foi incorreta, e é por isso que a
+pendência continua aberta em vez de ser encerrada por dedução.
 
 O boot confirmou `nexus_sense`, banner 25.701 e modelo ANV15-52. DKMS
 registra apenas o nome novo nos três kernels instalados. Unit e
