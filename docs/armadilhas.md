@@ -696,22 +696,40 @@ O comando **retorna sucesso** nos dois casos. Um segundo depois, só o
 bluetooth continua bloqueado. A leitura fácil — e errada — é "eu quebrei o
 caminho de escrita do wireless".
 
-**Causa.** `acer_rfkill_update()` roda a 1 Hz, relê o estado do firmware e
-reafirma o que leu:
+**Causa: não estabelecida.** A primeira redação desta armadilha dizia que
+`acer_rfkill_update()`, rodando a 1 Hz, relia o firmware e desfazia o bloqueio.
+**Está errado, e a correção importa mais que o erro:**
 
 ```c
-status = get_u32(&state, ACER_CAP_WIRELESS);
-if (ACPI_SUCCESS(status))
-    rfkill_set_sw_state(wireless_rfkill, !state);
+/* acer_rfkill_init() */
+if ((ec_raw_mode || !wmi_has_guid(ACERWMID_EVENT_GUID)) && has_cap(...))
+    schedule_delayed_work(&acer_rfkill_work, ...);
 ```
 
-O firmware deste aparelho aceita a escrita, devolve sucesso, e continua
-reportando o wireless como ligado. O poll então desfaz o bloqueio. Com o
-bluetooth o firmware responde coerente e o bloqueio fica.
+`ACERWMID_EVENT_GUID` **existe** nesta máquina (conferido em
+`/sys/bus/wmi/devices/`) e `ec_raw_mode` é falso. A condição é falsa: **o
+trabalho periódico nunca é agendado aqui.** Ele não pode ter desfeito nada.
 
-Não há nada a corrigir no driver: ele está fazendo o que o firmware manda. O
-caminho de escrita **funciona** — o que não funciona é o firmware honrar o
-pedido para o wireless.
+O outro candidato óbvio também não fecha. O tratador de evento WMI
+(`WMID_HOTKEY_EVENT`, teclas `KEY_WLAN`/`KEY_BLUETOOTH`) sincroniza os **três**
+rádios de uma vez, do mesmo `device_state`. Se ele tivesse disparado, o
+bluetooth teria voltado junto — e não voltou.
+
+**O que está estabelecido, e só isto:**
+
+| | |
+|---|---|
+| `rfkill block` devolve 0 | nos dois rádios |
+| bluetooth | bloqueia e **fica** bloqueado |
+| wireless | bloqueia e volta sozinho em ~1 s |
+| driver anterior à camada A | comporta-se exatamente igual |
+| o poll de 1 Hz | **não roda nesta máquina** |
+
+**Para fechar a conta**, quem for investigar: instrumentar `acer_rfkill_set()` e
+`wmid3_set_device_status()` com `pr_debug`, ligar o dynamic debug, e olhar quem
+chama `rfkill_set_sw_state` depois do bloqueio. A hipótese que sobra é o
+próprio firmware recusar o soft-block do wireless e algum caminho relê-lo — mas
+isso é hipótese, não medição.
 
 **Como verificar que é pré-existente, e não sua.** Compile a revisão anterior
 num worktree e carregue o `.ko` direto, sem mexer no DKMS:

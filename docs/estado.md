@@ -12,8 +12,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 3022 linhas (eram 5167) |
-| versão | **v1.1.6** — `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 3 parâmetros, 3008 linhas (eram 5167) |
+| versão | **v1.1.7** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
@@ -44,7 +44,9 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Executar a camada A              v1.1.4: -641 linhas, bitmask identico
 [x] Executar a camada B              v1.1.5: -1077 linhas, bitmask identico
 [x] Enxugar o log do kernel          v1.1.6: ~50 linhas/minuto -> zero em repouso
-[ ] Camada D, caso a caso            THREEG, force_caps, ec_raw_mode; sem prazo
+[~] Camada D, caso a caso            v1.1.7: ec_raw_mode fora, force_caps mascarado
+[ ] Entender o rfkill do wireless    bloqueio volta sozinho, causa nao estabelecida
+[ ] Depois disso: THREEG e o poll    ~80 linhas, presas ao mecanismo acima
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
@@ -342,10 +344,11 @@ Catorze commits, `v1.1.2` → **`v1.1.6`**. Entrou por três pendências que o
 `estado.md` listava e terminou com o driver a **36% menos linhas**.
 
 ```
-driver      4734  ->  3022 linhas
-pr_info       57  ->  33   (mais 11 pr_debug)
-GUIDs          7  ->  4
-interfaces     4  ->  1
+driver         4734  ->  3008 linhas
+pr_info          57  ->  33   (mais 11 pr_debug)
+GUIDs             7  ->  4
+interfaces        4  ->  1
+parametros        9  ->  3
 ```
 
 **Cada mudança de código foi ao hardware antes de ir para `master`:** ramo,
@@ -362,6 +365,7 @@ mudanças — mais perfis, atributos, rfkill, hwmon e persistência de estado.
 | camada A | −641 linhas, prova de firmware (GUIDs ausentes) |
 | camada B | −1077 linhas, prova de construção (quirk único) |
 | log do kernel | ~50 linhas/minuto → zero em repouso |
+| camada D | parcial: `ec_raw_mode` fora, `force_caps` mascarado |
 | razão do modo máximo | [decisões 19](decisoes.md) |
 | erro WMI | conta fechada em campo: 4h04, zero ocorrências |
 | armadilha 25 | o bloqueio do wifi não gruda, e não é defeito nosso |
@@ -390,9 +394,13 @@ Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
 
 Nada está pela metade. As três frentes abertas são independentes:
 
-- **Camada D** — `THREEG`, `force_caps`, `ec_raw_mode`. Caso a caso, cada um com
-  argumento nos dois sentidos; a tabela está em
-  [poda-subsistemas.md](poda-subsistemas.md). É a menor das três e não urge.
+- **O `rfkill` do wireless** — o bloqueio volta sozinho e **ninguém sabe por
+  quê**. A causa que a armadilha 25 atribuía ao poll de 1 Hz está errada: esse
+  poll nunca é agendado nesta máquina. Enquanto isso não for entendido, `THREEG`
+  e o trabalho periódico de rfkill (~80 linhas) ficam onde estão — mexer num
+  caminho com efeito não explicado impede separar depois o que é seu do que já
+  estava lá. O roteiro de instrumentação está na armadilha 25. **Cuidado: o
+  teste que fecharia isso derruba a rede da máquina.**
 - **Gatilho por programa aberto** — pedido nesta sessão, com as seis perguntas
   de desenho abertas logo abaixo. **Começa por brainstorm**, não por código: o
   agente hoje não observa processos.

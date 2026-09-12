@@ -20,7 +20,7 @@
 # A versao e a do PROJETO, nao a do modulo. O driver tem a sua propria em
 # DRIVER_VERSION (nexus_sense.c), que alimenta o pacote DKMS -- sao dois
 # espacos de numeracao de proposito. Ver docs/decisoes.md secao 7.
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="1.1.7"
 # Caminhos de instalacoes ANTIGAS, mantidos so para a limpeza encontra-los.
 # Nada deste projeto e instalado neles: o pacote vai para
 # /usr/lib/nexus-sense e os lancadores para /usr/bin. Ver docs/decisoes.md
