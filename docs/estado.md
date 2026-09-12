@@ -43,8 +43,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Classificar a poda               docs/poda-subsistemas.md: camadas A/B/C/D e o portao
 [x] Executar a camada A              v1.1.4: -641 linhas, bitmask identico
 [x] Executar a camada B              v1.1.5: -1077 linhas, bitmask identico
-[ ] Camada D, caso a caso            THREEG, force_caps, ec_raw_mode; sem prazo
 [x] Enxugar o log do kernel          v1.1.6: ~50 linhas/minuto -> zero em repouso
+[ ] Camada D, caso a caso            THREEG, force_caps, ec_raw_mode; sem prazo
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
@@ -333,6 +333,78 @@ G. documentacao                  spec 9
 
 A **fase D perdeu o objeto**: não haverá binário a versionar nem manifesto a
 manter. Ela é substituída pela spec da GUI e pela renomeação.
+
+---
+
+## A sessão de 2026-09-11/12, e onde ela parou
+
+Catorze commits, `v1.1.2` → **`v1.1.6`**. Entrou por três pendências que o
+`estado.md` listava e terminou com o driver a **36% menos linhas**.
+
+```
+driver      4734  ->  3022 linhas
+pr_info       57  ->  33   (mais 11 pr_debug)
+GUIDs          7  ->  4
+interfaces     4  ->  1
+```
+
+**Cada mudança de código foi ao hardware antes de ir para `master`:** ramo,
+reinstalação por DKMS, recarga do módulo, portão medido, e só então merge. O
+portão é o `capability bitmask` — `0x00002c26` do começo ao fim das quatro
+mudanças — mais perfis, atributos, rfkill, hwmon e persistência de estado.
+
+### O que fechou
+
+| | |
+|---|---|
+| parâmetros inertes | `enable_all`, `predator_v4`, `nitro_v4` e os dois campos de quirk |
+| classificação da poda | [poda-subsistemas.md](poda-subsistemas.md), camadas A/B/C/D |
+| camada A | −641 linhas, prova de firmware (GUIDs ausentes) |
+| camada B | −1077 linhas, prova de construção (quirk único) |
+| log do kernel | ~50 linhas/minuto → zero em repouso |
+| razão do modo máximo | [decisões 19](decisoes.md) |
+| erro WMI | conta fechada em campo: 4h04, zero ocorrências |
+| armadilha 25 | o bloqueio do wifi não gruda, e não é defeito nosso |
+
+### Cinco coisas que só apareceram medindo
+
+Vale mais do que a contagem de linhas, porque cada uma teria virado defeito:
+
+1. **`acer_predator_state_load/save()` parecia morta pelo nome** e está viva
+   pelo ramo `NITRO_SENSE` — é ela que preserva perfil e ventoinhas entre
+   reinícios. Nome de função não é prova (armadilha 4).
+2. **O turbo não morre pela capability apagada.** A chamada no tratador de
+   eventos só olha `key_num`; o que a mata é a guarda *dentro* de
+   `WMID_gaming_get_u64`. Guarda no sítio de chamada e guarda dentro da função
+   provam coisas diferentes.
+3. **`WMID_gaming_get_sys_info` quase foi junto**, por estar entre duas funções
+   mortas. O `hwmon` a usa. O build apontou — como apontou as três dependências
+   da camada A.
+4. **`WMID_gaming_set_fan_mode()` parece o caminho das ventoinhas e não é.**
+   Quem funciona é `acer_set_fan_speed()`, que chama `WMI_gaming_execute_u64`
+   direto, sem checar capability.
+5. **As duas estimativas de poda erraram por baixo** — A previa ~290 e saíram
+   641; B previa ~765 e saíram 1077. Numa poda a estimativa é piso, não teto.
+
+### Onde o próximo trabalho começa
+
+Nada está pela metade. As três frentes abertas são independentes:
+
+- **Camada D** — `THREEG`, `force_caps`, `ec_raw_mode`. Caso a caso, cada um com
+  argumento nos dois sentidos; a tabela está em
+  [poda-subsistemas.md](poda-subsistemas.md). É a menor das três e não urge.
+- **Gatilho por programa aberto** — pedido nesta sessão, com as seis perguntas
+  de desenho abertas logo abaixo. **Começa por brainstorm**, não por código: o
+  agente hoje não observa processos.
+- **Mainline** — o caminho que encerraria o fork. A poda ajudou: o driver está
+  menor e com uma interface só. Continua sem data.
+
+### Uma coisa a não repetir
+
+**Não rode `rfkill block` no `acer-wireless` desta máquina.** O teste da camada A
+derrubou a rede, o NetworkManager não reconectou sozinho e foi preciso religar à
+mão. A resposta que ele daria já está escrita na armadilha 25 — não precisa ser
+refeito.
 
 ---
 
