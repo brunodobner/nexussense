@@ -395,8 +395,10 @@ Nada está pela metade. As três frentes abertas são independentes:
 
 - **O `rfkill` do wireless: encerrado, sem defeito.** Chegou a ser uma frente
   aberta, com a armadilha 25 afirmando que o bloqueio se desfazia sozinho.
-  Medido de novo com rede cabeada de reserva e leitura a cada segundo dentro de
-  um comando só: **o bloqueio segura**, e o driver não registra nada. O que
+  Medido de novo, e a segunda vez em condição limpa — usuário com o wifi
+  desligado e saindo só pela cabeada, o que tirou a pessoa do caminho da
+  medição. Ciclo inteiro num comando só: `unblock` leva a 0 e segura, `block`
+  leva a 1 e segura por 10 s, e o driver não registra nada. O que
   desfazia era o usuário religando o wifi à mão entre uma medição e outra. A
   armadilha foi retratada.
 
