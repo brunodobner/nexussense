@@ -125,8 +125,13 @@ else
   echo "  FALHA $direto chamadas diretas a wmi_evaluate_method (esperado 1)"; fail=1
 fi
 
+# Piso, nao numero exato: ele cai quando codigo morto e removido, e isso
+# e legitimo. Era 14 ate a camada A da poda (2026-09-11) levar junto
+# wmab_execute e WMI_execute_u32, que chamavam o wrapper. Quem garante a
+# regra de verdade e a checagem acima, de chamada direta; este piso so
+# pega o caso de alguem esvaziar o wrapper sem mexer nela.
 n_wrap=$(grep -c 'acer_wmi_evaluate_method(' "$S" || true)
-if [ "$n_wrap" -ge 14 ]; then
+if [ "$n_wrap" -ge 12 ]; then
   echo "  OK   $n_wrap usos do wrapper serializado"
 else
   echo "  FALHA so $n_wrap usos do wrapper: alguem escapou"; fail=1

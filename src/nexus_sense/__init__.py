@@ -11,4 +11,4 @@ linhagem e o driver ao lado, em driver/, que e trabalho derivado e
 carrega os creditos correspondentes no cabecalho.
 """
 
-__version__ = "1.1.3"
+__version__ = "1.1.4"

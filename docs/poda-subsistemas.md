@@ -3,8 +3,8 @@
 O que pode ser cortado do driver, o que **não** pode, e como provar a
 diferença antes de apagar qualquer linha.
 
-**Escrito em:** 2026-09-11, sobre o fonte na v1.1.2 + a remoção dos parâmetros
-inertes. **Estado:** classificação escrita, nenhuma camada executada.
+**Escrito em:** 2026-09-11. **Estado:** camada A executada e verificada na
+máquina; camada B pendente.
 
 A decisão que governa este documento é a
 [seção 6 de decisoes.md](decisoes.md): podar a tabela de modelos é seguro,
@@ -48,6 +48,10 @@ journalctl -k -b | grep 'capability bitmask'
 ls /sys/devices/platform/acer-wmi/nitro_sense/   # 6 arquivos
 cat /sys/firmware/acpi/platform_profile_choices  # low-power quiet balanced balanced-performance
 cat /sys/class/rfkill/*/name | grep acer         # acer-wireless, acer-bluetooth
+# O critério é que as DUAS entradas existam -- nao que um bloqueio grude.
+# O firmware nao honra soft-block no wireless, e o poll o desfaz em 1 s.
+# Ver armadilha 25; e nao rode 'rfkill block' se a rede desta maquina
+# for o seu caminho ate aqui.
 ls /sys/devices/platform/acer-wmi/hwmon/         # existe
 
 # 5. as duas suítes
@@ -66,7 +70,7 @@ camadas deveria tocar — mas "não deveria" é exatamente o que se confere.
 Ordenadas por **força da prova**, da mais forte para a mais fraca. A ordem de
 execução é a mesma: o que é mais defensável sai primeiro.
 
-### Camada A — morto por fato de firmware
+### Camada A — morto por fato de firmware — **feita em 2026-09-11**
 
 **A prova:** o GUID não existe nesta máquina, então o caminho de código nunca é
 alcançado. Medido em `/sys/bus/wmi/devices/`, 2026-09-11:
@@ -84,14 +88,51 @@ alcançado. Medido em `/sys/bus/wmi/devices/`, 2026-09-11:
 Esta é a prova mais forte do documento, porque é a única que não depende de
 nenhuma leitura do nosso próprio código.
 
-| o que sai | linhas |
-|---|---|
-| `AMW0_get_u32`, `AMW0_set_u32` `:660-775` | ~115 |
-| `AMW0_find_mailled` `:776`, `AMW0_set_cap_acpi_check_device` `:820`, `AMW0_set_capabilities` `:831` | ~85 |
-| `AMW0_interface` `:915`, `AMW0_V2_interface` `:919` | ~8 |
-| `WMID_set_capabilities` `:1255` | ~50 |
-| `wmid_interface` `:1306` | ~4 |
-| a cascata de seleção de interface em `acer_wmi_init()` | ~25 |
+**O que saiu, e o que a estimativa errou.** Previa ~290 linhas; saíram **641**.
+A conta original esqueceu que os caminhos do `WMID_GUID1` — `WMI_execute_u32`,
+`WMID_get_u32`, `WMID_set_u32` — caem pelo mesmo motivo, e que sem eles o `enum`
+de tipos, o campo `.type` e os dois `switch` de despacho perdem o objeto.
+
+| o que saiu |
+|---|
+| `wmab_execute` e as structs `wmab_args`/`wmab_ret` |
+| `AMW0_get_u32`, `AMW0_set_u32`, `AMW0_find_mailled` |
+| `AMW0_set_cap_acpi_check_device`, `AMW0_set_capabilities` |
+| `AMW0_interface`, `AMW0_V2_interface` |
+| `WMI_execute_u32`, `WMID_get_u32`, `WMID_set_u32` |
+| `WMID_set_capabilities`, `wmid_interface` |
+| as três macros `ACER_AMW0_*` e os quatro `#define` de GUID |
+| o `enum` de tipos, o campo `.type` e os dois `switch` de despacho |
+| a cascata de seleção de interface em `acer_wmi_init()` |
+
+`get_u32` e `set_u32` viraram três linhas cada: as únicas capabilities que
+chegam ali são `WIRELESS`, `BLUETOOTH` e `THREEG`, e todas vão para
+`wmid_v2_*`.
+
+**Três coisas caíram junto por dependência**, como na poda da tabela:
+`max_brightness` virou constante (quem a variava era `WMID_set_capabilities`, e
+o backlight — camada B — ainda a lê); `get_wmid_devices()` consulta o
+`WMID_GUID2` direto; e com ela fora, `create_debugfs`/`remove_debugfs` ficaram
+sem chamador, levando `struct acer_debug` e o campo `.debug`. O `acer_debug`
+estava listado na camada D, a decidir: não chegou a ser decisão, caiu por
+dependência.
+
+**A guarda de carregamento mudou de critério, de propósito.** Era
+`AMW0_GUID1 presente && quirk desconhecido`, herdada de quando o driver
+carregava em máquinas de outros fabricantes que expõem esse GUID. Com o AMW0
+fora, manter a metade do GUID **afrouxaria** a defesa — virou a checagem direta
+do quirk, que num driver de um modelo só é mais estreita, não menos.
+
+**O portão, medido depois:** bitmask `0x00002c26` idêntico, os quatro perfis,
+os seis atributos, `acer-wireless` e `acer-bluetooth` presentes, `hwmon`
+presente, `Thermal states loaded/restored` no log, zero avisos, `W=1` limpo,
+333 Python e 15/0/2 shell com e sem root.
+
+**O caminho de escrita do rfkill também foi exercitado**, já que `set_u32` foi
+reescrito nesta camada: `rfkill block` devolveu 0 nos dois rádios e o bluetooth
+segurou o bloqueio através do poll. O wireless voltou sozinho — e o driver
+**anterior**, compilado num worktree e carregado por `insmod`, fez exatamente o
+mesmo. Não é regressão; é a armadilha 25.
 
 **Confirmação por outro caminho:** o log mostra
 `Function bitmap for Communication Button: 0x801` *antes* do bitmask, o que
@@ -168,7 +209,7 @@ coletiva; cada um é uma decisão própria, e nenhum precisa ser tomado agora.
 |---|---|---|
 | `THREEG` (rfkill, parâmetro, capability) | capability apagada, nenhum rfkill 3G na máquina | compartilha `acer_rfkill_init/exit` com wireless e bluetooth — errar aqui é o erro original de novo |
 | `force_caps` | parâmetro de depuração, ninguém passa | é a válvula de escape se o bitmask mudar num firmware novo |
-| `ec_raw_mode` e o `acer_debug` | acesso EC cru, sem uso neste modelo | custo de manter é quase zero |
+| `ec_raw_mode` | acesso EC cru, sem uso neste modelo | custo de manter é quase zero; o `acer_debug` que o acompanhava já caiu por dependência na camada A |
 | `cycle_gaming_thermal_profile` | ninguém o passa | muda o comportamento do botão N, que é usado |
 | os 57 `pr_info` | ~50 linhas/minuto no log do kernel | ver abaixo — é item próprio, não poda |
 
@@ -191,16 +232,21 @@ Um commit por camada, portão entre cada um. A camada A vem antes da B porque
 tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 
 ```
-[ ] Camada A   ~290 linhas   prova de firmware
+[x] Camada A    641 linhas   prova de firmware      2026-09-11
 [ ] Camada B   ~765 linhas   prova de construção
 [ ] Camada D   caso a caso, sem prazo
 ```
 
 | | linhas |
 |---|---|
-| hoje (v1.1.2 + parâmetros inertes fora) | 4734 |
-| depois de A | ~4440 |
-| depois de B | ~3680 |
+| v1.1.2 | 4734 |
+| depois de A | **4093** |
+| depois de B | ~3330 |
+
+A estimativa de A errou por baixo — previa ~290 e saíram 641 — porque contava
+só o que tinha `AMW0` no nome. A de B pode errar do mesmo jeito, e para o mesmo
+lado: o `four_zone_kb` tem estado próprio e funções de load/save que a conta não
+separou.
 
 **Compilar entre cada estágio** foi o que tornou a poda da tabela administrável:
 os três primeiros builds falharam, cada um apontando exatamente o que tinha

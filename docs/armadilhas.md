@@ -676,6 +676,66 @@ arquivo" passa, e mente.
 
 ---
 
+## 25. O bloqueio do wifi não gruda — e isso não é defeito seu
+
+> **Antes de rodar este teste:** bloquear o `acer-wireless` derruba a rede, e o
+> NetworkManager pode não reconectar sozinho — foi preciso religar à mão. Se
+> você estiver trabalhando por SSH, ou com alguém dependendo dessa máquina para
+> chegar até aqui, **não rode**. A resposta já está escrita abaixo; o teste só
+> precisa ser repetido se o comportamento mudar.
+
+**Sintoma.** Ao verificar que o `rfkill` ainda funciona depois de mexer no
+driver, o bluetooth se comporta e o wifi não:
+
+```
+rfkill block  <acer-bluetooth>   ->  soft=1, e fica em 1
+rfkill block  <acer-wireless>    ->  soft=1, e volta para 0 sozinho
+```
+
+O comando **retorna sucesso** nos dois casos. Um segundo depois, só o
+bluetooth continua bloqueado. A leitura fácil — e errada — é "eu quebrei o
+caminho de escrita do wireless".
+
+**Causa.** `acer_rfkill_update()` roda a 1 Hz, relê o estado do firmware e
+reafirma o que leu:
+
+```c
+status = get_u32(&state, ACER_CAP_WIRELESS);
+if (ACPI_SUCCESS(status))
+    rfkill_set_sw_state(wireless_rfkill, !state);
+```
+
+O firmware deste aparelho aceita a escrita, devolve sucesso, e continua
+reportando o wireless como ligado. O poll então desfaz o bloqueio. Com o
+bluetooth o firmware responde coerente e o bloqueio fica.
+
+Não há nada a corrigir no driver: ele está fazendo o que o firmware manda. O
+caminho de escrita **funciona** — o que não funciona é o firmware honrar o
+pedido para o wireless.
+
+**Como verificar que é pré-existente, e não sua.** Compile a revisão anterior
+num worktree e carregue o `.ko` direto, sem mexer no DKMS:
+
+```bash
+git worktree add /tmp/antes <revisão-anterior>
+cd /tmp/antes/driver && make
+sudo rmmod nexus_sense && sudo insmod /tmp/antes/driver/src/nexus_sense.ko
+# repita o teste; depois:
+sudo rmmod nexus_sense && sudo modprobe nexus_sense   # volta o instalado
+git worktree remove /tmp/antes --force
+```
+
+Medido assim em 2026-09-12, na camada A da poda: o driver anterior faz
+exatamente o mesmo. **Bisseccionar com `insmod` de um worktree custa dois
+minutos e transforma "acho que quebrei" em fato.**
+
+**O que isso significa para o portão da poda.** Em
+[poda-subsistemas.md](poda-subsistemas.md), o critério do `rfkill` é que as
+duas entradas **existam** e que o `block` **retorne 0** — não que o estado
+grude. Exigir que grudasse reprovaria um driver correto.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash
