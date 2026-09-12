@@ -47,7 +47,6 @@
 #include <linux/workqueue.h>
 #include <linux/mutex.h>
 #include <linux/cleanup.h>
-#include <linux/debugfs.h>
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
@@ -71,20 +70,6 @@ MODULE_DESCRIPTION("Nexus Sense - WMI driver for Acer Nitro and Predator laptops
 MODULE_LICENSE("GPL");
 
 #define DRIVER_VERSION "25.701"
-
-/*
- * Magic Number
- * Meaning is unknown - this number is required for writing to ACPI for AMW0
- * (it's also used in acerhk when directly accessing the BIOS)
- */
-#define ACER_AMW0_WRITE 0x9610
-
-/*
- * Bit masks for the AMW0 interface
- */
-#define ACER_AMW0_WIRELESS_MASK 0x35
-#define ACER_AMW0_BLUETOOTH_MASK 0x34
-#define ACER_AMW0_MAILLED_MASK 0x31
 
 /*
  * Method IDs for WMID interface
@@ -129,10 +114,6 @@ MODULE_LICENSE("GPL");
 /*
  * Acer ACPI method GUIDs
  */
-#define AMW0_GUID1 "67C3371D-95A3-4C37-BB61-DD47B491DAAB"
-#define AMW0_GUID2 "431F16ED-0C2B-444C-B267-27DEB140CF9C"
-#define WMID_GUID1 "6AF4F258-B401-42FD-BE91-3D4AC2D7C0D3"
-#define WMID_GUID2 "95764E09-FB56-4E83-B31A-37761F60994A"
 #define WMID_GUID3 "61EF69EA-865C-4BC3-A502-A0DEBA0CB531"
 #define WMID_GUID4 "7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56"
 #define WMID_GUID5 "79772EC5-04B1-4bfd-843C-61E7F77B6CC9"
@@ -360,19 +341,6 @@ struct hotkey_function_type_aa
 #define ACER_CAP_NITRO_SENSE BIT(13)
 #define ACER_CAP_NITRO_SENSE_V4 BIT(14)
 
-/*
- * Interface type flags
- */
-enum interface_flags
-{
-    ACER_AMW0,
-    ACER_AMW0_V2,
-    ACER_WMID,
-    ACER_WMID_v2,
-};
-
-static int max_brightness = 0xF;
-
 static int mailled = -1;
 static int brightness = -1;
 static int threeg = -1;
@@ -405,12 +373,6 @@ struct acer_data
     int brightness;
 };
 
-struct acer_debug
-{
-    struct dentry *root;
-    u32 wmid_devices;
-};
-
 static struct rfkill *wireless_rfkill;
 static struct rfkill *bluetooth_rfkill;
 static struct rfkill *threeg_rfkill;
@@ -419,17 +381,11 @@ static bool rfkill_inited;
 /* Each low-level interface must define at least some of the following */
 struct wmi_interface
 {
-    /* The WMI device type */
-    u32 type;
-
     /* The capabilities this interface provides */
     u32 capability;
 
     /* Private data for the current interface */
     struct acer_data data;
-
-    /* debugfs entries associated with this interface */
-    struct acer_debug debug;
 };
 
 /* The static interface pointer, points to the currently detected interface */
@@ -562,26 +518,6 @@ static bool has_cap(u32 cap)
 }
 
 /*
- * AMW0 (V1) interface
- */
-struct wmab_args
-{
-    u32 eax;
-    u32 ebx;
-    u32 ecx;
-    u32 edx;
-};
-
-struct wmab_ret
-{
-    u32 eax;
-    u32 ebx;
-    u32 ecx;
-    u32 edx;
-    u32 eex;
-};
-
-/*
  * Toda avaliacao de metodo WMI deste driver passa por aqui, serializada.
  *
  * Sem isto, leitores concorrentes colidem no firmware: ele devolve
@@ -642,406 +578,6 @@ static acpi_status acer_wmi_evaluate_method(const char *guid, u8 instance,
     mutex_unlock(&acer_wmi_lock);
 
     return status;
-}
-
-static acpi_status wmab_execute(struct wmab_args *regbuf,
-                                struct acpi_buffer *result)
-{
-    struct acpi_buffer input;
-    acpi_status status;
-    input.length = sizeof(struct wmab_args);
-    input.pointer = (u8 *)regbuf;
-
-    status = acer_wmi_evaluate_method(AMW0_GUID1, 0, 1, &input, result);
-
-    return status;
-}
-
-static acpi_status AMW0_get_u32(u32 *value, u32 cap)
-{
-    int err;
-    u8 result;
-
-    switch (cap)
-    {
-    case ACER_CAP_MAILLED:
-        switch (quirks->mailled)
-        {
-        default:
-            err = ec_read(0xA, &result);
-            if (err)
-                return AE_ERROR;
-            *value = (result >> 7) & 0x1;
-            return AE_OK;
-        }
-        break;
-    case ACER_CAP_WIRELESS:
-        switch (quirks->wireless)
-        {
-        case 1:
-            err = ec_read(0x7B, &result);
-            if (err)
-                return AE_ERROR;
-            *value = result & 0x1;
-            return AE_OK;
-        case 2:
-            err = ec_read(0x71, &result);
-            if (err)
-                return AE_ERROR;
-            *value = result & 0x1;
-            return AE_OK;
-        case 3:
-            err = ec_read(0x78, &result);
-            if (err)
-                return AE_ERROR;
-            *value = result & 0x1;
-            return AE_OK;
-        default:
-            err = ec_read(0xA, &result);
-            if (err)
-                return AE_ERROR;
-            *value = (result >> 2) & 0x1;
-            return AE_OK;
-        }
-        break;
-    case ACER_CAP_BLUETOOTH:
-        switch (quirks->bluetooth)
-        {
-        default:
-            err = ec_read(0xA, &result);
-            if (err)
-                return AE_ERROR;
-            *value = (result >> 4) & 0x1;
-            return AE_OK;
-        }
-        break;
-    case ACER_CAP_BRIGHTNESS:
-        switch (quirks->brightness)
-        {
-        default:
-            err = ec_read(0x83, &result);
-            if (err)
-                return AE_ERROR;
-            *value = result;
-            return AE_OK;
-        }
-        break;
-    default:
-        return AE_ERROR;
-    }
-    return AE_OK;
-}
-
-static acpi_status AMW0_set_u32(u32 value, u32 cap)
-{
-    struct wmab_args args;
-
-    args.eax = ACER_AMW0_WRITE;
-    args.ebx = value ? (1 << 8) : 0;
-    args.ecx = args.edx = 0;
-
-    switch (cap)
-    {
-    case ACER_CAP_MAILLED:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        args.ebx |= ACER_AMW0_MAILLED_MASK;
-        break;
-    case ACER_CAP_WIRELESS:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        args.ebx |= ACER_AMW0_WIRELESS_MASK;
-        break;
-    case ACER_CAP_BLUETOOTH:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        args.ebx |= ACER_AMW0_BLUETOOTH_MASK;
-        break;
-    case ACER_CAP_BRIGHTNESS:
-        if (value > max_brightness)
-            return AE_BAD_PARAMETER;
-        switch (quirks->brightness)
-        {
-        default:
-            return ec_write(0x83, value);
-        }
-    default:
-        return AE_ERROR;
-    }
-
-    /* Actually do the set */
-    return wmab_execute(&args, NULL);
-}
-
-static acpi_status __init AMW0_find_mailled(void)
-{
-    struct wmab_args args;
-    struct wmab_ret ret;
-    acpi_status status = AE_OK;
-    struct acpi_buffer out = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-
-    args.eax = 0x86;
-    args.ebx = args.ecx = args.edx = 0;
-
-    status = wmab_execute(&args, &out);
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = (union acpi_object *)out.pointer;
-    if (obj && obj->type == ACPI_TYPE_BUFFER &&
-        obj->buffer.length == sizeof(struct wmab_ret))
-    {
-        ret = *((struct wmab_ret *)obj->buffer.pointer);
-    }
-    else
-    {
-        kfree(out.pointer);
-        return AE_ERROR;
-    }
-
-    if (ret.eex & 0x1)
-        interface->capability |= ACER_CAP_MAILLED;
-
-    kfree(out.pointer);
-
-    return AE_OK;
-}
-
-static const struct acpi_device_id norfkill_ids[] __initconst = {
-    {"VPC2004", 0},
-    {"IBM0068", 0},
-    {"LEN0068", 0},
-    {"SNY5001", 0}, /* sony-laptop in charge */
-    {"HPQ6601", 0},
-    {"", 0},
-};
-
-static int __init AMW0_set_cap_acpi_check_device(void)
-{
-    const struct acpi_device_id *id;
-
-    for (id = norfkill_ids; id->id[0]; id++)
-        if (acpi_dev_found(id->id))
-            return true;
-
-    return false;
-}
-
-static acpi_status __init AMW0_set_capabilities(void)
-{
-    struct wmab_args args;
-    struct wmab_ret ret;
-    acpi_status status;
-    struct acpi_buffer out = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-
-    /*
-     * On laptops with this strange GUID (non Acer), normal probing doesn't
-     * work.
-     */
-    if (wmi_has_guid(AMW0_GUID2))
-    {
-        if ((quirks != &quirk_unknown) ||
-            !AMW0_set_cap_acpi_check_device())
-            interface->capability |= ACER_CAP_WIRELESS;
-        return AE_OK;
-    }
-
-    args.eax = ACER_AMW0_WRITE;
-    args.ecx = args.edx = 0;
-
-    args.ebx = 0xa2 << 8;
-    args.ebx |= ACER_AMW0_WIRELESS_MASK;
-
-    status = wmab_execute(&args, &out);
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = out.pointer;
-    if (obj && obj->type == ACPI_TYPE_BUFFER &&
-        obj->buffer.length == sizeof(struct wmab_ret))
-    {
-        ret = *((struct wmab_ret *)obj->buffer.pointer);
-    }
-    else
-    {
-        status = AE_ERROR;
-        goto out;
-    }
-
-    if (ret.eax & 0x1)
-        interface->capability |= ACER_CAP_WIRELESS;
-
-    args.ebx = 2 << 8;
-    args.ebx |= ACER_AMW0_BLUETOOTH_MASK;
-
-    /*
-     * It's ok to use existing buffer for next wmab_execute call.
-     * But we need to kfree(out.pointer) if next wmab_execute fail.
-     */
-    status = wmab_execute(&args, &out);
-    if (ACPI_FAILURE(status))
-        goto out;
-
-    obj = (union acpi_object *)out.pointer;
-    if (obj && obj->type == ACPI_TYPE_BUFFER && obj->buffer.length == sizeof(struct wmab_ret))
-    {
-        ret = *((struct wmab_ret *)obj->buffer.pointer);
-    }
-    else
-    {
-        status = AE_ERROR;
-        goto out;
-    }
-
-    if (ret.eax & 0x1)
-        interface->capability |= ACER_CAP_BLUETOOTH;
-
-    /*
-     * This appears to be safe to enable, since all Wistron based laptops
-     * appear to use the same EC register for brightness, even if they
-     * differ for wireless, etc
-     */
-    if (quirks->brightness >= 0)
-        interface->capability |= ACER_CAP_BRIGHTNESS;
-
-    status = AE_OK;
-out:
-    kfree(out.pointer);
-    return status;
-}
-
-static struct wmi_interface AMW0_interface = {
-    .type = ACER_AMW0,
-};
-
-static struct wmi_interface AMW0_V2_interface = {
-    .type = ACER_AMW0_V2,
-};
-
-/*
- * New interface (The WMID interface)
- */
-static acpi_status
-WMI_execute_u32(u32 method_id, u32 in, u32 *out)
-{
-    struct acpi_buffer input = {(acpi_size)sizeof(u32), (void *)(&in)};
-    struct acpi_buffer result = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-    u32 tmp = 0;
-    acpi_status status;
-
-    status = acer_wmi_evaluate_method(WMID_GUID1, 0, method_id, &input, &result);
-
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = (union acpi_object *)result.pointer;
-    if (obj)
-    {
-        if (obj->type == ACPI_TYPE_BUFFER &&
-            (obj->buffer.length == sizeof(u32) ||
-             obj->buffer.length == sizeof(u64)))
-        {
-            tmp = *((u32 *)obj->buffer.pointer);
-        }
-        else if (obj->type == ACPI_TYPE_INTEGER)
-        {
-            tmp = (u32)obj->integer.value;
-        }
-    }
-
-    if (out)
-        *out = tmp;
-
-    kfree(result.pointer);
-
-    return status;
-}
-
-static acpi_status WMID_get_u32(u32 *value, u32 cap)
-{
-    acpi_status status;
-    u8 tmp;
-    u32 result, method_id = 0;
-
-    switch (cap)
-    {
-    case ACER_CAP_WIRELESS:
-        method_id = ACER_WMID_GET_WIRELESS_METHODID;
-        break;
-    case ACER_CAP_BLUETOOTH:
-        method_id = ACER_WMID_GET_BLUETOOTH_METHODID;
-        break;
-    case ACER_CAP_BRIGHTNESS:
-        method_id = ACER_WMID_GET_BRIGHTNESS_METHODID;
-        break;
-    case ACER_CAP_THREEG:
-        method_id = ACER_WMID_GET_THREEG_METHODID;
-        break;
-    case ACER_CAP_MAILLED:
-        if (quirks->mailled == 1)
-        {
-            ec_read(0x9f, &tmp);
-            *value = tmp & 0x1;
-            return 0;
-        }
-        fallthrough;
-    default:
-        return AE_ERROR;
-    }
-    status = WMI_execute_u32(method_id, 0, &result);
-
-    if (ACPI_SUCCESS(status))
-        *value = (u8)result;
-
-    return status;
-}
-
-static acpi_status WMID_set_u32(u32 value, u32 cap)
-{
-    u32 method_id = 0;
-    char param;
-
-    switch (cap)
-    {
-    case ACER_CAP_BRIGHTNESS:
-        if (value > max_brightness)
-            return AE_BAD_PARAMETER;
-        method_id = ACER_WMID_SET_BRIGHTNESS_METHODID;
-        break;
-    case ACER_CAP_WIRELESS:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        method_id = ACER_WMID_SET_WIRELESS_METHODID;
-        break;
-    case ACER_CAP_BLUETOOTH:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        method_id = ACER_WMID_SET_BLUETOOTH_METHODID;
-        break;
-    case ACER_CAP_THREEG:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        method_id = ACER_WMID_SET_THREEG_METHODID;
-        break;
-    case ACER_CAP_MAILLED:
-        if (value > 1)
-            return AE_BAD_PARAMETER;
-        if (quirks->mailled == 1)
-        {
-            param = value ? 0x92 : 0x93;
-            i8042_lock_chip();
-            i8042_command(&param, 0x1059);
-            i8042_unlock_chip();
-            return 0;
-        }
-        break;
-    default:
-        return AE_ERROR;
-    }
-    return WMI_execute_u32(method_id, (u32)value, NULL);
 }
 
 static acpi_status wmid3_get_device_status(u32 *value, u16 device)
@@ -1252,64 +788,13 @@ static void __init type_aa_dmi_decode(const struct dmi_header *header, void *d)
     commun_fn_key_number = type_aa->commun_fn_key_number;
 }
 
-static acpi_status __init WMID_set_capabilities(void)
-{
-    struct acpi_buffer out = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-    acpi_status status;
-    u32 devices;
-
-    status = wmi_query_block(WMID_GUID2, 0, &out);
-    if (ACPI_FAILURE(status))
-        return status;
-
-    obj = (union acpi_object *)out.pointer;
-    if (obj)
-    {
-        if (obj->type == ACPI_TYPE_BUFFER &&
-            (obj->buffer.length == sizeof(u32) ||
-             obj->buffer.length == sizeof(u64)))
-        {
-            devices = *((u32 *)obj->buffer.pointer);
-        }
-        else if (obj->type == ACPI_TYPE_INTEGER)
-        {
-            devices = (u32)obj->integer.value;
-        }
-        else
-        {
-            kfree(out.pointer);
-            return AE_ERROR;
-        }
-    }
-    else
-    {
-        kfree(out.pointer);
-        return AE_ERROR;
-    }
-
-    pr_info("Function bitmap for Communication Device: 0x%x\n", devices);
-    if (devices & 0x07)
-        interface->capability |= ACER_CAP_WIRELESS;
-    if (devices & 0x40)
-        interface->capability |= ACER_CAP_THREEG;
-    if (devices & 0x10)
-        interface->capability |= ACER_CAP_BLUETOOTH;
-
-    if (!(devices & 0x20))
-        max_brightness = 0x9;
-
-    kfree(out.pointer);
-    return status;
-}
-
-static struct wmi_interface wmid_interface = {
-    .type = ACER_WMID,
-};
-
-static struct wmi_interface wmid_v2_interface = {
-    .type = ACER_WMID_v2,
-};
+/*
+ * A unica interface que restou. Este firmware expoe WMID_GUID3 e
+ * WMID_GUID4; AMW0_GUID1, WMID_GUID1 e WMID_GUID2 nao existem nele --
+ * medido em /sys/bus/wmi/devices/ --, e os caminhos que dependiam
+ * deles sairam na camada A da poda. Ver docs/poda-subsistemas.md.
+ */
+static struct wmi_interface wmid_v2_interface = {};
 
 /*
  * WMID ApgeAction interface
@@ -1567,82 +1052,27 @@ static int WMID_gaming_get_misc_setting(enum acer_wmi_gaming_misc_setting settin
  * Generic Device (interface-independent)
  */
 
+/*
+ * Sobrou um caminho so. As tres capabilities que chegam aqui --
+ * WIRELESS, BLUETOOTH e THREEG -- sao as unicas que o WMID v2 atende;
+ * qualquer outra e erro de chamador, nao interface faltando.
+ */
 static acpi_status get_u32(u32 *value, u32 cap)
 {
-    acpi_status status = AE_ERROR;
+    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
+        return wmid_v2_get_u32(value, cap);
 
-    switch (interface->type)
-    {
-    case ACER_AMW0:
-        status = AMW0_get_u32(value, cap);
-        break;
-    case ACER_AMW0_V2:
-        if (cap == ACER_CAP_MAILLED)
-        {
-            status = AMW0_get_u32(value, cap);
-            break;
-        }
-        fallthrough;
-    case ACER_WMID:
-        status = WMID_get_u32(value, cap);
-        break;
-    case ACER_WMID_v2:
-        if (cap & (ACER_CAP_WIRELESS |
-                   ACER_CAP_BLUETOOTH |
-                   ACER_CAP_THREEG))
-            status = wmid_v2_get_u32(value, cap);
-        else if (wmi_has_guid(WMID_GUID2))
-            status = WMID_get_u32(value, cap);
-        break;
-    }
-
-    return status;
+    return AE_ERROR;
 }
 
 static acpi_status set_u32(u32 value, u32 cap)
 {
-    acpi_status status;
+    if (!(interface->capability & cap))
+        return AE_BAD_PARAMETER;
 
-    if (interface->capability & cap)
-    {
-        switch (interface->type)
-        {
-        case ACER_AMW0:
-            return AMW0_set_u32(value, cap);
-        case ACER_AMW0_V2:
-            if (cap == ACER_CAP_MAILLED)
-                return AMW0_set_u32(value, cap);
+    if (cap & (ACER_CAP_WIRELESS | ACER_CAP_BLUETOOTH | ACER_CAP_THREEG))
+        return wmid_v2_set_u32(value, cap);
 
-            /*
-             * On some models, some WMID methods don't toggle
-             * properly. For those cases, we want to run the AMW0
-             * method afterwards to be certain we've really toggled
-             * the device state.
-             */
-            if (cap == ACER_CAP_WIRELESS ||
-                cap == ACER_CAP_BLUETOOTH)
-            {
-                status = WMID_set_u32(value, cap);
-                if (ACPI_FAILURE(status))
-                    return status;
-
-                return AMW0_set_u32(value, cap);
-            }
-            fallthrough;
-        case ACER_WMID:
-            return WMID_set_u32(value, cap);
-        case ACER_WMID_v2:
-            if (cap & (ACER_CAP_WIRELESS |
-                       ACER_CAP_BLUETOOTH |
-                       ACER_CAP_THREEG))
-                return wmid_v2_set_u32(value, cap);
-            else if (wmi_has_guid(WMID_GUID2))
-                return WMID_set_u32(value, cap);
-            fallthrough;
-        default:
-            return AE_BAD_PARAMETER;
-        }
-    }
     return AE_BAD_PARAMETER;
 }
 
@@ -1705,6 +1135,13 @@ static int update_bl_status(struct backlight_device *bd)
 
     return 0;
 }
+
+/*
+ * Era variavel: WMID_set_capabilities() o baixava para 0x9 conforme o
+ * bitmap do WMID_GUID2. Esse GUID nao existe neste firmware e a funcao
+ * saiu na camada A, entao o valor nunca muda -- e agora diz isso.
+ */
+static const int max_brightness = 0xF;
 
 static const struct backlight_ops acer_bl_ops = {
     .get_brightness = read_brightness,
@@ -2771,39 +2208,6 @@ static void acer_wmi_input_destroy(void)
 {
     wmi_remove_notify_handler(ACERWMID_EVENT_GUID);
     input_unregister_device(acer_wmi_input_dev);
-}
-
-/*
- * debugfs functions
- */
-static u32 get_wmid_devices(void)
-{
-    struct acpi_buffer out = {ACPI_ALLOCATE_BUFFER, NULL};
-    union acpi_object *obj;
-    acpi_status status;
-    u32 devices = 0;
-
-    status = wmi_query_block(WMID_GUID2, 0, &out);
-    if (ACPI_FAILURE(status))
-        return 0;
-
-    obj = (union acpi_object *)out.pointer;
-    if (obj)
-    {
-        if (obj->type == ACPI_TYPE_BUFFER &&
-            (obj->buffer.length == sizeof(u32) ||
-             obj->buffer.length == sizeof(u64)))
-        {
-            devices = *((u32 *)obj->buffer.pointer);
-        }
-        else if (obj->type == ACPI_TYPE_INTEGER)
-        {
-            devices = (u32)obj->integer.value;
-        }
-    }
-
-    kfree(out.pointer);
-    return devices;
 }
 
 static int acer_wmi_hwmon_init(void);
@@ -4380,19 +3784,6 @@ static struct platform_driver acer_platform_driver = {
 
 static struct platform_device *acer_platform_device;
 
-static void remove_debugfs(void)
-{
-    debugfs_remove_recursive(interface->debug.root);
-}
-
-static void __init create_debugfs(void)
-{
-    interface->debug.root = debugfs_create_dir("acer-wmi", NULL);
-
-    debugfs_create_u32("devices", S_IRUGO, interface->debug.root,
-                       &interface->debug.wmid_devices);
-}
-
 static const enum acer_wmi_predator_v4_sensor_id acer_wmi_temp_channel_to_sensor_id[] = {
     [0] = ACER_WMID_SENSOR_CPU_TEMPERATURE,
     [1] = ACER_WMID_SENSOR_GPU_TEMPERATURE,
@@ -4559,69 +3950,44 @@ static int __init acer_wmi_init(void)
     pr_info("Detected model type: %s\n", dmi_get_system_info(DMI_PRODUCT_NAME));
 
     /*
-     * AMW0_GUID1 nao e exclusivo da Acer: outros fabricantes o expoem, e
-     * o acer-wmi do kernel carregava em qualquer maquina que o tivesse.
-     * O upstream se defendia com uma whitelist de fabricantes.
+     * Este driver atende UM modelo. Se o DMI nao casou, quirks aponta
+     * para quirk_unknown e nao ha nada a fazer nesta maquina -- recusar
+     * aqui e mais barato e mais estreito que qualquer whitelist.
      *
-     * Aqui a defesa e mais simples e mais estreita: este driver tem UM
-     * quirk. Se o DMI nao casou, quirks aponta para quirk_unknown, e
-     * nao ha nada a fazer nesta maquina. A whitelist saiu na poda de
-     * 2026-09-11.
+     * Ate 2026-09-11 a guarda era "AMW0_GUID1 presente E quirk
+     * desconhecido", herdada de quando o driver carregava em maquinas de
+     * outros fabricantes que expoem esse GUID. Com o AMW0 fora, a
+     * condicao do GUID perdeu o objeto; mante-la sem ele afrouxaria a
+     * defesa, entao ela virou a checagem direta do quirk.
      */
-    if (wmi_has_guid(AMW0_GUID1) && quirks == &quirk_unknown)
+    if (quirks == &quirk_unknown)
     {
-        pr_debug("Unsupported machine has AMW0_GUID1, unable to load\n");
+        pr_debug("Unsupported machine, unable to load\n");
         return -ENODEV;
     }
 
     /*
-     * Detect which ACPI-WMI interface we're using.
+     * Uma interface so. WMID_GUID3 e o que este firmware expoe, e os
+     * outros tres GUIDs que a cascata testava nao existem nele.
      */
-    if (wmi_has_guid(AMW0_GUID1) && wmi_has_guid(WMID_GUID1))
-        interface = &AMW0_V2_interface;
-
-    if (!wmi_has_guid(AMW0_GUID1) && wmi_has_guid(WMID_GUID1))
-        interface = &wmid_interface;
-
-    if (wmi_has_guid(WMID_GUID3))
-        interface = &wmid_v2_interface;
-
-    if (interface)
-        dmi_walk(type_aa_dmi_decode, NULL);
-
-    if (wmi_has_guid(WMID_GUID2) && interface)
+    if (!wmi_has_guid(WMID_GUID3))
     {
-        if (!has_type_aa && ACPI_FAILURE(WMID_set_capabilities()))
-        {
-            pr_err("Unable to detect available WMID devices\n");
-            return -ENODEV;
-        }
-        /* WMID always provides brightness methods */
-        interface->capability |= ACER_CAP_BRIGHTNESS;
-    }
-    else if (!wmi_has_guid(WMID_GUID2) && interface && !has_type_aa && force_caps == -1)
-    {
-        pr_err("No WMID device detection method found\n");
+        pr_err("No or unsupported WMI interface, unable to load\n");
         return -ENODEV;
     }
 
-    if (wmi_has_guid(AMW0_GUID1) && !wmi_has_guid(WMID_GUID1))
+    interface = &wmid_v2_interface;
+
+    dmi_walk(type_aa_dmi_decode, NULL);
+
+    /*
+     * WIRELESS, BLUETOOTH e THREEG vem do descritor AA do firmware, em
+     * runtime. Sem ele e sem force_caps nao ha de onde tirar capability
+     * nenhuma, e carregar seria carregar cego.
+     */
+    if (!has_type_aa && force_caps == -1)
     {
-        interface = &AMW0_interface;
-
-        if (ACPI_FAILURE(AMW0_set_capabilities()))
-        {
-            pr_err("Unable to detect available AMW0 devices\n");
-            return -ENODEV;
-        }
-    }
-
-    if (wmi_has_guid(AMW0_GUID1))
-        AMW0_find_mailled();
-
-    if (!interface)
-    {
-        pr_err("No or unsupported WMI interface, unable to load\n");
+        pr_err("No WMID device detection method found\n");
         return -ENODEV;
     }
 
@@ -4691,12 +4057,6 @@ static int __init acer_wmi_init(void)
     if (err)
         goto error_device_add;
 
-    if (wmi_has_guid(WMID_GUID2))
-    {
-        interface->debug.wmid_devices = get_wmid_devices();
-        create_debugfs();
-    }
-
     /* Override any initial settings with values from the commandline */
     acer_commandline_init();
 
@@ -4723,7 +4083,6 @@ static void __exit acer_wmi_exit(void)
     if (acer_wmi_accel_dev)
         input_unregister_device(acer_wmi_accel_dev);
 
-    remove_debugfs();
     platform_device_unregister(acer_platform_device);
     platform_driver_unregister(&acer_platform_driver);
 
