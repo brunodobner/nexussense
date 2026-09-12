@@ -13,10 +13,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 2912 linhas (eram 5167) |
-| versão | **v1.1.8** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.1.9** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
+| suíte shell | 18 testes: 16 passam, 2 pulam, 0 falham — **com e sem root** |
 | suíte Python | 333 passaram (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang |
 
@@ -255,6 +255,8 @@ Depois da virada, o estado é este:
 /usr/bin/nexus-sense-agent              o agente
 /usr/lib/nexus-sense/nexus_sense/       o pacote Python
 /usr/lib/nexus-sense/apply-perms.sh     chamado pela regra udev
+/usr/lib/nexus-sense/verificar-dkms.sh  chamado pelo gancho do pacman
+/etc/pacman.d/hooks/90-nexus-sense-dkms-check.hook
 /usr/lib/systemd/user/nexus-sense-agent.service
 /etc/xdg/autostart/nexus-sense-autostart.desktop
 /usr/share/applications/nexus-sense.desktop

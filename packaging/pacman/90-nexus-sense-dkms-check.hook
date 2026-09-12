@@ -1,0 +1,19 @@
+# Instalado pelo Nexus Sense setup.sh
+#
+# Dispara depois que um kernel e instalado ou atualizado, e confere se o
+# nexus_sense foi construido para ele. O 90- garante que roda DEPOIS dos
+# ganchos do DKMS (70-dkms-install, 70-dkms-upgrade), que sao quem tenta
+# a reconstrucao -- o pacman ordena por nome de arquivo.
+#
+# Ver /usr/lib/nexus-sense/verificar-dkms.sh para o porque.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/modules/*/vmlinuz
+
+[Action]
+Description = Nexus Sense: conferindo o modulo para os kernels instalados...
+When = PostTransaction
+Exec = /usr/lib/nexus-sense/verificar-dkms.sh

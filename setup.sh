@@ -20,7 +20,7 @@
 # A versao e a do PROJETO, nao a do modulo. O driver tem a sua propria em
 # DRIVER_VERSION (nexus_sense.c), que alimenta o pacote DKMS -- sao dois
 # espacos de numeracao de proposito. Ver docs/decisoes.md secao 7.
-SCRIPT_VERSION="1.1.8"
+SCRIPT_VERSION="1.1.9"
 # Caminhos de instalacoes ANTIGAS, mantidos so para a limpeza encontra-los.
 # Nada deste projeto e instalado neles: o pacote vai para
 # /usr/lib/nexus-sense e os lancadores para /usr/bin. Ver docs/decisoes.md
@@ -278,6 +278,11 @@ comprehensive_cleanup() {
   # Stop loading the module at boot and let acer_wmi come back.
   rm -f /etc/modules-load.d/nexus_sense.conf
   rm -f /etc/modprobe.d/blacklist-acer_wmi.conf
+  # O gancho do pacman sai junto com o blacklist: sem um, o outro perde
+  # o objeto -- ele avisa sobre uma falha que so importa porque o
+  # acer_wmi esta desligado.
+  rm -f /etc/pacman.d/hooks/90-nexus-sense-dkms-check.hook
+  rm -f /usr/lib/nexus-sense/verificar-dkms.sh
   rmmod nexus_sense 2>/dev/null || true
   modprobe acer_wmi 2>/dev/null || true
   depmod -a
@@ -710,6 +715,35 @@ install_module_service() {
   echo -e "${GREEN}nexus_sense.service installed (saves state at shutdown).${NC}"
 }
 
+# Gancho do pacman que avisa quando o DKMS nao conseguiu construir o
+# modulo para um kernel novo.
+#
+# Por que existe: com 'blacklist acer_wmi' no lugar, uma falha de
+# construcao deixa o boot seguinte sem driver Acer nenhum -- e a
+# mensagem do DKMS se perde no meio de uma atualizacao grande.
+#
+# So no Arch e derivados: ganchos de pacman nao existem em outras
+# distros, e o instalador atende varias. Onde nao houver pacman, a
+# checagem simplesmente nao e instalada.
+install_dkms_check_hook() {
+  local script="${RAIZ}/packaging/scripts/verificar-dkms.sh"
+  local hook="${RAIZ}/packaging/pacman/90-nexus-sense-dkms-check.hook"
+
+  if ! command -v pacman &> /dev/null; then
+    return 0
+  fi
+  if [ ! -f "$script" ] || [ ! -f "$hook" ]; then
+    echo -e "${YELLOW}Aviso de DKMS nao instalado: arquivos ausentes no repositorio.${NC}"
+    return 0
+  fi
+
+  install -d /usr/lib/nexus-sense
+  install -m 755 "$script" /usr/lib/nexus-sense/verificar-dkms.sh
+  install -d /etc/pacman.d/hooks
+  install -m 644 "$hook" /etc/pacman.d/hooks/90-nexus-sense-dkms-check.hook
+  echo -e "${GREEN}Aviso de DKMS instalado (gancho do pacman).${NC}"
+}
+
 install_drivers() {
   echo -e "${YELLOW}Installing Nexus Sense drivers...${NC}"
 
@@ -827,6 +861,7 @@ install_drivers() {
 
   configure_acer_wmi_conflict
   install_module_service
+  install_dkms_check_hook
 
   echo -e "${GREEN}Nexus Sense installed via DKMS for ${built} kernel(s).${NC}"
   [ "$pulados" -gt 0 ] && echo -e "${BLUE}${pulados} kernel(s) com headers mas sem imagem bootavel foram pulados.${NC}"

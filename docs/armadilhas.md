@@ -756,6 +756,72 @@ Três coisas teriam evitado tudo:
 
 ---
 
+## 26. A blacklist que protege o driver é a mesma que deixa a máquina sem nenhum
+
+**Sintoma.** Depois de uma atualização de kernel, a máquina boota sem controle
+térmico nenhum: `/sys/firmware/acpi/platform_profile` some, o `nitro_sense` não
+aparece em `/sys/devices/platform/acer-wmi/`, e a GUI não abre nada de útil.
+
+**Causa.** Os dois drivers disputam os mesmos GUIDs WMI, então o instalador
+desliga o nativo à força:
+
+```
+/etc/modprobe.d/blacklist-acer_wmi.conf   ->   blacklist acer_wmi
+```
+
+Isso funciona enquanto o `nexus_sense` existir para o kernel que bootou. O DKMS
+reconstrói sozinho a cada kernel novo — há ganchos do pacman para isso
+(`70-dkms-install.hook`, `70-dkms-upgrade.hook`) — e quase sempre dá certo.
+
+**Quando não dá**, a soma é ruim:
+
+```
+acer_wmi desligado à força  +  nexus_sense não construído  =  driver nenhum
+```
+
+E o pior é o silêncio: a mensagem de erro do DKMS sai no meio da saída de uma
+atualização grande e passa despercebida. Você descobre no boot seguinte.
+
+**Socorro imediato**, para voltar a ter uma máquina usável antes de consertar:
+
+```bash
+sudo rm /etc/modprobe.d/blacklist-acer_wmi.conf
+# reinicia
+```
+
+O `acer_wmi` oficial assume e devolve perfis térmicos, leitura de ventoinha,
+rfkill e backlight. Você perde **só** os cinco atributos de controle —
+`fan_speed`, `battery_limiter`, `usb_charging`, `backlight_timeout`,
+`battery_calibration` — até reconstruir com calma. Ver decisões 6b para o que o
+nativo faz e o que não faz.
+
+**Conserto de verdade:**
+
+```bash
+dkms install -m nexus_sense -v <versão> -k <kernel>
+# se falhar, a saída diz o que quebrou; depois:
+sudo ./setup.sh    # reinstala o blacklist junto
+```
+
+**A prevenção que existe hoje.** Desde 2026-09-12 o instalador põe um gancho
+próprio, que roda **depois** dos do DKMS e confere se o módulo existe para todo
+kernel bootável:
+
+```
+/etc/pacman.d/hooks/90-nexus-sense-dkms-check.hook
+/usr/lib/nexus-sense/verificar-dkms.sh
+```
+
+Se faltar, ele imprime um bloco em vermelho no fim da atualização, com o kernel
+que falhou e a linha do socorro. **Ele não impede a quebra** — nada impede, um
+módulo fora da árvore depende de APIs que mudam. Ele troca "descobri no boot
+seguinte" por "o pacman me avisou".
+
+O gancho é instalado só onde existe `pacman`, e sai junto com a blacklist na
+desinstalação: sem um, o outro perde o objeto.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash
