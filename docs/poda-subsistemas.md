@@ -286,6 +286,9 @@ tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 | depois de A | 4093 |
 | depois de B | **3016** |
 
+*(O fonte tem 3022 linhas hoje: o commit do log do kernel, posterior a esta
+camada, acrescentou um comentário de seis linhas explicando o botão N.)*
+
 **As duas estimativas erraram por baixo, e para o mesmo lado:** A previa ~290 e
 saíram 641; B previa ~765 e saíram 1077. Em ambos os casos a conta somou o
 tamanho dos blocos e esqueceu o que eles arrastam — structs, campos, includes,
