@@ -1619,7 +1619,7 @@ static void acer_wmi_notify(union acpi_object *obj, void *context)
     {
     case WMID_HOTKEY_EVENT:
         device_state = return_value.device_state;
-        pr_info("device state: 0x%x\n", device_state);
+        pr_debug("device state: 0x%x\n", device_state);
 
         key = sparse_keymap_entry_from_scancode(acer_wmi_input_dev,
                                                 return_value.key_num);
@@ -1655,7 +1655,13 @@ static void acer_wmi_notify(union acpi_object *obj, void *context)
         acer_gsensor_event();
         break;
     case WMID_GAMING_TURBO_KEY_EVENT:
-        pr_info("pressed turbo button - %d\n", return_value.key_num);
+        /*
+         * O nome do evento e do upstream, onde ele servia a tecla de
+         * turbo dos Predator. Neste modelo quem dispara e o botao N, e
+         * key_num 0x5 percorre os perfis termicos -- nao existe turbo
+         * de firmware aqui (bitmap 0x53, sem o bit). Ver decisoes 19.
+         */
+        pr_debug("botao N: key_num %d\n", return_value.key_num);
         if (return_value.key_num == 0x5 && has_cap(ACER_CAP_PLATFORM_PROFILE))
             acer_thermal_profile_change();
         break;
@@ -1918,7 +1924,7 @@ static ssize_t predator_usb_charging_show(struct device *dev, struct device_attr
         pr_err("Error getting usb charging status: %s\n", acpi_format_exception(status));
         return -ENODEV;
     }
-    pr_info("usb charging get status: %llu\n", result);
+    pr_debug("usb charging get status: %llu\n", result);
     return sprintf(buf, "%d\n", acer_usb_charging_decode(result));
 }
 
@@ -1931,7 +1937,7 @@ static ssize_t predator_usb_charging_store(struct device *dev, struct device_att
         return -EINVAL;
     if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
         return -EINVAL;
-    pr_info("usb charging set value: %d\n", val);
+    pr_debug("usb charging set value: %d\n", val);
 
     /* Ler-modificar-escrever: a sequencia inteira e uma operacao so. */
     guard(mutex)(&acer_op_lock);
@@ -1977,7 +1983,7 @@ static ssize_t predator_usb_charging_store(struct device *dev, struct device_att
         pr_err("Error setting usb charging status: %s\n", acpi_format_exception(status));
         return -ENODEV;
     }
-    pr_info("usb charging set status: %llu\n", result);
+    pr_debug("usb charging set status: %llu\n", result);
     return count;
 }
 
@@ -2015,7 +2021,7 @@ struct set_battery_health_control_output
 
 static acpi_status battery_health_query(int mode, int *enabled)
 {
-    pr_info("battery health query: %d\n", mode);
+    pr_debug("battery health query: %d\n", mode);
     acpi_status status;
     union acpi_object *obj;
     struct get_battery_health_control_status_input params = {
@@ -2069,7 +2075,7 @@ failed:
 static acpi_status battery_health_set(u8 function, u8 function_status)
 {
 
-    pr_info("battery_health_set: %d | %d\n", function, function_status);
+    pr_debug("battery_health_set: %d | %d\n", function, function_status);
 
     acpi_status status;
     union acpi_object *obj;
@@ -2560,7 +2566,7 @@ static ssize_t predator_backlight_timeout_show(struct device *dev, struct device
         pr_err("Error getting backlight_timeout status: %s\n", acpi_format_exception(status));
         return -ENODEV;
     }
-    pr_info("backlight_timeout get status: %llu\n", result);
+    pr_debug("backlight_timeout get status: %llu\n", result);
     /*
      * Mesma classe do usb_charging: a resposta tem campos, nao e um enum.
      * Os bits 40-47 carregam o tempo limite (0x1E = 30s); zero = desligado.
@@ -2589,14 +2595,14 @@ static ssize_t predator_backlight_timeout_store(struct device *dev, struct devic
         return -EINVAL;
     if ((val != 0) && (val != 1))
         return -EINVAL;
-    pr_info("bascklight_timeout set value: %d\n", val);
+    pr_debug("backlight_timeout set value: %d\n", val);
     status = WMI_apgeaction_execute_u64(ACER_WMID_SET_FUNCTION, val == 1 ? 0x1E0000088402 : 0x88402, &result);
     if (ACPI_FAILURE(status))
     {
         pr_err("Error setting backlight_timeout status: %s\n", acpi_format_exception(status));
         return -ENODEV;
     }
-    pr_info("backlight_timeout set status: %llu\n", result);
+    pr_debug("backlight_timeout set status: %llu\n", result);
     return count;
 }
 

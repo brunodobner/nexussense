@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-12 (camadas A e B da poda: -1718 linhas)
+**Última atualização:** 2026-09-12 (poda A+B: -1718 linhas; log do kernel silenciado)
 
 ---
 
@@ -13,7 +13,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 3016 linhas (eram 5167) |
-| versão | **v1.1.5** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.1.6** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 17 testes: 15 passam, 2 pulam, 0 falham — **com e sem root** |
@@ -44,7 +44,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Executar a camada A              v1.1.4: -641 linhas, bitmask identico
 [x] Executar a camada B              v1.1.5: -1077 linhas, bitmask identico
 [ ] Camada D, caso a caso            THREEG, force_caps, ec_raw_mode; sem prazo
-[ ] Enxugar o log do kernel          ~50 linhas/minuto; pr_debug no lugar de pr_info
+[x] Enxugar o log do kernel          v1.1.6: ~50 linhas/minuto -> zero em repouso
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [ ] Levar os atributos ao mainline   o caminho que encerraria o fork; sem data
 ```
@@ -486,12 +486,22 @@ Coisas verdadeiras hoje que alguém pode estranhar:
   `acer_predator_state_load/save()` **não** morreu com isso — o caminho
   `nitro_sense` puro também a chama, e é ela que preserva perfil térmico e
   curvas de ventoinha entre reinícios (armadilha 4).
-- **O driver despeja ~50 linhas por minuto no log do kernel** —
-  `battery health query`, `usb charging get status` e `backlight_timeout get
-  status`, uma trinca a cada sondagem do agente. São ~72 mil linhas por dia, de
-  57 `pr_info` no fonte. O excesso de `pr_info` já estava listado como
-  obstáculo ao mainline; virou item próprio do roteiro, separado da poda,
-  porque a decisão ali é sobre nível de log e não sobre remover código.
+- **O log do kernel foi silenciado em 2026-09-12.** Em repouso o driver agora
+  não escreve nada; antes eram ~50 linhas por minuto. A medição que guiou o
+  corte: num boot de 8h44, **978 das ~1100 linhas** eram as três leituras de
+  sondagem (`battery health query`, `backlight_timeout get status`,
+  `usb charging get status`). Elas e as demais mensagens por-operação viraram
+  `pr_debug`; tudo que é por-carga do módulo ficou em `pr_info`, inclusive o
+  bitmask, que é o instrumento do portão da poda.
+
+  **Para trazê-las de volta quando precisar** (`CONFIG_DYNAMIC_DEBUG=y` nesta
+  máquina, conferido):
+
+  ```bash
+  sudo mount -t debugfs none /sys/kernel/debug 2>/dev/null
+  echo 'module nexus_sense +p' | sudo tee /sys/kernel/debug/dynamic_debug/control
+  # para desligar de novo: troque +p por -p
+  ```
 - **Os testes em shell são quase todos `grep` sobre o fonte.** É adequado ao
   propósito declarado — detectar o que a próxima release do upstream
   sobrescreveu — mas não verifica comportamento. A suíte Python nova, em
