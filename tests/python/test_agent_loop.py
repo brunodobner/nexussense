@@ -454,3 +454,50 @@ def test_tirar_o_cabo_durante_a_espera_guarda_para_a_proxima(tmp_path):
     conecta(raiz)
     agente.tick()
     assert perfil(raiz) == "balanced-performance"
+
+
+def test_na_bateria_o_ppd_volta_uma_vez_e_depois_e_do_usuario(tmp_path):
+    """Modo maximo suspenso nao e PPD preso. O agente devolvia o perfil
+    de CPU guardado a CADA passada na bateria, entao escolher 'economia'
+    no applet de energia durava 2 segundos."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True, maximum_saved_ppd="balanced"), caminho)
+    runtime = MaximumRuntime()
+    agente = Agent(Sysfs(raiz), caminho)
+    agente._maximum = MaximumMode(agente._maximum.controls, caminho, runtime, gpu=runtime)
+
+    agente.tick()
+    assert runtime.ppd == "performance"
+
+    desconecta(raiz)
+    agente.tick()
+    assert runtime.ppd == "balanced"  # devolvido na troca
+
+    runtime.ppd = "power-saver"  # o usuario escolhe economizar
+    for _ in range(3):
+        agente.tick()
+    assert runtime.ppd == "power-saver"
+
+    conecta(raiz)
+    agente.tick()
+    assert runtime.ppd == "performance"  # o modo volta com a tomada
+
+
+def test_devolucao_do_ppd_que_falhou_e_tentada_de_novo(tmp_path):
+    """'Uma vez' quer dizer uma vez que deu certo. Se o barramento
+    falhou na troca, a CPU ficaria em performance na bateria."""
+    raiz = build_tree(tmp_path / "raiz", on_ac=False, profile="balanced")
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True, maximum_saved_ppd="balanced"), caminho)
+    bom = MaximumRuntime()
+    bom.ppd = "performance"
+    agente = Agent(Sysfs(raiz), caminho)
+    agente._maximum = MaximumMode(agente._maximum.controls, caminho, PpdQuebrado(), gpu=bom)
+
+    agente.tick()
+    assert bom.ppd == "performance"
+
+    agente._maximum.runner = bom
+    agente.tick()
+    assert bom.ppd == "balanced"

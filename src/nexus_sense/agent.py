@@ -125,6 +125,9 @@ class Agent:
         # Devolucao que o firmware recusou: (perfil a devolver, perfil que
         # estava em vigor na recusa). Ver _retoma_pendente.
         self._pendente = None
+        # True depois que a suspensao do modo maximo na bateria foi
+        # aplicada com sucesso. Ver _reconcile_maximum.
+        self._suspensao_feita = False
         # As falhas do modo maximo ja avisadas. Repetir a mesma linha a
         # cada passada enterra no journal o momento em que ela comecou.
         self._falhas_maximo = ()
@@ -283,6 +286,7 @@ class Agent:
         if not config.maximum_mode:
             self._release_gpu()
             self._falhas_maximo = ()
+            self._suspensao_feita = False
             return
         active = on_ac is True
         falhas = []
@@ -292,7 +296,17 @@ class Agent:
                     self._maximum.controls.set_profile(THERMAL_PROFILE)
             except WriteError as error:
                 falhas.append(str(error))
-        errors = self._maximum.enforce_runtime(config, active=active)
+        if active or not self._suspensao_feita:
+            errors = self._maximum.enforce_runtime(config, active=active)
+        else:
+            # Suspenso nao e preso. O perfil de CPU guardado foi
+            # devolvido quando o cabo saiu; dali em diante ele e de quem
+            # usa a maquina. Reimpor a cada passada desfazia em 2 s
+            # qualquer escolha feita no applet de energia.
+            errors = ()
+        # So conta como feita se deu certo: uma devolucao que falhou
+        # deixaria a CPU em performance na bateria.
+        self._suspensao_feita = not active and not errors
         falhas.extend(errors)
         self._avisa_falhas(falhas)
         confirmed = active and not errors
