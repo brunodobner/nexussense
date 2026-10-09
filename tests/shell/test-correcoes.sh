@@ -172,4 +172,22 @@ else
   echo "  OK   o wrapper WMI nao toma o lock de operacao (sem ciclo)"
 fi
 
+# --- a mensagem de erro nao dereferencia o objeto que acabou de testar
+#
+# "if (!obj || ...) pr_err(..., obj->buffer.length)": quando o firmware
+# nao devolve objeto, e a propria mensagem que derruba o kernel. Nao ha
+# como provocar no hardware -- o firmware sempre responde --, entao a
+# prova e o padrao nao existir. Plano de melhorias 2026-10, tarefa 2.1.
+for fn in battery_health_query battery_health_set; do
+  corpo=$(awk "/^static acpi_status ${fn}\(/,/^}/" "$S")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q '!obj ||'; then
+    echo "  FALHA ${fn} testa !obj e usa obj na mesma condicao"; fail=1
+  elif printf '%s' "$corpo" | grep -q 'if (!obj)'; then
+    echo "  OK   ${fn} trata obj nulo antes de ler dele"
+  else
+    echo "  FALHA ${fn} nao testa obj nulo"; fail=1
+  fi
+done
+
 exit $fail

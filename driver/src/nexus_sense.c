@@ -1939,7 +1939,14 @@ static acpi_status battery_health_query(int mode, int *enabled)
 
     obj = output.pointer;
 
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 8)
+    /* Nulo sozinho e antes: a mensagem seguinte le obj->buffer.length, e
+     * com o teste de nulo na mesma condicao era ela que dereferenciava. */
+    if (!obj)
+    {
+        pr_err("No output getting battery health status\n");
+        return AE_ERROR;
+    }
+    if (obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 8)
     {
         pr_err("Unexpected output format getting battery health status, buffer "
                "length:%d\n",
@@ -1995,9 +2002,15 @@ static acpi_status battery_health_set(u8 function, u8 function_status)
 
     obj = output.pointer;
 
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 4)
+    /* Mesmo defeito de battery_health_query: nulo sozinho e antes. */
+    if (!obj)
     {
-        pr_err("Unexpected output format getting battery health status, buffer "
+        pr_err("No output setting battery health status\n");
+        return AE_ERROR;
+    }
+    if (obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 4)
+    {
+        pr_err("Unexpected output format setting battery health status, buffer "
                "length:%d\n",
                obj->buffer.length);
         goto failed;
