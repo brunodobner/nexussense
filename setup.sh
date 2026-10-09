@@ -219,7 +219,7 @@ comprehensive_cleanup() {
   #
   # Roda antes do novo ser registrado, e por isso vive na limpeza.
   for antigo in linuwu_sense; do
-    if dkms status 2> /dev/null | grep -q "^${antigo}"; then
+    if dkms status 2> /dev/null | grep "^${antigo}" > /dev/null; then
       echo "Removendo o pacote DKMS antigo: ${antigo}"
       for v in $(dkms status 2> /dev/null | grep "^${antigo}" \
                  | sed -E "s|^${antigo}[/,] *([^,]+).*|\\1|" | sort -u); do
@@ -879,7 +879,10 @@ install_drivers() {
 
   # 'dkms status' exits 0 even for a package that does not exist, so the
   # test must look for the word, not the exit code.
-  if ! dkms status "nexus_sense/${ver}" | grep -q installed; then
+  #
+  # Sem "grep -q": ele sai no primeiro acerto, e o dkms -- que imprime uma
+  # linha por kernel -- escreve a seguinte num cano fechado e reclama.
+  if ! dkms status "nexus_sense/${ver}" | grep installed > /dev/null; then
     echo -e "${RED}Error: DKMS reports no installed module for nexus_sense/${ver}${NC}"
     pause
     return 1
