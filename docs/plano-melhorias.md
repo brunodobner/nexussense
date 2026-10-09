@@ -100,8 +100,8 @@ Ramo `melhorias/1-python`. Sem root até o ensaio final.
 | 1.7 | PPD na bateria — **medir antes**, ver decisão D2 | `maximum.py` (`enforce_runtime`), `agent.py` | depende da medição |
 | 1.8 | sondagem a 1 Hz em tudo (decisão D3): `INTERVALO_PADRAO` de 100 para 1000 ms, a animação do gráfico acompanha o intervalo, e o histórico passa de 12 s para 2 min; sai `acer_temps` (lida e nunca usada) e o BDF da GPU é guardado em vez de varrer o PCI a cada passada | `gui/poller.py`, `gui/graph.py`, `telemetry.py`, `tray/controller.py` | o intervalo padrão é 1000; duas passadas varrem o PCI uma vez; `Sample` não tem `acer_temps` |
 | 1.9 | uma atualização por ação, e o cursor de ventoinha escreve com atraso de 150 ms em vez de a cada passo | `gui/app.py` (`_connect_state`), `gui/window.py`, `pages/performance.py` | um `changed` produz um `read_state`; arrasto de 20 passos produz 1 escrita |
-| 1.10 | as checagens do Diagnóstico rodam ao mostrar a página, não a cada repintura | `pages/diagnostics.py` | repintura com a página visível não chama `subprocess` |
-| 1.11 | limpeza: ramos de `nvidia-settings` mortos no `Runtime` de teste | `tests/python/test_maximum.py` | — |
+| ~~1.10~~ | **retirada.** As checagens do Diagnóstico rodariam só ao mostrar a página | `pages/diagnostics.py` | perdeu o objeto: depois da 1.1 a checagem inteira custa 12 ms, medido, contra os ~270 ms que a justificavam |
+| 1.11 | limpeza: ramos de `nvidia-settings` mortos nos três `Runtime` de teste | `test_maximum.py`, `test_agent_loop.py`, `test_leituras_wmi.py` | feita dentro da 1.1, que reescreveu os três |
 
 Notas de execução:
 
@@ -113,9 +113,11 @@ Notas de execução:
 - **1.6 vem da medição de 2026-09-30**, que não chegou ao `armadilhas.md`: o
   firmware responde "fora da tomada" enquanto a bateria está abaixo de 40%,
   mesmo com `ACAD/online=1`. Esta tarefa escreve a armadilha 27.
-- **1.7 é só leitura de código até agora.** O teste: tirar o cabo,
-  `powerprofilesctl set power-saver`, esperar 3 s, `powerprofilesctl get`. Se
-  voltar sozinho ao valor guardado, o defeito existe.
+- **1.7 foi demonstrada por teste, não por cabo.** Com o barramento simulado,
+  o agente antigo desfazia a escolha em uma passada — a lógica é determinística
+  e não precisava do hardware para aparecer. A conferência com o cabo na mão
+  fica no portão: tirar o cabo, `powerprofilesctl set power-saver`, esperar 5 s,
+  `powerprofilesctl get`. Tem de continuar `power-saver`.
 
 ### Portão da etapa 1
 
