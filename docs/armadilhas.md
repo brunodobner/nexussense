@@ -655,9 +655,40 @@ E há **dois escritores de verdade, em processos separados**: o agente
 (`nexus-sense-agent`) e a janela/bandeja (`nexus-sense`). Eu havia afirmado que
 só existia um; era suposição, e estava errada.
 
-Daí `acer_op_lock`, tomado só por essas duas funções, com
+Daí `acer_op_lock`, com
 **ordem obrigatória: `acer_op_lock` antes de `acer_wmi_lock`**. Não há ciclo
 possível porque o caminho interno nunca toma o de cima.
+
+Em 2026-10-09 entraram mais duas, que não leem antes de escrever mas são
+**sequências** de várias chamadas: `predator_fan_speed_store` (até três
+chamadas WMI, mais o par de variáveis que `fan_speed` devolve) e o botão N.
+
+### E uma terceira trava, que não é nossa
+
+O núcleo do `platform_profile` tem a dele, e ela entra na ordem sem aparecer no
+nosso arquivo:
+
+```
+escrita em .../profile    nucleo toma a dele  ->  profile_set  ->  acer_op_lock
+platform_profile_notify   toma a mesma trava do nucleo
+```
+
+O botão N troca o perfil e depois avisa o núcleo. Avisar **com `acer_op_lock`
+ainda na mão** inverte a ordem: um aperto do botão no instante de uma escrita em
+`profile`, e os dois ficam esperando um pelo outro para sempre — sem sinal que
+os tire de lá, porque `mutex_lock` não é interrompível.
+
+Por isso o botão ficou em duas funções: `acer_thermal_profile_cycle` faz a
+sequência sob a trava e a solta ao retornar; `acer_thermal_profile_change` só
+então chama `platform_profile_notify`.
+
+E a trava da ventoinha entra no `_store`, não em `acer_set_fan_speed`: o
+`profile_set` chama esta última com `acer_op_lock` já tomado, e mutex do kernel
+não é reentrante.
+
+**A regra, que é a da seção seguinte vista de outro lado:** antes de segurar uma
+trava sua ao chamar uma função do kernel, pergunte qual trava *ela* toma — e se
+o mesmo subsistema já chama você de volta com essa trava na mão.
 
 ### Por que NÃO travar todos os pontos de entrada
 
