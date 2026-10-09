@@ -341,20 +341,25 @@ unbind_button_from_nexus() {
   home=$(getent passwd "$user" | cut -d: -f6)
   [ -f "${home}/.config/kglobalshortcutsrc" ] || return 0
 
-  current=$(runuser -u "$user" -- env HOME="$home" kreadconfig6 --file kglobalshortcutsrc \
-              --group services --group nexus-sense.desktop --key _launch 2>/dev/null)
+  # damx.desktop e a entrada da linhagem antiga: o instalador do DAMX
+  # escrevia o mesmo valor sob o nome dele, e a renomeacao nao a levou.
+  # Ficava viva, apontando para um .desktop que nao existe mais.
+  local entrada key
+  for entrada in nexus-sense.desktop damx.desktop; do
+    current=$(runuser -u "$user" -- env HOME="$home" kreadconfig6 --file kglobalshortcutsrc \
+                --group services --group "$entrada" --key _launch 2>/dev/null)
 
-  if [ "$current" = "Launch (1)" ]; then
-    # kwriteconfig6 has no --delete-group: keys go one at a time.
-    echo "Removing the Nexus Sense button shortcut..."
-    local key
-    for key in _launch _k_friendly_name; do
-      runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
-        --group services --group nexus-sense.desktop --key "$key" --delete &> /dev/null || true
-    done
-  elif [ -n "$current" ]; then
-    echo "Keeping the custom Nexus Sense shortcut '${current}' (not set by this installer)."
-  fi
+    if [ "$current" = "Launch (1)" ]; then
+      # kwriteconfig6 has no --delete-group: keys go one at a time.
+      echo "Removing the button shortcut of ${entrada}..."
+      for key in _launch _k_friendly_name; do
+        runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
+          --group services --group "$entrada" --key "$key" --delete &> /dev/null || true
+      done
+    elif [ -n "$current" ]; then
+      echo "Keeping the custom shortcut '${current}' of ${entrada} (not set by this installer)."
+    fi
+  done
 }
 
 # Function to clean up nitro key detection service
@@ -1024,9 +1029,12 @@ EOL
 # Ate 2026-10-09 a desinstalacao so tirava o autostart: lancadores, pacote,
 # regra udev, unit do agente, .desktop, icones e grupo ficavam para tras.
 #
-# Duas coisas ficam de proposito:
-#   ~/.config/nexus-sense   o grupo e do instalador, a configuracao e
-#                           escolha do usuario. Ver plano-melhorias.md, D5.
+# Tres coisas ficam de proposito:
+#   ~/.config/nexus-sense   e escolha do usuario, nao do instalador. Ver
+#                           plano-melhorias.md, D5.
+#   o grupo nexus_sense     esta limpeza roda tambem antes de reinstalar, e
+#                           recriar o grupo troca o gid. Quem o remove e a
+#                           desinstalacao: cleanup_nexus_group.
 #   agente e bandeja em execucao   sao processos da sessao do usuario e
 #                           saem com ela. O disable abaixo so impede que
 #                           voltem na proxima.
@@ -1052,8 +1060,17 @@ cleanup_nexus_sense() {
   rm -f /usr/bin/nexus-sense
   rm -f /usr/bin/nexus-sense-agent
   rm -rf /usr/lib/nexus-sense
+}
 
-  # --- o grupo
+# Remove o grupo nexus_sense. So a desinstalacao chama (decisao D5); a
+# limpeza que antecede uma reinstalacao, nao.
+#
+# "groupadd -r" nao devolve o gid que o groupdel liberou: pega o menor gid
+# de sistema em uso e desce um. Medido em 2026-10-09: 950 -> 948, com o 950
+# livre. Apagar e recriar o grupo a cada reinstalacao trocava o gid toda
+# vez, e a sessao aberta -- agente e bandeja inclusive -- ficava sem
+# escrita nos atributos ate relogar. Ver armadilha 29.
+cleanup_nexus_group() {
   if getent group nexus_sense > /dev/null; then
     groupdel nexus_sense \
       || echo -e "${YELLOW}Nao foi possivel remover o grupo nexus_sense.${NC}"
@@ -1168,6 +1185,7 @@ perform_install() {
 uninstall() {
   echo -e "${YELLOW}Uninstalling Nexus Sense...${NC}"
   comprehensive_cleanup
+  cleanup_nexus_group
   echo -e "${GREEN}Nexus Sense uninstalled successfully!${NC}"
   pause
   return 0

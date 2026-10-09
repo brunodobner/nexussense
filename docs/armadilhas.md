@@ -492,6 +492,16 @@ não: faltava `/etc/xdg/autostart/nexus-sense-autostart.desktop`.
 Restaure as integrações da aplicação antes de pedir reboot e confira seu
 funcionamento depois. Não repita uma desinstalação ampla para esse reparo.
 
+**O hwdb se confere pelo banco, não pelo arquivo.** No portão de 2026-10-09 o
+roteiro cobrou `/etc/udev/hwdb.d/61-damx-nitro-key.hwdb` e reprovou uma
+instalação certa: o systemd 262 passou a trazer o ANV15-52 no
+`60-keyboard.hwdb` dele, o instalador viu `f5=prog1` no banco recompilado e,
+com razão, não gravou arquivo nenhum. A pergunta que vale é a da armadilha 23:
+
+```bash
+systemd-hwdb query "evdev:atkbd:$(cat /sys/class/dmi/id/modalias)" | grep f5
+```
+
 ---
 
 ## 22. Versão de kernel cravada em teste apodrece sozinha no Arch
@@ -618,8 +628,13 @@ udevadm info /dev/input/event3 | grep KEYBOARD_KEY_f5
 Foi assim que apareceu: `prog1` virou `presentation` na hora.
 
 E confirme que o `hwdb` do systemd não cobre o seu modelo antes de supor que
-cobre — aqui o único padrão ANV é `pnNitro*ANV*15-51`, e esta máquina é
-`ANV15-52`. É a armadilha 1 outra vez, no mesmo dígito.
+cobre — em setembro o único padrão ANV era `pnNitro*ANV*15-51`, e esta máquina
+é `ANV15-52`. É a armadilha 1 outra vez, no mesmo dígito.
+
+**Isso mudou, e o contrário também se confere:** o systemd 262 trouxe
+`pnNitro*ANV*15-52`. Desde então o arquivo deste instalador não é mais gravado
+nesta máquina — a função acha `prog1` no banco e retorna cedo, que é o desenho.
+Cobertura de upstream é fato com data; pergunte ao banco, não a este parágrafo.
 
 **A regra geral:** num script que limpa e depois reinstala, toda checagem de
 "já está feito" tem de ler disco ou banco recompilado, nunca cache de
@@ -975,6 +990,48 @@ ponha `LC_ALL=C` só na frente do comando que precisa dele, não em `export`.
 **O que isto tem em comum com a 19b.** No portão de 2026-10-09 foram 58
 conferências certas e 2 reprovadas, e as duas eram do roteiro. Antes de mexer no
 código por causa de uma reprovação, reproduza a falha fora do roteiro.
+
+---
+
+## 29. `groupadd -r` não devolve o gid que o `groupdel` liberou
+
+**Sintoma.** Depois de reinstalar, agente e bandeja param de conseguir escrever
+nas ventoinhas e no perfil, e só voltam depois de relogar. O usuário está no
+grupo, as permissões estão `664 root:nexus_sense`, e mesmo assim `EACCES`.
+
+**Causa.** A limpeza apagava o grupo e a instalação o recriava. Para grupo de
+sistema o `groupadd -r` não procura o primeiro gid livre: pega o **menor gid de
+sistema em uso e desce um**. Medido no portão de 2026-10-09:
+
+```
+antes     nexus_sense = 950      (949 = seat, 951 = docker)
+depois    nexus_sense = 948      com o 950 livre
+```
+
+Os processos da sessão guardam o gid **numérico** de quando ela abriu. O sysfs
+passa a dizer 948, a sessão continua com 950, e o nome igual não ajuda em nada:
+
+```
+$ id | tr ',' '\n' | grep 95
+950                    <- sem nome: o grupo que tinha esse numero nao existe mais
+$ ls -ln .../backlight_timeout
+-rw-rw-r-- 1 0 948
+```
+
+Eu tinha previsto 950 — "951 a 999 estão ocupados, o primeiro livre é o 950" —
+e errei por supor o algoritmo. Era uma linha de `getent` para conferir.
+
+**Como ficou.** O grupo só sai na desinstalação de verdade
+(`cleanup_nexus_group`, chamada por `uninstall`). A limpeza que antecede uma
+reinstalação o deixa onde está, com o usuário dentro e o gid igual.
+
+**Regra.** Num instalador, o que identifica um grupo ou usuário para o kernel é
+o número. Apagar e recriar "o mesmo" grupo não é operação neutra — meça o gid
+antes e depois:
+
+```bash
+getent group nexus_sense | cut -d: -f3
+```
 
 ---
 

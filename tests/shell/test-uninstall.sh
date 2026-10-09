@@ -135,7 +135,6 @@ remove 'o enable global do agente'  '--global disable nexus-sense-agent\.service
 remove 'o lancador do menu'         '/nexus-sense\.desktop"?$'
 remove 'o autostart da bandeja'     '/nexus-sense-autostart\.desktop$'
 remove 'os icones'                  "hicolor .*-name 'nexus-sense\*' -delete"
-remove 'o grupo'                    'groupdel nexus_sense'
 
 # O disable le a secao [Install] da unit: tem de rodar com ela no disco.
 ordem=$(printf '%s' "$app" | grep -v '^\s*#' \
@@ -152,6 +151,35 @@ if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' | grep -qF '.config/nexus-
   echo "  FALHA a desinstalacao apaga ~/.config/nexus-sense"; fail=1
 else
   echo "  OK   ~/.config/nexus-sense fica"
+fi
+
+# O grupo sai na desinstalacao (decisao D5) -- e SO nela. A limpeza tambem
+# roda antes de toda reinstalacao, e "groupadd -r" nao devolve o gid que o
+# groupdel liberou: pega o menor gid de sistema em uso e desce um. Medido no
+# portao de 2026-10-09: 950 -> 948, com o 950 livre. Apagar o grupo na
+# limpeza trocava o gid a cada reinstalacao, e a sessao aberta -- agente e
+# bandeja inclusive -- ficava sem escrita nos atributos ate relogar.
+desinstala=$(sed -n '/^uninstall() {/,/^}/p' "$S")
+grupo=$(sed -n '/^cleanup_nexus_group() {/,/^}/p' "$S")
+
+if printf '%s' "$grupo" | grep -v '^\s*#' | grep -q 'groupdel nexus_sense'; then
+  echo "  OK   cleanup_nexus_group remove o grupo"
+else
+  echo "  FALHA cleanup_nexus_group ausente ou nao remove o grupo"; fail=1
+fi
+
+ordem=$(printf '%s' "$desinstala" | grep -nE '^\s*(comprehensive_cleanup|cleanup_nexus_group)\s*$' \
+        | sed 's/^[0-9]*:\s*//' | tr '\n' ' ')
+if [ "$ordem" = "comprehensive_cleanup cleanup_nexus_group " ]; then
+  echo "  OK   a desinstalacao remove o grupo, depois da limpeza"
+else
+  echo "  FALHA uninstall nao remove o grupo: '$ordem'"; fail=1
+fi
+
+if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' | grep -qE 'groupdel nexus_sense|cleanup_nexus_group'; then
+  echo "  FALHA a limpeza da reinstalacao apaga o grupo: o gid muda a cada uma"; fail=1
+else
+  echo "  OK   a reinstalacao preserva o grupo e o gid"
 fi
 
 # O grupo do nome antigo sobreviveu a renomeacao do driver.

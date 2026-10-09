@@ -104,6 +104,15 @@ else
   echo "  FALHA remove qualquer valor"; fail=1
 fi
 
+# O atalho da linhagem antiga. O instalador do DAMX escrevia o mesmo valor
+# sob [services][damx.desktop], e a renomeacao nao o levou: achado no portao
+# de 2026-10-09, vivo e apontando para um .desktop que nao existe mais.
+if printf '%s' "$unbind" | grep -v '^\s*#' | grep -q 'damx\.desktop'; then
+  echo "  OK   remove tambem o atalho morto do damx.desktop"
+else
+  echo "  FALHA deixa o atalho do damx.desktop para tras"; fail=1
+fi
+
 # kwriteconfig6 nao tem --delete-group; apagar grupo inteiro e no-op.
 # Ignorar comentarios: o proprio codigo explica por que nao usa a opcao,
 # e a explicacao contem a string procurada.
