@@ -190,4 +190,29 @@ for fn in battery_health_query battery_health_set; do
   fi
 done
 
+# --- os _store de um byte nao truncam a entrada
+#
+# sscanf("%hhd") num u8 corta em silencio: "256" vira 0 e "257" vira 1, e
+# os dois passam pela validacao que vem depois. Escrever 256 em
+# battery_limiter desligava o limite de carga. kstrtou8 recusa o que nao
+# cabe, e tambem lixo depois do numero. Tarefa 2.2; a conferencia na
+# maquina -- escrever 256 e ver EINVAL com o valor intacto -- so se faz
+# com o modulo consertado carregado, porque antes dele a escrita vale.
+if grep -q 'sscanf(buf, "%hhd"' "$S"; then
+  echo "  FALHA ainda ha sscanf(\"%hhd\") num _store"; fail=1
+else
+  echo "  OK   nenhum sscanf(\"%hhd\") sobre u8"
+fi
+
+for fn in predator_usb_charging_store predator_battery_limit_store \
+          preadtor_battery_calibration_store predator_backlight_timeout_store; do
+  corpo=$(awk "/^static ssize_t ${fn}\(/,/^}/" "$S")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'kstrtou8(buf, 10, &val)'; then
+    echo "  OK   ${fn} le o byte com kstrtou8"
+  else
+    echo "  FALHA ${fn} nao usa kstrtou8"; fail=1
+  fi
+done
+
 exit $fail

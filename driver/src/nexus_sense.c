@@ -1831,7 +1831,13 @@ static ssize_t predator_usb_charging_store(struct device *dev, struct device_att
     acpi_status status;
     u64 result, current_raw, payload;
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    /*
+     * kstrtou8 e nao sscanf("%hhd"): este cortava em silencio o que nao
+     * cabe num byte -- "256" virava 0, "257" virava 1 -- e o valor cortado
+     * passava pela validacao abaixo. Vale para os quatro _store de um
+     * byte deste arquivo.
+     */
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
     if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
         return -EINVAL;
@@ -2051,7 +2057,7 @@ static ssize_t predator_battery_limit_store(struct device *dev,
                                             const char *buf, size_t count)
 {
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
 
     if ((val != 0) && (val != 1))
@@ -2082,7 +2088,7 @@ static ssize_t preadtor_battery_calibration_store(struct device *dev,
                                                   const char *buf, size_t count)
 {
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
 
     if ((val != 0) && (val != 1))
@@ -2502,7 +2508,7 @@ static ssize_t predator_backlight_timeout_store(struct device *dev, struct devic
     acpi_status status;
     u64 result;
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
     if ((val != 0) && (val != 1))
         return -EINVAL;
