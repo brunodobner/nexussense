@@ -54,8 +54,11 @@ class TrayController(QObject):
     def stop(self):
         self._timer.stop()
 
-    def refresh(self):
+    def refresh(self, *, notify=True):
         """Relê o barato e repinta o icone e o tooltip.
+
+        `notify=False` e para quando quem pediu foi a propria janela: ela
+        ja se releu, e avisa-la de volta a faria reler de novo.
 
         `read_basic` e nao `read_state`: o icone quer perfil e escolhas,
         o tooltip quer rotacao e temperatura. Nenhum dos dois olha os
@@ -82,7 +85,8 @@ class TrayController(QObject):
             tooltip_text(self.state, amostra, maximum=self.maximum_active)
         )
 
-        self.state_refreshed.emit()
+        if notify:
+            self.state_refreshed.emit()
 
     def _painel_escuro(self):
         """O painel costuma seguir o tema da sessao, e e o que temos.

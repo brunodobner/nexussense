@@ -5,7 +5,7 @@ fonte de energia e o estado de cada botao, nunca a quantidade nem a
 ordem. Ver spec secao 6.2 e decisao D7.
 """
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -30,6 +30,11 @@ COLUNAS = 5
 # assumindo o controle -- automatico, e nao parada. Ver spec secao 2.5.
 FAN_AUTO = (0, 0)
 FAN_MAX = (100, 100)
+
+# Quanto o cursor espera parado antes de escrever. Escrever a cada passo
+# do arrasto mandava dezenas de comandos ao firmware por segundo, cada um
+# seguido de uma releitura completa do aparelho.
+ATRASO_CURSOR_MS = 150
 
 FAN_ROTULOS = (
     ("auto", "Automático", "o driver decide pela temperatura"),
@@ -139,6 +144,10 @@ class PerformancePage(QWidget):
         self.buttons = {}
         # Guarda contra o setValue que emite valueChanged ao repintar.
         self._aplicando = False
+        self._fan_timer = QTimer(self)
+        self._fan_timer.setSingleShot(True)
+        self._fan_timer.setInterval(ATRASO_CURSOR_MS)
+        self._fan_timer.timeout.connect(self._escreve_cursores)
         self._grade = QGridLayout()
         self.message_label = QLabel("")
         self.message_label.setWordWrap(True)
@@ -213,6 +222,9 @@ class PerformancePage(QWidget):
         ventoinha e o usuario, movendo o cursor.
         """
         self.message_label.setText("")
+        # Quem acabou de arrastar e clicou em Automatico quer automatico:
+        # a escrita pendente do cursor nao pode chegar depois e desfazer.
+        self._fan_timer.stop()
         self._marca_modo(modo)
         if modo == "manual":
             self.fan_manual_box.setVisible(True)
@@ -224,8 +236,17 @@ class PerformancePage(QWidget):
         self.fan_values[chave].setText(f"{valor}%")
         if self._aplicando:
             return
+        # Reinicia a cada passo: so dispara quando o cursor para.
+        self._fan_timer.start()
+
+    def _escreve_cursores(self):
         self._escreve_ventoinha(
             self.fan_sliders["cpu"].value(), self.fan_sliders["gpu"].value()
+        )
+
+    def _cursor_em_uso(self):
+        return self._fan_timer.isActive() or any(
+            cursor.isSliderDown() for cursor in self.fan_sliders.values()
         )
 
     def _escreve_ventoinha(self, cpu, gpu):
@@ -250,6 +271,12 @@ class PerformancePage(QWidget):
             botao.setToolTip("")
         for cursor in self.fan_sliders.values():
             cursor.setEnabled(gravavel)
+
+        # Com o cursor na mao ou uma escrita pendente, a tela nao o puxa de
+        # volta: o estado lido ainda e o antigo, e a escrita que vem a
+        # seguir levaria o valor antigo junto.
+        if self._cursor_em_uso():
+            return
 
         modo = fan_mode(state.fan_speed)
         self._marca_modo(modo)

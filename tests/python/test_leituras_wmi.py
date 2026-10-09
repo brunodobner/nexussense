@@ -165,3 +165,18 @@ def test_o_agente_le_o_perfil_uma_vez_por_passada(tmp_path):
     agente.tick()
 
     assert espiao.lidos.count("profile") == 1
+
+
+def test_uma_acao_na_janela_rele_o_aparelho_uma_vez(qtbot, fake_root):
+    """O `changed` de uma pagina chegava a janela por dois caminhos: o
+    direto, e de volta pela bandeja. Eram dois `read_state` por clique --
+    27 ms cada, medido, com cinco chamadas WMI dentro."""
+    espiao, _controlador, janela = _monta_par(qtbot, fake_root)
+    janela.show()
+    qtbot.waitExposed(janela)
+    pagina = janela.pages[0][2]
+
+    espiao.lidos.clear()
+    pagina.changed.emit()
+
+    assert espiao.lidos.count("fan_speed") == 1
