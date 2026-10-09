@@ -1,9 +1,9 @@
 #!/bin/sh
 # Aplica grupo e permissao nos seis atributos graveis do Nexus Sense.
 #
-# Chamado pela regra udev 60-nexus-sense.rules. Roda cedo, quando o
-# dispositivo aparece; um atributo que ainda nao exista e simplesmente
-# pulado, e a regra dispara de novo no 'change' seguinte.
+# Chamado pela regra udev 60-nexus-sense.rules. No 'add' roda cedo, antes
+# de o probe criar os atributos: o que ainda nao existe e simplesmente
+# pulado, e a regra dispara de novo no 'bind', quando o probe termina.
 #
 # Silencioso de proposito: udev nao e lugar de imprimir.
 set -u

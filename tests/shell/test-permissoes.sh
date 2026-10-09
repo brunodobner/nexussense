@@ -12,6 +12,35 @@ GRUPO=nexus_sense
 
 falhas=0
 
+# ─── a regra, lida do repositorio ───────────────────────────────────
+# Vem antes de qualquer pulo: nao depende de driver carregado nem de grupo,
+# e uma falha aqui nao pode sair como "pulou".
+REGRA="$(cd "$(dirname "$0")/../.." && pwd)/packaging/udev/60-nexus-sense.rules"
+[ -e "$REGRA" ] || { echo "ERRO: alvo ausente: $REGRA"; exit 3; }
+
+# O 'add' do dispositivo sai ANTES do probe, que e quem cria os atributos:
+# a regra corria contra a criacao deles e ganhava por margem. O 'bind' e
+# emitido depois que o probe termina, com tudo no lugar.
+if grep 'SUBSYSTEM=="platform"' "$REGRA" | grep -qE '^ACTION=="([a-z]+\|)*bind(\|[a-z]+)*"'; then
+    echo "  OK   a regra do dispositivo dispara em bind"
+else
+    echo "FALHA: a regra do acer-wmi nao dispara em bind"
+    exit 1
+fi
+
+if udevadm verify --help > /dev/null 2>&1; then
+    if udevadm verify "$REGRA" > /dev/null 2>&1; then
+        echo "  OK   udevadm verify aceita a regra"
+    else
+        echo "FALHA: udevadm verify recusou a regra"
+        udevadm verify "$REGRA" 2>&1 | sed 's/^/       /'
+        exit 1
+    fi
+else
+    echo "  --   udevadm verify ausente"
+fi
+
+# ─── o estado da maquina ────────────────────────────────────────────
 # Sem driver carregado nao ha o que testar.
 [ -d "$BASE" ] || { echo "PULOU: acer-wmi ausente"; exit 2; }
 

@@ -9,8 +9,15 @@
 #
 # udev nao altera permissao de atributo sysfs por ATTR{}; e preciso RUN.
 # O caminho vem de $sys/$devpath para nao supor a montagem em /sys.
+#
+# 'bind' e o evento que vale para o dispositivo. O kernel emite 'add' ao
+# registrar o acer-wmi e so DEPOIS roda o probe, que e quem cria os
+# atributos de nitro_sense: o script corria contra a criacao deles e
+# ganhava por margem. 'bind' sai quando o probe termina, com tudo no lugar.
+# 'add' e 'change' ficam -- o script pula o que ainda nao existe, e e por
+# 'change' que o instalador aplica a regra sem recarregar o modulo.
 
-ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
+ACTION=="add|change|bind", SUBSYSTEM=="platform", KERNEL=="acer-wmi", \
   RUN+="/usr/lib/nexus-sense/apply-perms.sh"
 
 ACTION=="add|change", SUBSYSTEM=="platform-profile", KERNEL=="platform-profile-*", \
