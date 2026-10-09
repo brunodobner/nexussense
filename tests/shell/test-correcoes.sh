@@ -215,4 +215,53 @@ for fn in predator_usb_charging_store predator_battery_limit_store \
   fi
 done
 
+# --- ventoinha e botao N tambem sao operacoes inteiras
+#
+# Ajustar ventoinha sao ate tres chamadas WMI mais o par de variaveis que
+# fan_speed devolve; o botao N le o perfil e a fonte, escreve e talvez
+# baixe as ventoinhas. Sem acer_op_lock, dois escritores se intercalam no
+# meio. Tarefa 2.3.
+corpo_de() {
+  # "&& !/;$/" pula o prototipo: sem isso a faixa abriria na declaracao
+  # antecipada e so fecharia no fim de OUTRA funcao.
+  awk "/^static [a-z_ ]*${1}\(/ && !/;\$/,/^}/" "$S"
+}
+
+for fn in predator_fan_speed_store acer_thermal_profile_cycle; do
+  if corpo_de "$fn" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+    echo "  OK   ${fn} roda sob o acer_op_lock"
+  else
+    echo "  FALHA ${fn} nao toma o acer_op_lock"; fail=1
+  fi
+done
+
+# A trava entra no _store, nao em acer_set_fan_speed: o profile_set chama
+# esta com a trava ja tomada, e mutex do kernel nao e reentrante.
+corpo=$(corpo_de 'acer_set_fan_speed')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_set_fan_speed"; exit 3; }
+if printf '%s' "$corpo" | grep -q 'acer_op_lock'; then
+  echo "  FALHA acer_set_fan_speed toma acer_op_lock: trava sozinha no profile_set"; fail=1
+else
+  echo "  OK   acer_set_fan_speed nao toma a trava que o chamador ja tem"
+fi
+
+# A ordem com a trava do nucleo do platform_profile. O nucleo toma a dele
+# e chama profile_set, que toma a nossa. platform_profile_notify toma a
+# dele tambem -- entao quem avisa nao pode estar com a nossa na mao.
+corpo=$(corpo_de 'acer_thermal_profile_change')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_thermal_profile_change"; exit 3; }
+if ! printf '%s' "$corpo" | grep -q 'platform_profile_notify'; then
+  echo "  FALHA acer_thermal_profile_change nao avisa o nucleo da troca"; fail=1
+elif printf '%s' "$corpo" | grep -q '(&acer_op_lock)'; then
+  echo "  FALHA platform_profile_notify e acer_op_lock na mesma funcao: ordem invertida"; fail=1
+else
+  echo "  OK   o aviso ao nucleo sai fora do acer_op_lock"
+fi
+
+if corpo_de 'acer_thermal_profile_cycle' | grep -q 'platform_profile_notify('; then
+  echo "  FALHA acer_thermal_profile_cycle avisa o nucleo com a trava tomada"; fail=1
+else
+  echo "  OK   a parte travada do botao N nao chama o nucleo"
+fi
+
 exit $fail
