@@ -120,6 +120,9 @@ class Agent:
         self._saved_memoria = None
         self._maximum = MaximumMode(Controls(sysfs), config_path, gpu=PowerMizer())
         self._gpu_confirmed = False
+        # As falhas do modo maximo ja avisadas. Repetir a mesma linha a
+        # cada passada enterra no journal o momento em que ela comecou.
+        self._falhas_maximo = ()
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -207,23 +210,34 @@ class Agent:
         """
         if not config.maximum_mode:
             self._release_gpu()
+            self._falhas_maximo = ()
             return
         active = on_ac is True
+        falhas = []
         if active:
             try:
                 if perfil_atual != THERMAL_PROFILE:
                     self._maximum.controls.set_profile(THERMAL_PROFILE)
             except WriteError as error:
-                self.log.warning("não foi possível manter desempenho máximo: %s", error)
+                falhas.append(str(error))
         errors = self._maximum.enforce_runtime(config, active=active)
-        for error in errors:
-            self.log.warning("não foi possível manter desempenho máximo: %s", error)
+        falhas.extend(errors)
+        self._avisa_falhas(falhas)
         confirmed = active and not errors
         if confirmed and not self._gpu_confirmed:
             self.log.info("GPUPowerMizerMode=1 confirmado no cliente NVML persistente")
         if not active and self._gpu_confirmed:
             self.log.info("pedido PowerMizer liberado na bateria")
         self._gpu_confirmed = confirmed
+
+    def _avisa_falhas(self, falhas):
+        """Uma linha quando a falha aparece, outra quando todas somem."""
+        for falha in falhas:
+            if falha not in self._falhas_maximo:
+                self.log.warning("não foi possível manter desempenho máximo: %s", falha)
+        if self._falhas_maximo and not falhas:
+            self.log.info("desempenho máximo: as falhas anteriores cessaram")
+        self._falhas_maximo = tuple(falhas)
 
     def _release_gpu(self):
         try:

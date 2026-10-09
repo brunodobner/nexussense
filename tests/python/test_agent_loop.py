@@ -257,3 +257,39 @@ def test_desativar_modo_libera_cliente_que_o_agente_mantinha(tmp_path):
     save(Config(maximum_mode=False), caminho)
     agent.tick()
     assert runtime.powermizer == "0"
+
+
+class PpdQuebrado(MaximumRuntime):
+    """O barramento responde erro a tudo, como com o ppd parado."""
+
+    def __call__(self, args, **_kwargs):
+        return subprocess.CompletedProcess(args, 1, "", "sem serviço")
+
+
+def _avisos(caplog):
+    return [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_falha_persistente_do_modo_maximo_avisa_uma_vez(tmp_path, caplog):
+    """Com o ppd fora do ar a mesma falha se repetia a cada passada: uma
+    linha a cada 2 s, 43 200 por dia. O que interessa no journal e a
+    falha aparecer, mudar ou sumir -- nao que ela continua igual."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True, maximum_saved_ppd="balanced"), caminho)
+    agente = Agent(Sysfs(raiz), caminho)
+    quebrado = PpdQuebrado()
+    agente._maximum = MaximumMode(agente._maximum.controls, caminho, quebrado, gpu=quebrado)
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(10):
+            agente.tick()
+        assert len(_avisos(caplog)) == 1
+
+        agente._maximum.runner = MaximumRuntime()
+        agente.tick()
+        assert "cessaram" in caplog.text
+
+        agente._maximum.runner = quebrado
+        agente.tick()
+        assert len(_avisos(caplog)) == 2
