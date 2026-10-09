@@ -66,3 +66,71 @@ def test_tipo_errado_cai_para_o_padrao(tmp_path):
 def test_o_caminho_padrao_fica_sob_config(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert default_path() == tmp_path / "nexus-sense/config.toml"
+
+
+def test_quem_le_durante_a_gravacao_nunca_ve_arquivo_pela_metade(tmp_path):
+    """Dois processos mexem neste arquivo: a janela grava a intencao e o
+    agente rele a cada passada. Abrir com 'wb' trunca antes de escrever, e
+    quem lesse nesse intervalo recebia os PADROES -- com o modo maximo
+    desligado e a troca automatica religada -- sem erro nenhum.
+
+    Medido em 2026-10-09 neste mesmo formato de teste: 57% das leituras
+    voltavam erradas.
+    """
+    import threading
+    import time
+
+    alvo = tmp_path / "config.toml"
+    real = Config(
+        auto_switch=False,
+        battery_profile="low-power",
+        maximum_mode=True,
+        maximum_saved_profile="balanced-performance",
+        maximum_saved_ppd="balanced",
+    )
+    save(real, alvo)
+
+    parar = threading.Event()
+
+    def escritor():
+        while not parar.is_set():
+            save(real, alvo)
+
+    fio = threading.Thread(target=escritor)
+    fio.start()
+    try:
+        erradas = leituras = 0
+        fim = time.monotonic() + 0.5
+        while time.monotonic() < fim:
+            leituras += 1
+            if load(alvo) != real:
+                erradas += 1
+    finally:
+        parar.set()
+        fio.join()
+
+    assert leituras > 100
+    assert erradas == 0
+
+
+def test_a_gravacao_nao_deixa_temporario_para_tras(tmp_path):
+    alvo = tmp_path / "nexus-sense/config.toml"
+    save(Config(maximum_mode=True), alvo)
+    save(Config(maximum_mode=False), alvo)
+    assert [p.name for p in alvo.parent.iterdir()] == ["config.toml"]
+
+
+def test_gravar_por_um_link_preserva_o_link(tmp_path):
+    """Quem guarda a configuracao num repositorio de dotfiles tem um link
+    aqui. Trocar o arquivo no lugar nao pode substituir o link por uma
+    copia."""
+    verdadeiro = tmp_path / "dotfiles/config.toml"
+    verdadeiro.parent.mkdir()
+    save(Config(), verdadeiro)
+    link = tmp_path / "config.toml"
+    link.symlink_to(verdadeiro)
+
+    save(Config(battery_profile="low-power"), link)
+
+    assert link.is_symlink()
+    assert load(verdadeiro).battery_profile == "low-power"
