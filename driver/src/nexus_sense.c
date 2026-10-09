@@ -2018,14 +2018,19 @@ static acpi_status battery_health_set(u8 function, u8 function_status)
 
     ret = *((struct set_battery_health_control_output *)obj->buffer.pointer);
 
-    /* Os quatro bytes crus: e a amostra que faltava para julgar a
-     * condicao abaixo. Ver docs/armadilhas.md, 3b. */
+    /* Os quatro bytes crus, para quem precisar ver o que o firmware
+     * responde. Ver docs/armadilhas.md, 3b. */
     pr_debug("battery_health_set: raw return %*ph\n",
              (int)obj->buffer.length, obj->buffer.pointer);
 
-    if (ret.uReturn != 0 && ret.uReservedOut != 0)
+    /*
+     * So uReturn decide. A versao anterior exigia tambem o byte reservado
+     * diferente de zero, e uma recusa com ele zerado passava por sucesso.
+     * Medido nesta maquina: toda escrita que vale devolve 00 00 00 00.
+     */
+    if (ret.uReturn != 0)
     {
-        pr_err("Failed to set battery health status\n");
+        pr_err("Failed to set battery health status: 0x%02x\n", ret.uReturn);
         goto failed;
     }
 

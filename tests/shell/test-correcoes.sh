@@ -366,4 +366,20 @@ for fn in acer_predator_state_restore acer_predator_state_update; do
   fi
 done
 
+# --- a escrita da bateria reconhece a recusa do firmware
+#
+# A condicao so via falha quando uReturn E o byte reservado eram
+# diferentes de zero: uma recusa com o reservado em zero passava por
+# sucesso, e a interface mostrava como feito o que o firmware negou.
+# Medido em 2026-10-09: quatro escritas que valeram, todas com retorno
+# 00 00 00 00. O byte reservado nao decide nada.
+corpo=$(corpo_de 'battery_health_set')
+if printf '%s' "$corpo" | grep -q 'uReturn != 0 && ret.uReservedOut != 0'; then
+  echo "  FALHA battery_health_set so ve recusa se o byte reservado ajudar"; fail=1
+elif printf '%s' "$corpo" | grep -q 'if (ret.uReturn != 0)'; then
+  echo "  OK   battery_health_set trata uReturn diferente de zero como recusa"
+else
+  echo "  FALHA battery_health_set nao confere o retorno do firmware"; fail=1
+fi
+
 exit $fail
