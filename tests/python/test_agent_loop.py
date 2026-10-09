@@ -2,6 +2,7 @@ import logging
 import os
 
 import pytest
+import json
 import subprocess
 
 from nexus_sense.agent import Agent
@@ -44,15 +45,11 @@ class MaximumRuntime:
         self.powermizer = "0"
 
     def __call__(self, args, **_kwargs):
-        if args == ["powerprofilesctl", "get"]:
-            return subprocess.CompletedProcess(args, 0, self.ppd + "\n", "")
-        if args[:2] == ["powerprofilesctl", "set"]:
-            self.ppd = args[2]
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if "-q" in args:
-            return subprocess.CompletedProcess(args, 0, self.powermizer + "\n", "")
-        if "-a" in args:
-            self.powermizer = args[-1].rsplit("=", 1)[1]
+        if args[:1] == ["busctl"] and "get-property" in args:
+            resposta = json.dumps({"type": "s", "data": self.ppd})
+            return subprocess.CompletedProcess(args, 0, resposta, "")
+        if args[:1] == ["busctl"] and "set-property" in args:
+            self.ppd = args[-1]
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(args)
 

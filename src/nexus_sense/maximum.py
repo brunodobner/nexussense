@@ -3,6 +3,7 @@
 import dataclasses
 import subprocess
 
+from . import ppd
 from .config import default_path, load, save
 from .device import WriteError
 from .powermizer import PowerMizerError
@@ -11,22 +12,8 @@ THERMAL_PROFILE = "balanced-performance"
 PPD_PROFILE = "performance"
 
 
-def _run(args, runner=subprocess.run):
-    try:
-        return runner(args, capture_output=True, text=True, timeout=2)
-    except (OSError, subprocess.SubprocessError):
-        return None
-
-
-def ppd_profile(runner=subprocess.run):
-    result = _run(["powerprofilesctl", "get"], runner)
-    if result is None or result.returncode != 0:
-        return None
-    return (result.stdout or "").strip() or None
-
-
 def _set(args, description, runner):
-    result = _run(args, runner)
+    result = ppd.run(args, runner)
     if result is None or result.returncode != 0:
         detail = (result.stderr or "").strip() if result is not None else "indisponível"
         return f"{description}: {detail or 'comando recusado'}"
@@ -65,7 +52,7 @@ class MaximumMode:
                 current,
                 maximum_mode=True,
                 maximum_saved_profile=state.profile,
-                maximum_saved_ppd=ppd_profile(self.runner),
+                maximum_saved_ppd=ppd.active_profile(self.runner),
                 maximum_saved_powermizer=None,
             )
 
@@ -99,9 +86,9 @@ class MaximumMode:
         errors = []
         wanted_ppd = PPD_PROFILE if active else config.maximum_saved_ppd
 
-        if wanted_ppd and ppd_profile(self.runner) != wanted_ppd:
+        if wanted_ppd and ppd.active_profile(self.runner) != wanted_ppd:
             error = _set(
-                ["powerprofilesctl", "set", wanted_ppd],
+                ppd.set_argv(wanted_ppd),
                 "não foi possível ajustar a CPU",
                 self.runner,
             )

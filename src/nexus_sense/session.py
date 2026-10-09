@@ -7,6 +7,8 @@ subprocess por conta propria.
 
 import subprocess
 
+from . import ppd
+
 AGENT_UNIT = "nexus-sense-agent.service"
 
 
@@ -84,31 +86,15 @@ def ppd_state(runner=subprocess.run):
     numa versao futura ele passar a se ligar, esta verificacao acusa.
     Ver spec secao 2.11.
     """
-    def chama(*argumentos):
-        return runner(
-            ["powerprofilesctl", *argumentos],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-
-    try:
-        listagem = chama("list")
-    except (OSError, subprocess.SubprocessError):
+    # Pelo barramento, como o agente: ver ppd.py. Servico que nao
+    # responde conta como ausente -- nao ha o que disputar com quem nao
+    # esta rodando.
+    plataformas = ppd.platform_drivers(runner)
+    if plataformas is None:
         return PpdState(present=False, profile=None, drives_platform=False)
-
-    plataformas = []
-    for linha in (listagem.stdout or "").splitlines():
-        if "PlatformDriver:" in linha:
-            plataformas.append(linha.split(":", 1)[1].strip())
-
-    try:
-        perfil = (chama("get").stdout or "").strip() or None
-    except (OSError, subprocess.SubprocessError):
-        perfil = None
 
     return PpdState(
         present=True,
-        profile=perfil,
+        profile=ppd.active_profile(runner),
         drives_platform=any(p and p != "placeholder" for p in plataformas),
     )

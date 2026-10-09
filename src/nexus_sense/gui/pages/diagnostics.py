@@ -71,7 +71,7 @@ def run_checks(state, *, agent, ppd, in_group):
     )
 
     if not ppd.present:
-        linha = Check("power-profiles-daemon", True, "não instalado")
+        linha = Check("power-profiles-daemon", True, "não instalado, ou fora do ar")
     elif ppd.drives_platform:
         linha = Check(
             "power-profiles-daemon",

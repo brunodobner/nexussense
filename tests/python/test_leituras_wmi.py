@@ -11,6 +11,7 @@ sao stat e nao acionam o `show()` do driver -- por isso continuam de
 graca e nao aparecem aqui.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -49,7 +50,7 @@ class SysfsEspiao(Sysfs):
 
 
 class RuntimeFalso:
-    """powerprofilesctl e nvidia-settings de mentira, sem tocar na maquina."""
+    """O ppd e a GPU de mentira, sem tocar na maquina."""
 
     def __init__(self):
         self.ppd = "balanced"
@@ -62,15 +63,11 @@ class RuntimeFalso:
         self.powermizer = "0"
 
     def __call__(self, args, **_kwargs):
-        if args == ["powerprofilesctl", "get"]:
-            return subprocess.CompletedProcess(args, 0, self.ppd + "\n", "")
-        if args[:2] == ["powerprofilesctl", "set"]:
-            self.ppd = args[2]
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if "-q" in args:
-            return subprocess.CompletedProcess(args, 0, self.powermizer + "\n", "")
-        if "-a" in args:
-            self.powermizer = args[-1].rsplit("=", 1)[1]
+        if args[:1] == ["busctl"] and "get-property" in args:
+            resposta = json.dumps({"type": "s", "data": self.ppd})
+            return subprocess.CompletedProcess(args, 0, resposta, "")
+        if args[:1] == ["busctl"] and "set-property" in args:
+            self.ppd = args[-1]
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(args)
 
