@@ -2413,26 +2413,63 @@ static acpi_status acer_predator_state_restore(int value)
     return AE_OK;
 }
 
+/*
+ * O que esta no arquivo de estado segue para o firmware sem mais
+ * perguntas: as ventoinhas por acer_set_fan_speed, que so barra acima de
+ * 100, e o perfil por WMID_gaming_set_misc_setting, que nao barra nada.
+ * Entao a conferencia e aqui: ventoinha de 0 a 100, e perfil entre os
+ * que o firmware anuncia -- o bitmap tem oito bits.
+ */
+static bool acer_predator_state_valid(const struct acer_predator_state *state,
+                                      u8 supported_profiles)
+{
+    if (state->cpu_fan_speed < 0 || state->cpu_fan_speed > 100)
+        return false;
+    if (state->gpu_fan_speed < 0 || state->gpu_fan_speed > 100)
+        return false;
+    if (state->thermal_profile < 0 || state->thermal_profile >= BITS_PER_BYTE)
+        return false;
+
+    return supported_profiles & BIT(state->thermal_profile);
+}
+
 static int acer_predator_state_load(void)
 {
     u64 on_AC;
     struct file *file;
+    struct power_states loaded;
+    u8 supported_profiles;
     ssize_t len;
     acpi_status status;
 
     file = filp_open(STATE_FILE, O_RDONLY, 0);
     if (!IS_ERR(file))
     {
-
-        len = kernel_read(file, (char *)&current_states, sizeof(current_states), &file->f_pos);
+        /*
+         * Para um temporario, e so depois de conferido para o estado em
+         * uso. Lido direto, um arquivo curto ficava pela metade dentro de
+         * current_states enquanto o log dizia "using defaults".
+         */
+        len = kernel_read(file, (char *)&loaded, sizeof(loaded), &file->f_pos);
         filp_close(file, NULL);
 
-        if (len != sizeof(current_states))
+        if (len != sizeof(loaded))
         {
             pr_err("Incomplete state read, using defaults\n");
         }
+        else if (WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_SUPPORTED_PROFILES,
+                                              &supported_profiles))
+        {
+            pr_err("Cannot check the state file against the supported profiles, using defaults\n");
+        }
+        else if (!acer_predator_state_valid(&loaded.battery_state, supported_profiles) ||
+                 !acer_predator_state_valid(&loaded.ac_state, supported_profiles))
+        {
+            pr_err("Invalid state file, using defaults\n");
+        }
         else
         {
+            current_states = loaded;
             pr_info("Thermal states loaded\n");
         }
     }

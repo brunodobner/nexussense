@@ -278,4 +278,37 @@ else
   echo "  FALHA platform_profile_notify roda mesmo sem perfil registrado"; fail=1
 fi
 
+# --- o arquivo de estado e conferido antes de valer
+#
+# /etc/predator_state era lido direto para dentro de current_states. Um
+# arquivo curto ficava pela metade la dentro, com o log dizendo "using
+# defaults"; e um numero qualquer no disco -- ventoinha negativa, perfil
+# que o firmware nao anuncia -- seguia para o firmware. Tarefa 2.4; os
+# arquivos plantados sao ensaio de maquina, no portao.
+corpo=$(corpo_de 'acer_predator_state_load')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_predator_state_load"; exit 3; }
+
+if printf '%s' "$corpo" | grep -q 'kernel_read(file, (char \*)&current_states'; then
+  echo "  FALHA o estado e lido direto para dentro de current_states"; fail=1
+else
+  echo "  OK   o estado e lido para um temporario"
+fi
+
+l_valida=$(printf '%s\n' "$corpo" | grep -n 'acer_predator_state_valid(' | head -1 | cut -d: -f1)
+l_adota=$(printf '%s\n' "$corpo" | grep -n 'current_states = ' | head -1 | cut -d: -f1)
+if [ -n "$l_valida" ] && [ -n "$l_adota" ] && [ "$l_valida" -lt "$l_adota" ]; then
+  echo "  OK   o estado so e adotado depois de validado"
+else
+  echo "  FALHA o estado e adotado sem validacao (valida=${l_valida:-nunca} adota=${l_adota:-nunca})"; fail=1
+fi
+
+corpo=$(corpo_de 'acer_predator_state_valid')
+if printf '%s' "$corpo" | grep -q 'fan_speed > 100' \
+   && printf '%s' "$corpo" | grep -q 'fan_speed < 0' \
+   && printf '%s' "$corpo" | grep -q 'BIT(state->thermal_profile)'; then
+  echo "  OK   a validacao cobre ventoinha 0-100 e perfil anunciado"
+else
+  echo "  FALHA a validacao nao cobre ventoinha 0-100 e perfil anunciado"; fail=1
+fi
+
 exit $fail
