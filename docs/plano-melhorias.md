@@ -87,6 +87,9 @@ real, contando também os filhos — é ali que o `nvidia-smi` aparece.
 
 ## 3. Etapa 1 — Python: agente e janela
 
+**Fechada em 2026-10-09, v1.2.0.** O resultado medido e o que a execução
+refutou estão em [estado.md](estado.md).
+
 Ramo `melhorias/1-python`. Sem root até o ensaio final.
 
 | # | o quê | onde | teste que falha primeiro |

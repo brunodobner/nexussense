@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-09-12 (sessão encerrada: v1.1.9, roteiro sem pendências)
+**Última atualização:** 2026-10-09 (melhorias, etapa 1 fechada: v1.2.0; etapas 2 a 4 abertas)
 
 ---
 
@@ -13,11 +13,11 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 2912 linhas (eram 5167) |
-| versão | **v1.1.9** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.0** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 18 testes: 16 passam, 2 pulam, 0 falham — **com e sem root** |
-| suíte Python | 333 passaram (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte Python | 362 passaram (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang |
 
 ---
@@ -49,7 +49,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Aviso de DKMS no pacman          v1.1.9: falha de build grita em vez de silenciar
 [-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
-[ ] Melhorias, etapa 1 -- Python     agente e janela; ver plano-melhorias.md
+[x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
 [ ] Melhorias, etapa 2 -- driver     quatro consertos e limpeza; sessao propria
 [ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
@@ -353,6 +353,85 @@ G. documentacao                  spec 9
 
 A **fase D perdeu o objeto**: não haverá binário a versionar nem manifesto a
 manter. Ela é substituída pela spec da GUI e pela renomeação.
+
+---
+
+## Melhorias de 2026-10, etapa 1 — e onde a etapa 2 começa
+
+Uma avaliação do projeto inteiro em 2026-10-09 virou
+[plano-melhorias.md](plano-melhorias.md): quatro etapas, uma por sessão. A
+primeira, só Python, fechou na mesma sessão. **v1.1.9 → v1.2.0.**
+
+O que ela entregou, medido na máquina:
+
+| | antes | depois |
+|---|---|---|
+| agente, modo máximo, na tomada | 7,85% de um núcleo | **0,45%** (2,17 s em 481 s) |
+| janela aberta, 30 s | 44,6% de um núcleo | **5,3%** |
+| checagem do Diagnóstico | ~270 ms | 12 ms |
+| suíte Python | 333 | 362 |
+| suíte shell | 16 passam, 2 pulam | idêntica, linha a linha |
+
+De onde vinha o custo: o agente perguntava o perfil ao `powerprofilesctl` a
+cada passada — um script Python de 135 ms — e a janela chamava o `nvidia-smi`
+dez vezes por segundo. Um virou `busctl` (3,9 ms), a outra passou a sondar uma
+vez por segundo, por escolha do usuário.
+
+E seis consertos de comportamento, cada um com teste que falhou primeiro:
+
+- **sem o driver o agente espera** em vez de sair — sair virava laço, a unit o
+  reabria a cada 3 s para sempre (reproduzido: 8 reinícios em 26 s);
+- **`config.toml` gravado por troca atômica** — quem lia no meio da gravação
+  recebia os padrões, sem erro;
+- **religar o cabo abaixo de ~40% não perde o perfil guardado** — armadilha 27;
+- **na bateria o perfil de CPU é devolvido uma vez**, não reimposto a cada 2 s;
+- **falha persistente avisa uma vez**, não 43 200 vezes por dia;
+- **uma releitura por clique**, e o cursor de ventoinha escreve quando para.
+
+**O ensaio do cabo, registrado por um observador num comando só:**
+
+```
+ 10,7s  cabo sai
+ 12,3s  perfil -> balanced            (guardado: balanced-performance)
+ 19,4s  usuario escolhe power-saver
+        ... 40 s na bateria, e o power-saver FICA
+ 59,8s  cabo volta
+ 60,9s  perfil -> balanced-performance, ppd -> performance, GPU confirmada
+```
+
+### Quatro coisas que só apareceram medindo
+
+1. **A primeira medição do agente valia por 40 segundos de 300.** O usuário
+   desligou o modo máximo no meio dela, para abrir um jogo, e o número saiu
+   bonito — 0,31% — medindo outra coisa. Só apareceu porque uma linha do
+   journal não fechava com o resto. A medição seguinte confere a condição a
+   cada 10 s e só conta o trecho em que ela se manteve. É a armadilha 25 por
+   outro ângulo: havia uma pessoa na máquina, e ela não estava no modelo.
+2. **O roteiro do limiar de 40% reportou "ACEITA" para uma escrita recusada.**
+   `open().write()` só falha no `flush`, fora do `try`. Está na armadilha 27.
+3. **O limiar de 40% não é o número do kernel.** O firmware recusou a 39% e
+   aceitou 30 s depois, com o `capacity` ainda em 39.
+4. **A tarefa 1.10 perdeu o objeto no meio do caminho.** Ela existia por causa
+   dos 270 ms do Diagnóstico; depois da 1.1 eram 12. Saiu do plano.
+
+### O que ficou visto e não consertado
+
+- **A suíte chama o `nvidia-smi` de verdade 35 vezes por rodada**, medido com
+  um comando-isca no `PATH`. Rodar os testes com a dGPU adormecida a acorda.
+  Nenhum teste depende da resposta — os 362 passam com a isca. Está na etapa 4.
+- **O caminho de abaixo de 40% não foi exercitado no hardware de ponta a
+  ponta.** A recusa foi medida e a lógica está coberta por teste, mas no ensaio
+  do cabo a bateria estava em 44%.
+- **`maximum_saved_ppd` desta máquina vale `performance`.** Na bateria, com o
+  modo máximo suspenso, é para esse valor que a CPU volta — é o que estava em
+  vigor quando o modo foi ligado. Para mudar: desligar o modo, escolher o
+  perfil de CPU desejado, religar.
+
+### Onde a etapa 2 começa
+
+Numa **sessão nova**, pelo driver. Ler [armadilhas.md](armadilhas.md) e a
+seção 4 de [plano-melhorias.md](plano-melhorias.md): quatro consertos e uma
+limpeza opcional, com o portão do bitmask `0x00002c26` e reinício no fim.
 
 ---
 
