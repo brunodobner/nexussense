@@ -386,10 +386,10 @@ confusão existe e custou tempo uma vez.
 
 ## 17. `set -e` e função que depende de retorno não-zero
 
-`packaging/scripts/nitro-key-detection.sh` e `packaging/icons/gerar.sh` usam
-`set -euo pipefail`. Sob `set -e`, uma função que devolve não-zero **por
-projeto** — para dizer "não achei", "não aplicável" — mata o script em vez de
-ser tratada.
+`packaging/icons/gerar.sh` usa `set -euo pipefail` — e o
+`nitro-key-detection.sh`, que saiu do projeto em 2026-10-09, também usava. Sob
+`set -e`, uma função que devolve não-zero **por projeto** — para dizer "não
+achei", "não aplicável" — mata o script em vez de ser tratada.
 
 O `setup.sh` não usa `set -e` de propósito: ele é feito de funções que
 reportam por código de retorno (`install_drivers`, `driver_version`,

@@ -137,7 +137,7 @@ reescrito, e a GUI .NET original foi substituída por uma em PySide6.
 | `original/Linuwu-Sense/src/linuwu_sense.c` | `driver/src/nexus_sense.c` | ~200 linhas |
 | `original/Linuwu-Sense/Makefile` | `driver/Makefile` | 66+/74− |
 | `original/Linuwu-Sense/linuwu_sense.service` | `packaging/systemd/nexus_sense.service` | reescrita |
-| `original/nitro-key-detection.sh` | `packaging/scripts/nitro-key-detection.sh` | 13+/3− |
+| `original/nitro-key-detection.sh` | — | removido: era um serviço root lendo o teclado inteiro; o botão abre o app por hwdb e atalho do desktop |
 | `original/Linuwu-Sense/LICENSE` | `driver/LICENSE` | intocado |
 | — | `driver/dkms.conf` | inteiramente nosso |
 | — | `src/` (janela, bandeja, agente) | escrito do zero |

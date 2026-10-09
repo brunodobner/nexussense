@@ -17,7 +17,6 @@ exigir() {
 }
 S="$ROOT/setup.sh"
 exigir "$S"
-exigir "$ROOT/packaging/scripts/nitro-key-detection.sh"
 fail=0
 
 if grep -q '^install_nitro_key_hwdb() {' "$S"; then
@@ -66,29 +65,13 @@ case "$modelo" in
 esac
 
 # O remap e do teclado, nao do driver: tem de rodar mesmo quando a
-# instalacao pula os drivers (opcao 2 do menu), e ANTES da captura em
-# configure_nitro_button -- senao ela grava o keycode pre-remap.
+# instalacao pula os drivers (opcao 2 do menu).
 perform=$(sed -n '/^perform_install() {/,/^}/p' "$S")
 if printf '%s' "$perform" | grep -q 'install_nitro_key_hwdb'; then
   echo "  OK   chamada de perform_install, nao de dentro de install_drivers"
 else
   echo "  FALHA nao e chamada em perform_install"; fail=1
 fi
-
-if printf '%s' "$perform" | grep -B20 'configure_nitro_button' | grep -q 'install_nitro_key_hwdb'; then
-  echo "  OK   roda antes de configure_nitro_button"
-else
-  echo "  FALHA roda depois da captura"; fail=1
-fi
-
-# O codigo de reserva nao pode ser cravado: depende do mapeamento em vigor.
-for f in "$S" "$ROOT/packaging/scripts/nitro-key-detection.sh"; do
-  if grep -q 'KEYBOARD_KEY_f5=prog1' "$f"; then
-    echo "  OK   $(basename $f) deriva o codigo de reserva"
-  else
-    echo "  FALHA $(basename $f) crava o codigo de reserva"; fail=1
-  fi
-done
 
 # O vinculo do atalho passou a ser feito pelo proprio instalador. Se ele
 # escreve, a desinstalacao tem de remover -- senao sobra atalho vivo
@@ -141,20 +124,61 @@ else
   echo "  FALHA reinstalacao pularia o vinculo do atalho"; fail=1
 fi
 
-# O prompt do servico de deteccao roda logo depois do remap. Com o botao
-# ja funcionando, oferecer o servico sem contexto induz a instalar um
-# processo root que le o teclado inteiro, duplicando o que ja funciona.
-prompt=$(sed -n '/^configure_nitro_button() {/,/^}/p' "$S")
-if printf '%s' "$prompt" | grep -q 'NITRO_KEY_BOUND'; then
-  echo "  OK   prompt sabe se o botao ja esta vinculado"
+# O servico root de deteccao de tecla saiu (plano-melhorias.md, D4). Ele
+# rodava como root e lia todas as teclas do teclado, senhas inclusive, para
+# fazer o que o remap acima mais um atalho do desktop ja fazem sem processo
+# nenhum. Nesta maquina nunca chegou a ser instalado.
+#
+# As asserções abaixo sao de ausencia; o exigir no topo garante que o
+# setup.sh existe, senao passariam por vacuo (armadilha 14).
+codigo=$(grep -v '^\s*#' "$S")
+
+for fn in configure_nitro_button install_nitro_service; do
+  if printf '%s' "$codigo" | grep -q "$fn"; then
+    echo "  FALHA $fn ainda existe ou ainda e chamada"; fail=1
+  else
+    echo "  OK   $fn saiu"
+  fi
+done
+
+if [ -e "$ROOT/packaging/scripts/nitro-key-detection.sh" ]; then
+  echo "  FALHA packaging/scripts/nitro-key-detection.sh ainda existe"; fail=1
 else
-  echo "  FALHA prompt oferece o servico sem contexto"; fail=1
+  echo "  OK   o script do servico saiu do repositorio"
 fi
 
-if printf '%s' "$prompt" | grep -q 'watches every'; then
-  echo "  OK   prompt informa o custo (le todas as teclas)"
+# evtest so servia a captura e ao servico.
+if printf '%s' "$codigo" | grep -q 'evtest'; then
+  echo "  FALHA o instalador ainda usa ou instala evtest"; fail=1
 else
-  echo "  FALHA prompt nao informa o custo do servico"; fail=1
+  echo "  OK   o instalador nao instala evtest"
+fi
+
+# NITRO_KEY_BOUND so existia para o prompt do servico.
+if printf '%s' "$codigo" | grep -q 'NITRO_KEY_BOUND'; then
+  echo "  FALHA NITRO_KEY_BOUND ficou sem leitor"; fail=1
+else
+  echo "  OK   NITRO_KEY_BOUND saiu junto com o prompt"
+fi
+
+# A limpeza do servico ANTIGO fica: quem instalou uma versao anterior e
+# respondeu "y" ao prompt tem a unit habilitada, o script em
+# /usr/local/bin e /etc/damx -- e so a desinstalacao os tira de la.
+limpeza=$(sed -n '/^cleanup_nitro_service() {/,/^}/p' "$S")
+for alvo in 'nitro-key-detection.service' '/usr/local/bin/nitro-key-detection.sh' \
+            '/etc/damx/nitro_key.conf'; do
+  if printf '%s' "$limpeza" | grep -qF "$alvo"; then
+    echo "  OK   a limpeza ainda remove $alvo"
+  else
+    echo "  FALHA a limpeza deixou de remover $alvo"; fail=1
+  fi
+done
+
+cleanup=$(sed -n '/^comprehensive_cleanup() {/,/^}/p' "$S")
+if printf '%s' "$cleanup" | grep -qE '^\s*cleanup_nitro_service\s*$'; then
+  echo "  OK   comprehensive_cleanup chama cleanup_nitro_service"
+else
+  echo "  FALHA comprehensive_cleanup nao limpa o servico antigo"; fail=1
 fi
 
 exit $fail

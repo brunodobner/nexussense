@@ -657,10 +657,6 @@ EOL
 bind_button_to_nexus() {
   local user home rc current
 
-  # Lido por configure_nitro_button logo depois: com o botao ja vinculado,
-  # o servico de deteccao vira alternativa, nao necessidade.
-  NITRO_KEY_BOUND=0
-
   print_shortcut_instructions() {
     echo -e "${BLUE}To open Nexus Sense with the button: your desktop's keyboard${NC}"
     echo -e "${BLUE}settings -> Shortcuts -> add the Nexus Sense application, and${NC}"
@@ -685,7 +681,6 @@ bind_button_to_nexus() {
               --group services --group nexus-sense.desktop --key _launch 2>/dev/null)
   if [ -n "$current" ]; then
     echo -e "${GREEN}Nexus Sense already has the shortcut '${current}'; leaving it alone.${NC}"
-    NITRO_KEY_BOUND=1
     return 0
   fi
 
@@ -696,7 +691,6 @@ bind_button_to_nexus() {
        --group services --group nexus-sense.desktop --key _launch "Launch (1)" 2>/dev/null &&
      runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
        --group services --group nexus-sense.desktop --key _k_friendly_name "Nexus Sense" 2>/dev/null; then
-    NITRO_KEY_BOUND=1
     echo -e "${GREEN}Button bound to Nexus Sense for user ${user}.${NC}"
     echo -e "${YELLOW}KWin reads shortcut bindings at login: log out and back in${NC}"
     echo -e "${YELLOW}to activate it.${NC}"
@@ -1017,102 +1011,6 @@ cleanup_nexus_sense() {
   fi
 }
 
-configure_nitro_button() {
-  echo -e "${YELLOW}Configuring Nitro/PredatorSense Button Hardware Code...${NC}"
-
-  # Ask user if they want to setup the key with 10 second timeout.
-  # Default to No so installs/updates do not silently add a keyboard hook service.
-  # Predator machines have the same dedicated button (the PredatorSense key) —
-  # it even sends the same code as the Nitro key on the models tested so far.
-  #
-  # install_nitro_key_hwdb runs before this and usually already makes the
-  # button open DAMX, without any daemon. When it did, say so: this service
-  # would duplicate working behaviour at a real cost -- it runs as root and
-  # reads every key on the keyboard, passwords included. It stays available
-  # for environments with no global shortcuts, but nobody should install it
-  # by accident.
-  if [ "${NITRO_KEY_BOUND:-0}" = "1" ]; then
-    echo -e "${GREEN}The button already opens Nexus Sense through a desktop shortcut.${NC}"
-    echo -e "${BLUE}The detection service below is an alternative for desktops${NC}"
-    echo -e "${BLUE}without global shortcuts. It runs as root and watches every${NC}"
-    echo -e "${BLUE}key on the keyboard, so install it only if the shortcut did${NC}"
-    echo -e "${BLUE}not work for you.${NC}"
-    echo -e "${YELLOW}Install the key detection service anyway? (y/N) - Waiting 10 seconds...${NC}"
-  else
-    echo -e "${YELLOW}Do you want to setup your Nitro/PredatorSense Key? (y/N) - Waiting 10 seconds...${NC}"
-  fi
-  read -t 10 -n 1 -r response
-  
-  # Default to No if timeout or empty response
-  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
-    echo -e "\n${BLUE}No response detected. Skipping Nitro button setup.${NC}"
-    response="N"
-  fi
-
-  # Check if user wants to skip
-  if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Skipping button configuration. You can run setup again later to enable it.${NC}"
-    return 0
-  fi
-
-  if ! command -v evtest &> /dev/null; then
-    echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
-    if command -v apt-get &> /dev/null; then
-      apt-get update && apt-get install -y evtest
-    elif command -v dnf &> /dev/null; then
-      dnf install -y evtest
-    elif command -v pacman &> /dev/null; then
-      pacman -S --noconfirm --needed evtest
-    else
-      echo -e "${RED}Could not install evtest automatically. Install it with your package manager and re-run setup.${NC}"
-      return 1
-    fi
-  fi
-
-  DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
-
-  # Codigo de reserva, usado quando a captura falha. Depende do
-  # mapeamento em vigor: com a regra hwdb deste instalador o botao emite
-  # prog1 (148); sem ela, a entrada generica Acer do systemd o entrega
-  # como presentation (425). Cravar um dos dois daria o errado na metade
-  # dos casos.
-  FALLBACK_KEY=425
-  if [ -n "$DEVICE" ] && udevadm info "$DEVICE" 2>/dev/null | grep -q 'KEYBOARD_KEY_f5=prog1'; then
-    FALLBACK_KEY=148
-  fi
-
-  mkdir -p /etc/damx
-
-  if [ -z "$DEVICE" ]; then
-    echo -e "${RED}Error: Keyboard hardware not found! Using fallback code ${FALLBACK_KEY}.${NC}"
-    echo "NITRO_KEY=$FALLBACK_KEY" > /etc/damx/nitro_key.conf
-    return 1
-  fi
-
-  echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
-  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO / PREDATORSENSE BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
-
-  # On both Nitro and Predator EC keyboards the button arrives as scancode
-  # 0xf5, which the kernel maps to keycode 425 unless an hwdb quirk remaps
-  # it (some models get prog1/148). Capturing beats hardcoding either one.
-  CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
-
-  if [ -n "$CAPTURED_CODE" ]; then
-    echo -e "${GREEN}Success! Button code captured: ${CAPTURED_CODE}${NC}"
-    echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro_key.conf
-  else
-    echo -e "${RED}Timeout or no key detected. Falling back to code ${FALLBACK_KEY}.${NC}"
-    echo -e "${YELLOW}If you DID press the button: key remappers like keyd or kmonad grab the${NC}"
-    echo -e "${YELLOW}keyboard exclusively, so this capture (and the detection service) never${NC}"
-    echo -e "${YELLOW}sees the key. Stop the remapper and re-run setup, or bind the key in the${NC}"
-    echo -e "${YELLOW}remapper's own config instead.${NC}"
-    echo "NITRO_KEY=$FALLBACK_KEY" > /etc/damx/nitro_key.conf
-  fi
-  
-  # Install NitroKeyDetection.sh as a service
-  install_nitro_service
-}
-
 detect_desktop_user() {
   if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id -u "$SUDO_USER" >/dev/null 2>&1; then
     echo "$SUDO_USER"
@@ -1129,75 +1027,6 @@ detect_desktop_user() {
   fi
 
   awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' /etc/passwd
-}
-
-install_nitro_service() {
-  echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
-
-  NITRO_SCRIPT="${RAIZ}/packaging/scripts/nitro-key-detection.sh"
-  TARGET_USER=$(detect_desktop_user)
-
-  if [ -z "$TARGET_USER" ] || ! id -u "$TARGET_USER" >/dev/null 2>&1; then
-    echo -e "${RED}Error: Could not determine desktop user for Nitro key launcher.${NC}"
-    return 1
-  fi
-
-  echo -e "${BLUE}The button will launch Nexus Sense for user: ${TARGET_USER}${NC}"
-  
-  # Check if NitroKeyDetection.sh exists
-  if [ ! -f "$NITRO_SCRIPT" ]; then
-    echo -e "${RED}Error: nitro-key-detection.sh not found at ${NITRO_SCRIPT}${NC}"
-    return 1
-  fi
-  
-  # Make the script executable
-  chmod +x "$NITRO_SCRIPT"
-  
-  # Copy script to /usr/local/bin
-  cp "$NITRO_SCRIPT" /usr/local/bin/
-  chmod +x "/usr/local/bin/nitro-key-detection.sh"
-  
-  # Create systemd service file
-  cat > /etc/systemd/system/nitro-key-detection.service << EOF
-[Unit]
-Description=Nitro/PredatorSense Key Detection Service
-After=multi-user.target
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/nitro-key-detection.sh
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-User=root
-Environment=DAMX_TARGET_USER=${TARGET_USER}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # Reload systemd, enable and start the service
-  systemctl daemon-reload
-  systemctl enable nitro-key-detection.service
-  systemctl start nitro-key-detection.service
-  
-  # Check if service is running
-  if systemctl is-active --quiet nitro-key-detection.service; then
-    echo -e "${GREEN}✓ Nitro Key Detection Service installed and running successfully!${NC}"
-    echo -e "${GREEN}Service status: $(systemctl status nitro-key-detection.service --no-pager | grep Active)${NC}"
-  else
-    echo -e "${RED}✗ Service installation failed. Checking logs...${NC}"
-    journalctl -u nitro-key-detection.service -n 10 --no-pager
-    return 1
-  fi
-  
-  echo -e "${BLUE}Service commands:${NC}"
-  echo -e "  Start: systemctl start nitro-key-detection.service"
-  echo -e "  Stop:  systemctl stop nitro-key-detection.service"
-  echo -e "  Status: systemctl status nitro-key-detection.service"
-  echo -e "  Logs:  journalctl -u nitro-key-detection.service -f"
 }
 
 perform_install() {
@@ -1232,12 +1061,10 @@ perform_install() {
   NEXUS_RESULT=$?
 
   # O remap de keycode e do teclado, nao do driver: precisa rodar mesmo
-  # quando a instalacao pula os drivers (opcao 2 do menu), e antes da
-  # captura em configure_nitro_button -- senao ela grava o keycode antigo.
+  # quando a instalacao pula os drivers (opcao 2 do menu). Ele e o atalho
+  # do desktop sao o caminho inteiro do botao: nao ha servico lendo o
+  # teclado. Ver docs/plano-melhorias.md, decisao D4.
   install_nitro_key_hwdb
-
-  #Setup NitroButton shortcut
-  configure_nitro_button
 
   # Check if all installations were successful
   if [ $DRIVER_RESULT -eq 0 ] && [ $NEXUS_RESULT -eq 0 ]; then

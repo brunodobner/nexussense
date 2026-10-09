@@ -107,7 +107,6 @@ done < <(grep -roE '\]\([a-zA-Z0-9_./-]+\.(md|txt|sh)\)' README.md docs/*.md 2>/
 alvos=(
   driver/Makefile driver/dkms.conf driver/src/nexus_sense.c
   src/nexus_sense packaging/scripts/apply-perms.sh
-  packaging/scripts/nitro-key-detection.sh
   packaging/systemd/nexus_sense.service packaging/systemd/nexus-sense-agent.service
   packaging/desktop/nexus-sense.desktop packaging/desktop/nexus-sense-autostart.desktop
   packaging/udev/60-nexus-sense.rules
