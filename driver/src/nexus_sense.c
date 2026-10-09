@@ -1438,8 +1438,12 @@ static int acer_thermal_profile_change(void)
      * Avisar com a nossa ainda na mao inverteria a ordem -- botao N e
      * uma escrita em .../profile ao mesmo tempo, e os dois param para
      * sempre.
+     *
+     * E so se o registro deu certo: quando falha nas dez tentativas,
+     * platform_profile_device guarda um ERR_PTR, nao um dispositivo.
      */
-    platform_profile_notify(platform_profile_device);
+    if (platform_profile_support)
+        platform_profile_notify(platform_profile_device);
 
     return 0;
 }

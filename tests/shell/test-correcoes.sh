@@ -264,4 +264,18 @@ else
   echo "  OK   a parte travada do botao N nao chama o nucleo"
 fi
 
+# --- o botao N nao avisa um perfil que nao chegou a registrar
+#
+# Se devm_platform_profile_register falhar nas dez tentativas,
+# platform_profile_device fica com um ERR_PTR, e o aviso o dereferenciava
+# no primeiro aperto do botao. platform_profile_support existia para
+# dizer exatamente isso e ninguem o lia; foi o Clang 23, com W=1, que
+# apontou a variavel escrita e nunca usada.
+if corpo_de 'acer_thermal_profile_change' | grep -B1 'platform_profile_notify(' \
+   | grep -q 'if (platform_profile_support)'; then
+  echo "  OK   o aviso ao nucleo depende de o perfil ter registrado"
+else
+  echo "  FALHA platform_profile_notify roda mesmo sem perfil registrado"; fail=1
+fi
+
 exit $fail
