@@ -184,6 +184,21 @@ systemctl list-unit-files | grep -iE 'damx|linuwu|nitro'
 grep -i damx ~/.config/kglobalshortcutsrc
 ```
 
+**Essa varredura só enxerga a linhagem antiga.** Em 2026-10-09 ela voltava
+vazia com o aplicativo inteiro ainda no disco: lançadores, pacote, regra udev,
+unit do agente, `.desktop`, ícones e grupo têm `nexus` no nome, não `damx`. E o
+`-maxdepth 4` não desce até os ícones (`hicolor/16x16/status/` é o quinto
+nível). A que cobre o que este projeto instala:
+
+```bash
+find /etc /usr/local /usr/share /usr/lib /usr/bin /var/lib /opt /usr/src -xdev \
+  \( -iname '*nexus-sense*' -o -iname '*nexus_sense*' \) 2>/dev/null
+getent group nexus_sense linuwu_sense
+```
+
+Grupo não é arquivo: nenhum `find` o acha. O `linuwu_sense` sobreviveu à
+renomeação do driver por um mês, com o usuário dentro.
+
 Cuidado com **instaladores de outra linhagem**: o pessoal criava
 `damx-gui.desktop` apontando para `/usr/local/bin/damx-gui`, nome que o
 `setup.sh` não conhecia. Sobrevivia como ícone morto no menu.

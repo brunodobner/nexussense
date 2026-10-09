@@ -205,8 +205,9 @@ comprehensive_cleanup() {
   # qualquer processo da maquina podia recarregar o driver por ele. Some
   # junto e nao volta -- o Nexus Sense nao tem socket nenhum.
   rm -f /var/run/DAMX.sock /run/DAMX.sock
-  rm -f /etc/xdg/autostart/nexus-sense-autostart.desktop
   rm -rf /opt/DAMX
+
+  cleanup_nexus_sense
   refresh_desktop_database
 
   # Remove the driver. Under DKMS 'make uninstall' is not enough: it drops
@@ -233,6 +234,12 @@ comprehensive_cleanup() {
     fi
     modprobe -r "${antigo}" &> /dev/null || true
     find /lib/modules -name "${antigo}.ko*" -delete &> /dev/null || true
+    # O grupo do nome antigo tambem sobreviveu a renomeacao: o usuario
+    # seguia dentro dele, sem atributo nenhum que o usasse.
+    if getent group "${antigo}" > /dev/null; then
+      echo "Removendo o grupo antigo: ${antigo}"
+      groupdel "${antigo}" || true
+    fi
   done
 
   if [ -d "$DRIVER_DIR" ]; then
@@ -967,6 +974,47 @@ EOL
   refresh_desktop_database
   echo -e "${GREEN}Nexus Sense instalado.${NC}"
   return 0
+}
+
+# Desfaz install_nexus_sense, item por item.
+#
+# Ate 2026-10-09 a desinstalacao so tirava o autostart: lancadores, pacote,
+# regra udev, unit do agente, .desktop, icones e grupo ficavam para tras.
+#
+# Duas coisas ficam de proposito:
+#   ~/.config/nexus-sense   o grupo e do instalador, a configuracao e
+#                           escolha do usuario. Ver plano-melhorias.md, D5.
+#   agente e bandeja em execucao   sao processos da sessao do usuario e
+#                           saem com ela. O disable abaixo so impede que
+#                           voltem na proxima.
+cleanup_nexus_sense() {
+  echo "Removendo o aplicativo Nexus Sense..."
+
+  # --- a unit de usuario do agente
+  # O disable vem antes do rm: e pela secao [Install] da unit que o
+  # systemctl sabe qual link desfazer.
+  systemctl --global disable nexus-sense-agent.service &> /dev/null || true
+  rm -f /usr/lib/systemd/user/nexus-sense-agent.service
+
+  # --- a regra udev
+  rm -f /etc/udev/rules.d/60-nexus-sense.rules
+  udevadm control --reload &> /dev/null || true
+
+  # --- icones e lancadores do desktop
+  find /usr/share/icons/hicolor -type f -name 'nexus-sense*' -delete 2>/dev/null || true
+  rm -f "${DESKTOP_FILE_DIR}/nexus-sense.desktop"
+  rm -f /etc/xdg/autostart/nexus-sense-autostart.desktop
+
+  # --- os dois lancadores e o pacote
+  rm -f /usr/bin/nexus-sense
+  rm -f /usr/bin/nexus-sense-agent
+  rm -rf /usr/lib/nexus-sense
+
+  # --- o grupo
+  if getent group nexus_sense > /dev/null; then
+    groupdel nexus_sense \
+      || echo -e "${YELLOW}Nao foi possivel remover o grupo nexus_sense.${NC}"
+  fi
 }
 
 configure_nitro_button() {
