@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 2: portão passou, v1.2.1, falta a partida a frio; etapas 3 e 4 abertas)
+**Última atualização:** 2026-10-09 (melhorias, etapa 2: portão passou, v1.2.2, falta a partida a frio; etapas 3 e 4 abertas)
 
 ---
 
@@ -12,8 +12,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 2999 linhas (eram 5167) |
-| versão | **v1.2.1** — `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
+| versão | **v1.2.2** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 18 testes: 16 passam, 2 pulam, 0 falham — **com e sem root** |
@@ -50,7 +50,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
-[~] Melhorias, etapa 2 -- driver     v1.2.1: portao passou; falta conferir a partida a frio
+[~] Melhorias, etapa 2 -- driver     v1.2.2: portao passou; falta conferir a partida a frio
 [ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
@@ -435,7 +435,8 @@ Numa sessão nova, pelo driver. O que ela fez está na seção seguinte.
 
 ## Melhorias de 2026-10, etapa 2 — o portão passou, falta a partida a frio
 
-A etapa do driver, no ramo `melhorias/2-driver`. **v1.2.0 → v1.2.1.** Tudo foi
+A etapa do driver, no ramo `melhorias/2-driver`. **v1.2.0 → v1.2.1**, e na
+mesma noite **v1.2.2**, com o que tinha ficado para depois. Tudo foi
 ao hardware antes do merge; o que falta é o reinício, que se confere na sessão
 seguinte — a lista está no fim desta seção.
 
@@ -464,8 +465,8 @@ W=1         limpo sob Clang 23, em 7.2.9-1-cachyos e 6.18.55-1-cachyos-lts
 suites      362 Python; shell 16 passam, 2 pulam -- identicas ao baseline
 ```
 
-O módulo carregado tem `srcversion` `B530962B6CE5FDBCF23F2E9`, o mesmo do build
-`W=1` e o mesmo do arquivo que o DKMS instalou.
+O módulo desse portão tinha `srcversion` `B530962B6CE5FDBCF23F2E9`. **O que
+está carregado hoje é o da etapa 2b, `F9236711C6E76401FD38B7A`** — ver abaixo.
 
 ### Cinco coisas que só apareceram executando
 
@@ -530,20 +531,52 @@ voltou, e por alguns minutos isso pareceu o botão funcionando. Era o app —
 `config.toml` foi gravado no mesmo décimo de segundo. É a armadilha 25 de novo:
 havia uma pessoa clicando na janela que o próprio aperto abre.
 
+### Etapa 2b, na mesma noite — os três que tinham ficado para depois
+
+A primeira versão desta seção listava três defeitos vistos e não consertados. O
+usuário perguntou como consertá-los e mandou fazer antes do reinício: assim uma
+partida a frio confere tudo. Ramo `melhorias/2b-driver`, **v1.2.1 → v1.2.2**.
+
+| | conserto | prova na máquina |
+|---|---|---|
+| leitor do par | `predator_fan_speed_show` sob `acer_op_lock` | 753 leituras de `fan_speed` no meio de 8 escritores: zero pares misturados |
+| estado | `acer_predator_state_load` e `_save` sob a mesma trava | oito cargas do módulo sem travar; os três arquivos plantados de novo |
+| bateria | `battery_health_set` trata `uReturn != 0` como recusa, sem pedir ajuda ao byte reservado | a amostra abaixo |
+
+**A trava no `probe` não contradiz a armadilha 24.** O que ela proíbe é travar o
+`probe` inteiro: os registros de rfkill, platform_profile e hwmon chamam o
+driver de volta. A restauração de estado fica depois deles e só fala com o
+firmware e com o arquivo.
+
+**A condição da bateria foi trocada com amostra, não por leitura** (armadilha
+3b). Um `pr_debug` novo imprime os quatro bytes crus do retorno; a regra foi
+escrita antes de medir — só trocar se toda escrita que vale devolver `uReturn`
+zero:
+
+```
+battery_limiter     <- 1   aceito, lido 1   retorno 00 00 00 00
+battery_limiter     <- 0   aceito, lido 0   retorno 00 00 00 00
+battery_limiter     <- 1   aceito, lido 1   retorno 00 00 00 00
+battery_calibration <- 0   aceito, lido 0   retorno 00 00 00 00
+```
+
+Repetido depois da troca, com o mesmo resultado: nenhuma escrita válida virou
+recusa. **Não há amostra de recusa** — pelo sysfs só chegam 0 e 1, e o firmware
+aceita os dois. Se um dia aparecer `Failed to set battery health status: 0x..`
+no log, o código que vier ali é a amostra que falta.
+
+Dois portões: o completo sobre o build com as travas (**65 OK, 0 FALHA**, suíte
+shell como root 16 passam e 2 pulam, já com `LC_ALL=C`), e um curto sobre o
+build final, que só difere daquele por essa condição (**34 OK, 0 FALHA**).
+
 ### Visto e não consertado
 
-- **`battery_health_set` só reconhece falha se `uReturn` *e* `uReservedOut`
-  forem diferentes de zero.** Parece que deveria ser *ou*. Sem amostra do que o
-  firmware devolve numa recusa, trocar poderia reprovar escrita válida.
-- **`fan_speed` é lido sem trava.** São dois inteiros; um leitor no meio de uma
-  escrita pode ver o par misturado por alguns nanossegundos.
-- **`acer_predator_state_load` não toma `acer_op_lock`**, e roda no `probe` com
-  os atributos já criados. Um escritor que chegasse nesse instante se
-  intercalaria com a restauração.
 - **`dkms status | grep -q`** no instalador e nos testes deixa `echo: write
   error: Broken pipe` na saída. Ruído, não defeito; é assunto da etapa 3.
 - **O que `temp3` mede não foi apurado.** O rótulo é o nome que o firmware dá
   ao sensor, `External 2`.
+- **A ordem de travas do botão N continua sem prova de hardware**, pelo motivo
+  da seção acima: o evento não chega.
 
 ### O que falta: a partida a frio
 
@@ -556,7 +589,7 @@ journalctl -k -b | grep nexus_sense
 #                                   PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
 #   Thermal states loaded            <- e NAO "Invalid state file" nem "Incomplete"
 #   Thermal states restored successfully
-cat /sys/module/nexus_sense/srcversion          # B530962B6CE5FDBCF23F2E9
+cat /sys/module/nexus_sense/srcversion          # F9236711C6E76401FD38B7A
 cat /sys/firmware/acpi/platform_profile_choices # low-power quiet balanced balanced-performance
 cat /sys/firmware/acpi/platform_profile         # o perfil de antes do reinicio
 stat -c '%a %U:%G %n' /sys/devices/platform/acer-wmi/nitro_sense/*
