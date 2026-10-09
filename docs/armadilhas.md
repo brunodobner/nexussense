@@ -822,6 +822,54 @@ desinstalação: sem um, o outro perde o objeto.
 
 ---
 
+## 27. "Na tomada" para o kernel não é "na tomada" para o firmware
+
+**Sintoma.** Cabo ligado, bateria carregando, e a escrita de `quiet` ou
+`balanced-performance` volta `EOPNOTSUPP` — a mesma recusa de quando se está na
+bateria. Na interface aparecia "Ligue o cabo para usá-lo", com o cabo ligado, e
+parecia travamento.
+
+**Causa.** O driver decide pela consulta WMI `GET_PREDATOR_V4_BAT_STATUS`, que
+ele chama de `on_AC`. Ela **não** quer dizer "cabo ligado": devolve 0 enquanto a
+bateria está abaixo de uns 40%, mesmo com `ACAD/online=1`. O aplicativo decidia
+disponibilidade só por `ACAD/online`, e os dois discordam nessa faixa.
+
+Duas medições, com o cabo ligado o tempo todo:
+
+```
+2026-09-30   recusou de 26% a 39%, aceitou quando o capacity virou 40%
+2026-10-09   bateria=39%  cabo=1   RECUSA (ENOTSUP)
+             30 s depois, capacity ainda em 39%:   ACEITA
+```
+
+A segunda corrige a primeira num detalhe que importa: **o limiar é do firmware
+e não coincide com o número do `capacity`.** Ele aceitou com o kernel ainda
+dizendo 39. Não dá para prever a aceitação lendo a carga; só perguntando.
+
+**O que isso quebrava no agente.** `_on_plug` apagava o perfil guardado e só
+depois escrevia. Religar o cabo com pouca carga recusava a escrita, e o guardado
+já tinha sumido do disco: a máquina ficava em `balanced` até alguém notar.
+
+**Como ficou.** O agente escreve primeiro e só consome o guardado se a escrita
+passar. Recusada, a devolução fica pendente e é tentada a cada passada — sem
+olhar a carga, pelo motivo acima. Duas saídas da espera: tirar o cabo de novo
+guarda para a próxima, e escolher outro perfil à mão **cancela** a devolução,
+porque carregar até 40% leva minutos e a escolha feita nesse meio tempo é do
+usuário.
+
+**Uma coisa que o firmware não faz:** derrubar um perfil já em vigor. Em
+2026-10-09 a máquina estava em `balanced-performance` a 39%, na tomada, e
+continuou. A recusa é só para a escrita.
+
+**E uma armadilha dentro da medição.** O primeiro roteiro usava
+`open(P, "w").write(valor)` dentro de um `try` e reportou **ACEITA** para uma
+escrita recusada: com arquivo bufferizado o erro só sai no `flush` do
+fechamento, fora do `try`. Em sysfs, escreva com `os.write` num descritor, ou
+feche dentro do `try`. É a armadilha 11 de novo — cheque o efeito, não o
+comando.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

@@ -122,6 +122,9 @@ class Agent:
         self._saved_memoria = None
         self._maximum = MaximumMode(Controls(sysfs), config_path, gpu=PowerMizer())
         self._gpu_confirmed = False
+        # Devolucao que o firmware recusou: (perfil a devolver, perfil que
+        # estava em vigor na recusa). Ver _retoma_pendente.
+        self._pendente = None
         # As falhas do modo maximo ja avisadas. Repetir a mesma linha a
         # cada passada enterra no journal o momento em que ela comecou.
         self._falhas_maximo = ()
@@ -185,6 +188,54 @@ class Agent:
             choices=self._read_choices(),
         )
         self._was_on_ac = now_on_ac
+
+        ja_avisada = self._pendente is not None
+        if decisao.profile is None:
+            decisao = self._retoma_pendente(decisao, config, perfil, now_on_ac)
+
+        # Devolver e consumir o guardado. So vale se a escrita passar.
+        devolvendo = (
+            decisao.profile is not None
+            and config.saved_ac_profile is not None
+            and decisao.config.saved_ac_profile is None
+        )
+
+        # A escrita vem ANTES da gravacao, e a ordem importa: antes era o
+        # contrario, e uma devolucao recusada ja tinha apagado do disco o
+        # perfil que deveria voltar.
+        if decisao.profile is not None:
+            try:
+                self.sysfs.write(self.sysfs.profile_path(), decisao.profile)
+            except OSError as erro:
+                if devolvendo:
+                    # O caso real: cabo ligado e bateria abaixo de 40%.
+                    # O firmware ainda se diz fora da tomada e recusa. O
+                    # guardado fica, e a devolucao e tentada de novo.
+                    if not ja_avisada:
+                        self.log.warning(
+                            "o firmware recusou devolver %s (%s); acontece com a "
+                            "bateria abaixo de uns 40%%. Fica pendente",
+                            decisao.profile,
+                            erro,
+                        )
+                    self._pendente = (decisao.profile, perfil)
+                    decisao = decisao._replace(config=config)
+                else:
+                    # Acontece de verdade: sem a regra udev aplicada, ou
+                    # numa corrida em que o cabo volta entre a decisao e
+                    # a escrita.
+                    self.log.warning(
+                        "não foi possível escrever o perfil %s: %s",
+                        decisao.profile,
+                        erro,
+                    )
+            else:
+                # O que acabou de ser escrito e o perfil em vigor: quem
+                # vem depois nao precisa perguntar de novo ao firmware.
+                perfil = decisao.profile
+                self._pendente = None
+                self.log.info("perfil -> %s (%s)", decisao.profile, decisao.reason)
+
         # A memoria acompanha a decisao, tenha a gravacao dado certo ou nao.
         self._saved_memoria = decisao.config.saved_ac_profile
 
@@ -194,23 +245,33 @@ class Agent:
             except OSError as erro:
                 self.log.warning("não foi possível gravar a configuração: %s", erro)
 
-        if decisao.profile is not None:
-            try:
-                self.sysfs.write(self.sysfs.profile_path(), decisao.profile)
-                # O que acabou de ser escrito e o perfil em vigor: quem
-                # vem depois nao precisa perguntar de novo ao firmware.
-                perfil = decisao.profile
-                self.log.info("perfil -> %s (%s)", decisao.profile, decisao.reason)
-            except OSError as erro:
-                # Acontece de verdade: sem a regra udev aplicada, ou numa
-                # corrida em que o cabo volta entre a decisao e a escrita.
-                self.log.warning(
-                    "não foi possível escrever o perfil %s: %s", decisao.profile, erro
-                )
-
         self._reconcile_maximum(decisao.config, now_on_ac, perfil)
 
         return decisao
+
+    def _retoma_pendente(self, decisao, config, perfil, on_ac):
+        """Tenta de novo a devolucao que o firmware recusou.
+
+        Tres saidas. Na bateria a pendencia some da memoria, mas o
+        guardado fica no arquivo para a proxima vez que o cabo entrar.
+        Se o perfil mudou desde a recusa, alguem escolheu a mao -- e
+        carregar de 26% a 40% leva minutos, tempo de sobra para isso --
+        entao a escolha vence e a devolucao e cancelada. Senao, tenta.
+        """
+        if self._pendente is None:
+            return decisao
+        if not on_ac:
+            self._pendente = None
+            return decisao
+
+        guardado, visto = self._pendente
+        limpo = dataclasses.replace(config, saved_ac_profile=None)
+        if perfil != visto:
+            self._pendente = None
+            return Decision(
+                None, limpo, "devolução cancelada: o perfil foi escolhido à mão"
+            )
+        return Decision(guardado, limpo, f"carga suficiente: devolvendo {guardado}")
 
     def _reconcile_maximum(self, config, on_ac, perfil_atual):
         """Mantém o modo após login, suspensão e alterações externas.

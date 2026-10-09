@@ -354,3 +354,103 @@ def test_once_sem_driver_continua_acusando(tmp_path):
     from nexus_sense.__main__ import main
 
     assert main(["--root", str(tmp_path / "vazia"), "--once"]) == 1
+
+
+# ---------------------------------------------------------------------
+# Abaixo de 40% de bateria o firmware se diz fora da tomada
+# ---------------------------------------------------------------------
+
+
+class SysfsAbaixoDe40(Sysfs):
+    """O ANV15-52 com o cabo ligado e a bateria abaixo de 40%.
+
+    `ACAD/online` diz 1, e mesmo assim o firmware recusa os perfis de
+    tomada com EOPNOTSUPP -- para ele a maquina ainda esta na bateria.
+    Medido em 2026-09-30 e de novo em 2026-10-09. Ver armadilha 27.
+    """
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.recusa = True
+
+    def write(self, path, value):
+        from pathlib import Path
+
+        from nexus_sense.model import AC_ONLY
+
+        if self.recusa and Path(path).name == "profile" and str(value) in AC_ONLY:
+            raise OSError(95, "Operation not supported")
+        super().write(path, value)
+
+
+def _religado_abaixo_de_40(tmp_path):
+    """Estava em balanced-performance, tirou o cabo, religou com pouca
+    carga. Devolve (raiz, caminho, sysfs, agente) ja depois da recusa."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    caminho = liga(tmp_path)
+    sysfs = SysfsAbaixoDe40(raiz)
+    agente = Agent(sysfs, caminho)
+    agente.tick()
+    desconecta(raiz)
+    agente.tick()
+    assert perfil(raiz) == "balanced"
+    conecta(raiz)
+    agente.tick()
+    return raiz, caminho, sysfs, agente
+
+
+def test_religar_abaixo_de_40_nao_perde_o_perfil_guardado(tmp_path):
+    """O defeito: o guardado era apagado ANTES de a escrita dar certo.
+    Recusada a escrita, a maquina ficava em balanced para sempre."""
+    raiz, caminho, _sysfs, _agente = _religado_abaixo_de_40(tmp_path)
+
+    assert perfil(raiz) == "balanced"
+    assert load(caminho).saved_ac_profile == "balanced-performance"
+
+
+def test_o_perfil_volta_quando_a_carga_passa_de_40(tmp_path, caplog):
+    raiz, caminho, sysfs, agente = _religado_abaixo_de_40(tmp_path)
+    # A recusa ja foi dita uma vez, na religada. Daqui em diante a espera
+    # nao pode encher o journal.
+    assert len(_avisos(caplog)) == 1
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(5):
+            agente.tick()
+        assert perfil(raiz) == "balanced"
+        assert len(_avisos(caplog)) == 0
+
+        sysfs.recusa = False
+        agente.tick()
+
+    assert perfil(raiz) == "balanced-performance"
+    assert load(caminho).saved_ac_profile is None
+
+
+def test_escolha_manual_durante_a_espera_cancela_a_devolucao(tmp_path):
+    """Carregar de 26% a 40% leva minutos. Se nesse meio tempo voce
+    escolhe outro perfil, a escolha e sua: o agente nao pode desfaze-la
+    quando a carga chegar."""
+    raiz, caminho, sysfs, agente = _religado_abaixo_de_40(tmp_path)
+
+    Sysfs(raiz).write(Sysfs(raiz).profile_path(), "low-power")
+    agente.tick()
+    sysfs.recusa = False
+    agente.tick()
+
+    assert perfil(raiz) == "low-power"
+    assert load(caminho).saved_ac_profile is None
+
+
+def test_tirar_o_cabo_durante_a_espera_guarda_para_a_proxima(tmp_path):
+    raiz, caminho, sysfs, agente = _religado_abaixo_de_40(tmp_path)
+
+    desconecta(raiz)
+    agente.tick()
+    assert load(caminho).saved_ac_profile == "balanced-performance"
+
+    sysfs.recusa = False
+    conecta(raiz)
+    agente.tick()
+    assert perfil(raiz) == "balanced-performance"
