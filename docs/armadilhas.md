@@ -686,6 +686,14 @@ Em 2026-10-09 entraram mais duas, que não leem antes de escrever mas são
 **sequências** de várias chamadas: `predator_fan_speed_store` (até três
 chamadas WMI, mais o par de variáveis que `fan_speed` devolve) e o botão N.
 
+E, no mesmo dia, as três que faltavam: quem **lê** esse par
+(`predator_fan_speed_show`) e as duas funções de estado, que rodam no `probe` e
+no `remove` com os atributos já no ar. A do `probe` parece contrariar a seção
+"Por que NÃO travar todos os pontos de entrada", logo abaixo, e não contraria:
+o que ali trava a máquina é segurar a trava **durante os registros**. A
+restauração de estado vem depois deles e só fala com o firmware e com o
+arquivo — nada que chame o driver de volta.
+
 ### E uma terceira trava, que não é nossa
 
 O núcleo do `platform_profile` tem a dele, e ela entra na ordem sem aparecer no

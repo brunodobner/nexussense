@@ -338,4 +338,48 @@ else
   echo "  FALHA hwmon sem rotulos: temp1/temp2/temp3 nao dizem o que medem"; fail=1
 fi
 
+# --- o que sobrou da 2.3: quem LE o par, e quem o restaura
+#
+# A 2.3 travou os escritores. Ficaram de fora o leitor de fan_speed --
+# dois inteiros, lidos enquanto um escritor troca o par -- e as duas
+# funcoes de estado, que rodam no probe e no remove com os atributos no
+# ar: um escritor que chegasse nesse instante se intercalaria com a
+# restauracao.
+for fn in predator_fan_speed_show acer_predator_state_load acer_predator_state_save; do
+  corpo=$(corpo_de "$fn")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+    echo "  OK   ${fn} roda sob o acer_op_lock"
+  else
+    echo "  FALHA ${fn} nao toma o acer_op_lock"; fail=1
+  fi
+done
+
+# As duas de dentro sao chamadas com a trava ja tomada.
+for fn in acer_predator_state_restore acer_predator_state_update; do
+  corpo=$(corpo_de "$fn")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'acer_op_lock'; then
+    echo "  FALHA ${fn} toma acer_op_lock: trava sozinha no probe ou no remove"; fail=1
+  else
+    echo "  OK   ${fn} nao toma a trava que o chamador ja tem"
+  fi
+done
+
+# --- a escrita da bateria reconhece a recusa do firmware
+#
+# A condicao so via falha quando uReturn E o byte reservado eram
+# diferentes de zero: uma recusa com o reservado em zero passava por
+# sucesso, e a interface mostrava como feito o que o firmware negou.
+# Medido em 2026-10-09: quatro escritas que valeram, todas com retorno
+# 00 00 00 00. O byte reservado nao decide nada.
+corpo=$(corpo_de 'battery_health_set')
+if printf '%s' "$corpo" | grep -q 'uReturn != 0 && ret.uReservedOut != 0'; then
+  echo "  FALHA battery_health_set so ve recusa se o byte reservado ajudar"; fail=1
+elif printf '%s' "$corpo" | grep -q 'if (ret.uReturn != 0)'; then
+  echo "  OK   battery_health_set trata uReturn diferente de zero como recusa"
+else
+  echo "  FALHA battery_health_set nao confere o retorno do firmware"; fail=1
+fi
+
 exit $fail
