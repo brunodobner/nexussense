@@ -177,7 +177,7 @@ enum acer_wmi_gaming_misc_setting
 static ssize_t version_show(struct device *dev, struct device_attribute *attr,
                             char *buf)
 {
-    return sprintf(buf, "%s\n", DRIVER_VERSION);
+    return sysfs_emit(buf, "%s\n", DRIVER_VERSION);
 }
 static DEVICE_ATTR_RO(version);
 
@@ -1040,25 +1040,6 @@ static int acer_gsensor_event(void)
 /* Fan Speed */
 static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed);
 
-//  static int acer_get_fan_speed(int fan) {
-//      if (quirks->predator_v4 || quirks->nitro_sense) {
-//          acpi_status status;
-//          u64 fanspeed;
-
-//          status = WMI_gaming_execute_u64(
-//              ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
-//              fan == 0 ? ACER_WMID_CMD_GET_PREDATOR_V4_CPU_FAN_SPEED :
-//                     ACER_WMID_CMD_GET_PREDATOR_V4_GPU_FAN_SPEED,
-//              &fanspeed);
-
-//          if (ACPI_FAILURE(status))
-//              return -EIO;
-
-//          return FIELD_GET(ACER_PREDATOR_V4_FAN_SPEED_READ_BIT_MASK, fanspeed);
-//      }
-//      return -EOPNOTSUPP;
-//  }
-
 static int
 acer_predator_v4_platform_profile_get(struct device *dev,
                                       enum platform_profile_option *profile)
@@ -1236,17 +1217,6 @@ acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
         pr_info(" - Performance profile supported\n");
     }
 
-    // Used to set the minimum platform profile to balanced but caused
-    // issues while retying to set the profile as it already found balanced and did'nt retry
-
-    // if (bitmap_empty(choices, PLATFORM_PROFILE_LAST))
-    // {
-    //     pr_warn("No thermal profiles detected, using defaults\n");
-    //     set_bit(PLATFORM_PROFILE_BALANCED, choices);
-    //     acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-    //     last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-    // }
-
     pr_info("Max performance profile: %d, Last non-turbo profile: %d\n",
             acer_predator_v4_max_perf, last_non_turbo_profile);
 
@@ -1270,7 +1240,6 @@ static int acer_platform_profile_setup(struct platform_device *device)
     int retry;
     int max_retries = 10;
     int retry_delay_ms = 100;
-    //int err;
 
     if (quirks->nitro_sense)
     {
@@ -1285,28 +1254,6 @@ static int acer_platform_profile_setup(struct platform_device *device)
             {
                 platform_profile_support = true;
                 pr_info("Platform profile registered successfully on attempt %d\n", retry + 1);
-
-                // Dont need the logs anymore
-                // // Log the available profiles
-                // if (platform_profile_device)
-                // {
-                //     unsigned long choices = 0;
-                //     err = acer_predator_v4_platform_profile_probe(NULL, &choices);
-                //     if (!err)
-                //     {
-                //         pr_info("Available platform profiles:\n");
-                //         if (test_bit(PLATFORM_PROFILE_LOW_POWER, &choices))
-                //             pr_info("- LOW_POWER\n");
-                //         if (test_bit(PLATFORM_PROFILE_QUIET, &choices))
-                //             pr_info("- QUIET\n");
-                //         if (test_bit(PLATFORM_PROFILE_BALANCED, &choices))
-                //             pr_info("- BALANCED\n");
-                //         if (test_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, &choices))
-                //             pr_info("- BALANCED_PERFORMANCE\n");
-                //         if (test_bit(PLATFORM_PROFILE_PERFORMANCE, &choices))
-                //             pr_info("- PERFORMANCE\n");
-                //     }
-                // }
 
                 return 0;
             }
@@ -1866,7 +1813,7 @@ static ssize_t predator_usb_charging_show(struct device *dev, struct device_attr
         return -ENODEV;
     }
     pr_debug("usb charging get status: %llu\n", result);
-    return sprintf(buf, "%d\n", acer_usb_charging_decode(result));
+    return sysfs_emit(buf, "%d\n", acer_usb_charging_decode(result));
 }
 
 static ssize_t predator_usb_charging_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -2092,7 +2039,7 @@ static ssize_t predator_battery_limit_show(struct device *dev,
     if (ACPI_FAILURE(status))
         return -ENODEV;
 
-    return sprintf(buf, "%d\n", enabled);
+    return sysfs_emit(buf, "%d\n", enabled);
 }
 
 static ssize_t predator_battery_limit_store(struct device *dev,
@@ -2123,7 +2070,7 @@ static ssize_t predator_battery_calibration_show(struct device *dev,
     if (ACPI_FAILURE(status))
         return -ENODEV;
 
-    return sprintf(buf, "%d\n", enabled);
+    return sysfs_emit(buf, "%d\n", enabled);
 }
 
 static ssize_t preadtor_battery_calibration_store(struct device *dev,
@@ -2160,7 +2107,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
 
     if (t_cpu_fan_speed == 100 && t_gpu_fan_speed == 100)
     {
-        pr_info("MAX FAN MODE!\n");
+        pr_debug("MAX FAN MODE!\n");
         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x820009, NULL);
         if (ACPI_FAILURE(status))
         {
@@ -2170,7 +2117,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
     }
     else if (t_cpu_fan_speed == 0 && t_gpu_fan_speed == 0)
     {
-        pr_info("AUTO FAN MODE!\n");
+        pr_debug("AUTO FAN MODE!\n");
         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x410009, NULL);
         if (ACPI_FAILURE(status))
         {
@@ -2182,7 +2129,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
     {
         if (t_cpu_fan_speed == 0)
         {
-            pr_info("CUSTOM FAN MODE (GPU)\n");
+            pr_debug("CUSTOM FAN MODE (GPU)\n");
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x10001, NULL);
             if (ACPI_FAILURE(status))
             {
@@ -2204,7 +2151,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
         }
         else if (t_gpu_fan_speed == 0)
         {
-            pr_info("CUSTOM FAN MODE (CPU)\n");
+            pr_debug("CUSTOM FAN MODE (CPU)\n");
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x400008, NULL);
             if (ACPI_FAILURE(status))
             {
@@ -2226,7 +2173,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
         }
         else
         {
-            pr_info("CUSTOM FAN MODE (MIXED)!\n");
+            pr_debug("CUSTOM FAN MODE (MIXED)!\n");
             // set gaming behvaiour mode to custom
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC30009, NULL);
             if (ACPI_FAILURE(status))
@@ -2257,7 +2204,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
 
     cpu_fan_speed = t_cpu_fan_speed;
     gpu_fan_speed = t_gpu_fan_speed;
-    pr_info("Fan speeds updated: CPU=%d, GPU=%d\n", cpu_fan_speed, gpu_fan_speed);
+    pr_debug("Fan speeds updated: CPU=%d, GPU=%d\n", cpu_fan_speed, gpu_fan_speed);
 
     return AE_OK;
 }
@@ -2266,7 +2213,7 @@ static ssize_t predator_fan_speed_show(struct device *dev,
                                        struct device_attribute *attr,
                                        char *buf)
 {
-    return sprintf(buf, "%d,%d\n", cpu_fan_speed, gpu_fan_speed);
+    return sysfs_emit(buf, "%d,%d\n", cpu_fan_speed, gpu_fan_speed);
 }
 
 static ssize_t predator_fan_speed_store(struct device *dev,
@@ -2586,7 +2533,7 @@ static ssize_t predator_backlight_timeout_show(struct device *dev, struct device
         u8 timeout = (result >> 40) & 0xFF;
 
         /* 0xFF = funcao nao implementada, como no lcd_override. */
-        return sprintf(buf, "%d\n", timeout == 0xFF ? -1 : timeout ? 1 : 0);
+        return sysfs_emit(buf, "%d\n", timeout == 0xFF ? -1 : timeout ? 1 : 0);
     }
 }
 
@@ -2791,18 +2738,52 @@ static int acer_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
     }
 }
 
+/*
+ * Rotulos, na ordem dos canais acima. Sem eles o hwmon mostra temp1,
+ * temp2 e temp3 e cabe a quem le adivinhar. O terceiro leva o nome que o
+ * firmware da ao sensor; o que ele mede nesta placa nao foi apurado.
+ */
+static const char *const acer_wmi_temp_label[] = {
+    [0] = "CPU",
+    [1] = "GPU",
+    [2] = "External 2",
+};
+
+static const char *const acer_wmi_fan_label[] = {
+    [0] = "CPU",
+    [1] = "GPU",
+};
+
+static int acer_wmi_hwmon_read_string(struct device *dev,
+                                      enum hwmon_sensor_types type, u32 attr,
+                                      int channel, const char **str)
+{
+    switch (type)
+    {
+    case hwmon_temp:
+        *str = acer_wmi_temp_label[channel];
+        return 0;
+    case hwmon_fan:
+        *str = acer_wmi_fan_label[channel];
+        return 0;
+    default:
+        return -EOPNOTSUPP;
+    }
+}
+
 static const struct hwmon_channel_info *const acer_wmi_hwmon_info[] = {
     HWMON_CHANNEL_INFO(temp,
-                       HWMON_T_INPUT,
-                       HWMON_T_INPUT,
-                       HWMON_T_INPUT),
+                       HWMON_T_INPUT | HWMON_T_LABEL,
+                       HWMON_T_INPUT | HWMON_T_LABEL,
+                       HWMON_T_INPUT | HWMON_T_LABEL),
     HWMON_CHANNEL_INFO(fan,
-                       HWMON_F_INPUT,
-                       HWMON_F_INPUT),
+                       HWMON_F_INPUT | HWMON_F_LABEL,
+                       HWMON_F_INPUT | HWMON_F_LABEL),
     NULL};
 
 static const struct hwmon_ops acer_wmi_hwmon_ops = {
     .read = acer_wmi_hwmon_read,
+    .read_string = acer_wmi_hwmon_read_string,
     .is_visible = acer_wmi_hwmon_is_visible,
 };
 

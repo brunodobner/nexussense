@@ -311,4 +311,31 @@ else
   echo "  FALHA a validacao nao cobre ventoinha 0-100 e perfil anunciado"; fail=1
 fi
 
+# --- limpeza (tarefa 2.5)
+#
+# Nada aqui muda comportamento; as tres checagens existem para a limpeza
+# nao voltar atras calada. sysfs_emit conhece o tamanho da pagina, sprintf
+# nao. E o caminho da ventoinha escrevia duas linhas no log do kernel a
+# cada ajuste -- o unico ruido por-operacao que sobrou depois de
+# 2026-09-12.
+n=$(grep -c '[^n]sprintf(buf' "$S" || true)
+if [ "$n" -eq 0 ]; then
+  echo "  OK   os _show usam sysfs_emit"
+else
+  echo "  FALHA $n _show ainda com sprintf"; fail=1
+fi
+
+n=$(corpo_de 'acer_set_fan_speed' | grep -c 'pr_info(' || true)
+if [ "$n" -eq 0 ]; then
+  echo "  OK   ajustar a ventoinha nao escreve no log em repouso"
+else
+  echo "  FALHA acer_set_fan_speed tem $n pr_info por operacao"; fail=1
+fi
+
+if corpo_de 'acer_wmi_hwmon_read_string' | grep -q 'acer_wmi_temp_label'; then
+  echo "  OK   os sensores do hwmon tem rotulo"
+else
+  echo "  FALHA hwmon sem rotulos: temp1/temp2/temp3 nao dizem o que medem"; fail=1
+fi
+
 exit $fail
