@@ -618,6 +618,45 @@ gastou 2 min 29 s de CPU em 12 h 08 min — **0,34% de um núcleo**.
 Numa **sessão nova**, pelo instalador: seção 5 de
 [plano-melhorias.md](plano-melhorias.md). Nada pendente da etapa 2 a bloqueia.
 
+**Ponto de partida:** `master` em v1.2.2. O baseline esperado é 362 na suíte
+Python e, na shell, 16 passam e 2 pulam — sem root, com root e sob `LC_ALL=C`.
+Se o capturado no começo da sessão for outro, a diferença é notícia.
+
+**O que a etapa 2 viu no instalador e deixou para a 3**, lido no `setup.sh`:
+
+- **`dkms status ... | grep -q installed`** em `install_drivers` e em
+  `test-install-drivers.sh`. O `grep -q` sai no primeiro acerto e o `dkms`
+  reclama: `echo: write error: Broken pipe`. Com `grep installed > /dev/null`
+  some — foi assim no portão curto da 2b.
+- **`install_nexus_sense` diz "Usuário … adicionado ao grupo" toda vez**, e "o
+  grupo só vale depois de relogar", mesmo com o usuário já dentro: o `usermod
+  -aG` e a mensagem não perguntam antes. A 3.4 mexe em `detect_desktop_user`,
+  que alimenta esse trecho.
+- **O grupo é criado com `groupadd -r`, sem gid fixo.** Hoje é 950. A decisão D5
+  manda a desinstalação apagá-lo, e o portão da etapa 3 desinstala e reinstala
+  na mesma chamada: se o gid recriado for outro, a sessão em curso — agente e
+  bandeja inclusive — fica sem poder escrever nos atributos até relogar. **Medir
+  o gid antes e depois**, e não contar com escrita sem root entre a reinstalação
+  e o reinício.
+
+**O que vale para o roteiro do portão**, e custou duas reprovações falsas na
+etapa 2:
+
+- índice de `rfkill` e de `hwmon` se procura pelo nome, na hora de usar
+  (armadilhas 19 e 19b) — a 3.6 recarrega o módulo dez vezes;
+- `LC_ALL=C` só na frente do comando que precisa, não em `export` (armadilha 28);
+- a condição que o roteiro exige se mede quando ele roda, não quando se pede a
+  senha: o diálogo do `pkexec` já ficou 70 minutos aberto;
+- o scratchpad é tmpfs e a etapa termina em reinício: o que o portão mediu vai
+  para este arquivo **antes** de reiniciar;
+- dizer no chat quando um diálogo de senha ou um gesto está sendo esperado. Uma
+  notificação sozinha passou despercebida.
+
+**Para a 3.3**, que tira o serviço root de tecla: o caminho que fica foi
+exercitado 16 vezes na etapa 2 — o botão N chega como tecla, o hwdb a traduz em
+`prog1` e o atalho do KDE abre o app. Cada aperto aparece no journal do usuário
+como `Started Nexus Sense - Controle do laptop`, o que serve de sonda sem root.
+
 ---
 
 ## A sessão de 2026-09-11/12, e onde ela parou
