@@ -115,6 +115,8 @@ class Agent:
         self.interval = interval
         self.log = logger or LOG
         self._was_on_ac = None
+        # None ate a primeira passada; depois, se o driver estava la.
+        self._driver_presente = None
         # Ultimo perfil de tomada conhecido. Espelha o arquivo quando ele
         # e gravavel, e o substitui quando nao e.
         self._saved_memoria = None
@@ -148,8 +150,17 @@ class Agent:
         perfil = self._read_profile()
 
         if now_on_ac is None or perfil is None:
+            # Esperar, e nao sair: quem sai e reaberto pela unit a cada
+            # 3 s, para sempre. Uma linha na ida e outra na volta.
+            if self._driver_presente is not False:
+                self.log.warning("driver ou fonte de energia ausente; aguardando")
+            self._driver_presente = False
             self._release_gpu()
             return Decision(None, load(self.config_path), "driver ou fonte ausente")
+
+        if self._driver_presente is False:
+            self.log.info("driver de volta; retomando")
+        self._driver_presente = True
 
         # Recarregado a cada passada de proposito: a GUI escreve neste
         # arquivo, e o agente nao tem outro jeito de saber.

@@ -293,3 +293,64 @@ def test_falha_persistente_do_modo_maximo_avisa_uma_vez(tmp_path, caplog):
         agente._maximum.runner = quebrado
         agente.tick()
         assert len(_avisos(caplog)) == 2
+
+
+def test_sem_driver_o_agente_avisa_uma_vez_e_retoma(tmp_path, caplog):
+    """Driver ausente nao e motivo para morrer: e o cenario de uma
+    atualizacao de kernel em que o DKMS falhou (armadilha 26). O agente
+    espera, e quando o modulo aparece segue sem ninguem precisar relogar."""
+    raiz = tmp_path / "raiz"
+    agente = Agent(Sysfs(raiz), liga(tmp_path))
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(5):
+            assert agente.tick().profile is None
+        assert len(_avisos(caplog)) == 1
+        assert "ausente" in caplog.text
+
+        build_tree(raiz, profile="balanced")
+        agente.tick()
+        assert "de volta" in caplog.text
+        assert len(_avisos(caplog)) == 1
+
+
+def test_main_sem_driver_fica_vivo_em_vez_de_sair(tmp_path):
+    """Sair com 1 virava laco. A unit tem Restart=always e RestartSec=3,
+    e o limite de 5 partidas em 10 s nunca e atingido nesse ritmo.
+    Reproduzido em 2026-10-09 numa unit descartavel: 8 reinicios em 26 s,
+    sem parar."""
+    import signal
+    import threading
+    import time
+
+    from nexus_sense.__main__ import main
+
+    antigos = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGINT)}
+    # Cancelado no finally: se main voltar antes do sinal, ele nao pode
+    # sobrar apontado para o proprio pytest.
+    alarme = threading.Timer(0.3, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    inicio = time.monotonic()
+    alarme.start()
+    try:
+        codigo = main(
+            [
+                "--root", str(tmp_path / "vazia"),
+                "--config", str(tmp_path / "config.toml"),
+                "--interval", "0.01",
+            ]
+        )
+        durou = time.monotonic() - inicio
+    finally:
+        alarme.cancel()
+        for sinal, tratador in antigos.items():
+            signal.signal(sinal, tratador)
+
+    assert durou >= 0.25, "o agente saiu sozinho em vez de esperar o driver"
+    assert codigo == 0
+
+
+def test_once_sem_driver_continua_acusando(tmp_path):
+    """`--once` e diagnostico de uma passada: ali sair com erro informa."""
+    from nexus_sense.__main__ import main
+
+    assert main(["--root", str(tmp_path / "vazia"), "--once"]) == 1
