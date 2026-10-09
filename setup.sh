@@ -869,6 +869,42 @@ install_drivers() {
   return 0
 }
 
+# Cria o grupo nexus_sense e poe nele o usuario do desktop -- e so anuncia
+# o que de fato fez.
+#
+# Numa reinstalacao o usuario ja esta dentro. Dizer "adicionado" e "so vale
+# depois de relogar" toda vez manda relogar sem motivo, e ensina a ignorar
+# o aviso no dia em que ele for verdade.
+ensure_nexus_group() {
+  local alvo mudou=0
+
+  if ! getent group nexus_sense > /dev/null; then
+    groupadd -r nexus_sense
+    echo -e "${YELLOW}Grupo nexus_sense criado.${NC}"
+    mudou=1
+  fi
+
+  alvo=$(detect_desktop_user)
+  if [ -n "$alvo" ]; then
+    if id -nG "$alvo" 2>/dev/null | tr ' ' '\n' | grep -qx nexus_sense; then
+      echo -e "${BLUE}Usuário ${alvo} já está no grupo nexus_sense.${NC}"
+    else
+      usermod -aG nexus_sense "$alvo"
+      echo -e "${BLUE}Usuário ${alvo} adicionado ao grupo nexus_sense.${NC}"
+      mudou=1
+    fi
+  fi
+
+  [ "$mudou" -eq 1 ] || return 0
+
+  # A spec exige que o instalador diga isto em voz alta ao criar o grupo.
+  echo -e "${YELLOW}Atenção: quem estiver no grupo nexus_sense pode alterar${NC}"
+  echo -e "${YELLOW}as ventoinhas e o perfil térmico sem senha. O driver limita${NC}"
+  echo -e "${YELLOW}a ventoinha a 0-100 e 0 significa automático, então o pior${NC}"
+  echo -e "${YELLOW}caso é modesto -- mas é uma permissão que antes não existia.${NC}"
+  echo -e "${YELLOW}O grupo só vale depois de relogar.${NC}"
+}
+
 # Instala o Nexus Sense: o pacote Python, os dois lancadores, os icones,
 # a regra udev com o grupo e a unit de usuario do agente.
 #
@@ -933,22 +969,7 @@ EOL
     /etc/xdg/autostart/nexus-sense-autostart.desktop
 
   # --- o grupo, e o aviso que ele exige
-  if ! getent group nexus_sense > /dev/null; then
-    groupadd -r nexus_sense
-    echo -e "${YELLOW}Grupo nexus_sense criado.${NC}"
-  fi
-  local alvo
-  alvo=$(detect_desktop_user)
-  if [ -n "$alvo" ]; then
-    usermod -aG nexus_sense "$alvo"
-    echo -e "${BLUE}Usuário ${alvo} adicionado ao grupo nexus_sense.${NC}"
-  fi
-  # A spec exige que o instalador diga isto em voz alta ao criar o grupo.
-  echo -e "${YELLOW}Atenção: quem estiver no grupo nexus_sense pode alterar${NC}"
-  echo -e "${YELLOW}as ventoinhas e o perfil térmico sem senha. O driver limita${NC}"
-  echo -e "${YELLOW}a ventoinha a 0-100 e 0 significa automático, então o pior${NC}"
-  echo -e "${YELLOW}caso é modesto -- mas é uma permissão que antes não existia.${NC}"
-  echo -e "${YELLOW}O grupo só vale depois de relogar.${NC}"
+  ensure_nexus_group
 
   # --- a regra udev que aplica o grupo aos seis atributos
   install -m 644 "${RAIZ}/packaging/udev/60-nexus-sense.rules" \
