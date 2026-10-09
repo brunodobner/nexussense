@@ -64,8 +64,8 @@ A instalação completa:
 A GUI usa PySide6 e `dbus-python` (no Arch/CachyOS: `pyside6` e
 `python-dbus`). O extra Python `gui` declara essas dependências. A bandeja
 com scroll requer Qt com dispatcher GLib; sem ele, usa `QSystemTrayIcon`.
-O instalador também obtém `powerprofilesctl` e `nvidia-settings`, usados pelo
-modo **Desempenho máximo**, e confirma as dependências antes de copiar o app.
+O instalador também obtém o `power-profiles-daemon`, usado pelo modo
+**Desempenho máximo**, e confirma as dependências antes de copiar o app.
 
 ## Componentes
 

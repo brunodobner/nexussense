@@ -435,6 +435,25 @@ is_llvm_kernel() {
   return 1
 }
 
+# Pacotes de headers dos kernels BOOTAVEIS, no Arch e derivados.
+#
+# Cada kernel grava o nome do proprio pacote em
+# /lib/modules/<versao>/pkgbase, e os headers dele sao "<pkgbase>-headers".
+# Pedir o "linux-headers" generico so serve a quem roda o kernel "linux":
+# numa maquina so com linux-cachyos ele instala headers de um kernel que
+# nao existe -- o diretorio so-headers da armadilha 22b -- e deixa sem
+# headers o kernel que da boot.
+#
+# vmlinuz e o discriminador de "bootavel", o mesmo de install_drivers. O
+# argumento existe para o teste plantar uma arvore.
+arch_header_packages() {
+  local raiz="${1:-/lib/modules}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] && [ -r "${d}pkgbase" ] || continue
+    printf '%s-headers\n' "$(cat "${d}pkgbase")"
+  done | sort -u
+}
+
 # Install build dependencies based on distribution.
 # Kernel headers are required for any module build; DKMS is required for
 # the module to survive kernel upgrades. Neither base-devel nor
@@ -442,10 +461,14 @@ is_llvm_kernel() {
 install_build_deps() {
   if command -v pacman &> /dev/null; then
     # Arch-based (including CachyOS, Manjaro, EndeavourOS).
-    # linux-headers covers the stock kernel; other kernels (linux-lts,
-    # linux-cachyos, ...) need their own -headers package, which
-    # check_kernel_headers reports on.
-    pacman -S --needed --noconfirm base-devel linux-headers dkms
+    local headers
+    headers=$(arch_header_packages)
+    if [ -z "$headers" ]; then
+      echo -e "${YELLOW}Nenhum kernel com pkgbase em /lib/modules: instale os headers do seu kernel a mao.${NC}"
+    fi
+    # $headers sem aspas de proposito: e uma lista, um pacote por palavra.
+    # shellcheck disable=SC2086
+    pacman -S --needed --noconfirm base-devel dkms $headers
     if is_llvm_kernel; then
       pacman -S --needed --noconfirm clang llvm lld
     fi
@@ -465,10 +488,12 @@ install_build_deps() {
 # Dependências de execução da janela, bandeja e agente. O pacote Python é
 # copiado para /usr/lib, então estes módulos precisam vir do gerenciador da
 # distribuição, no mesmo Python usado por /usr/bin/nexus-sense.
+#
+# A GPU não entra aqui: o PowerMizer fala com a NVML, que vem com o driver
+# da NVIDIA, e onde ela falta o modo máximo segue sem essa parte.
 runtime_dependencies_ok() {
   python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null &&
-    command -v powerprofilesctl &> /dev/null &&
-    command -v nvidia-settings &> /dev/null
+    command -v powerprofilesctl &> /dev/null
 }
 
 install_runtime_deps() {
@@ -477,20 +502,20 @@ install_runtime_deps() {
   echo -e "${YELLOW}Installing Nexus Sense runtime dependencies...${NC}"
   if command -v pacman &> /dev/null; then
     pacman -S --needed --noconfirm pyside6 python-dbus python-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v apt-get &> /dev/null; then
     apt-get update
     apt-get install -y python3-pyside6.qtcore python3-pyside6.qtgui \
       python3-pyside6.qtwidgets python3-pyside6.qtdbus python3-dbus python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v dnf &> /dev/null; then
     dnf install -y python3-pyside6 python3-dbus python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v zypper &> /dev/null; then
     zypper install -y python3-PySide6 python3-dbus-python python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   else
-    echo -e "${RED}Unknown package manager. Install PySide6, dbus-python, tomli-w, powerprofilesctl and nvidia-settings.${NC}"
+    echo -e "${RED}Unknown package manager. Install PySide6, dbus-python, tomli-w and power-profiles-daemon.${NC}"
     return 1
   fi
 

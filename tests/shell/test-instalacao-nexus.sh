@@ -51,7 +51,6 @@ confere "avisa sobre a permissao nova"      'ventoinhas e o perfil'
 confere "recarrega o udev"                  'udevadm control'
 confere "remove variantes antigas do tray"  "status/nexus-sense-tray\*"
 confere "instala controle do perfil da CPU" 'power-profiles-daemon'
-confere "instala controle da GPU NVIDIA"    'nvidia-settings'
 
 # Nenhum arquivo privilegiado deve reaparecer sem decisao: se alguem
 # ressuscitar o helper, este teste acusa.
