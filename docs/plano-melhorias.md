@@ -144,9 +144,8 @@ e reiniciar agente e bandeja:
 
 ## 4. Etapa 2 — driver
 
-**Portão passado em 2026-10-09, v1.2.2. Falta a partida a frio**, que se
-confere na sessão seguinte. O resultado medido, o que a execução refutou e a
-lista do que conferir depois do reinício estão em [estado.md](estado.md).
+**Fechada em 2026-10-09, v1.2.2**, com a partida a frio conferida. O resultado
+medido e o que a execução refutou estão em [estado.md](estado.md).
 
 Ramo `melhorias/2-driver`. Sessão própria.
 

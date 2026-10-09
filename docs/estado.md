@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 2: portão passou, v1.2.2, falta a partida a frio; etapas 3 e 4 abertas)
+**Última atualização:** 2026-10-09 (melhorias, etapa 2 fechada: v1.2.2, partida a frio conferida; etapas 3 e 4 abertas)
 
 ---
 
@@ -50,7 +50,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
-[~] Melhorias, etapa 2 -- driver     v1.2.2: portao passou; falta conferir a partida a frio
+[x] Melhorias, etapa 2 -- driver     v1.2.2: bitmask identico, partida a frio conferida
 [ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
@@ -433,12 +433,12 @@ Numa sessão nova, pelo driver. O que ela fez está na seção seguinte.
 
 ---
 
-## Melhorias de 2026-10, etapa 2 — o portão passou, falta a partida a frio
+## Melhorias de 2026-10, etapa 2 — fechada, e onde a etapa 3 começa
 
 A etapa do driver, no ramo `melhorias/2-driver`. **v1.2.0 → v1.2.1**, e na
 mesma noite **v1.2.2**, com o que tinha ficado para depois. Tudo foi
-ao hardware antes do merge; o que falta é o reinício, que se confere na sessão
-seguinte — a lista está no fim desta seção.
+ao hardware antes do merge, e a partida a frio foi conferida no mesmo dia — o
+resultado está no fim desta seção.
 
 O que entrou, cada item com teste que falhou primeiro:
 
@@ -578,37 +578,45 @@ build final, que só difere daquele por essa condição (**34 OK, 0 FALHA**).
 - **A ordem de travas do botão N continua sem prova de hardware**, pelo motivo
   da seção acima: o evento não chega.
 
-### O que falta: a partida a frio
+### A partida a frio, que fecha a etapa
 
-A etapa só se dá por fechada depois de um reinício. **No começo da sessão
-seguinte**, antes de qualquer outra coisa:
+Conferida em 2026-10-09 às 19:01, onze minutos depois de um reinício. E não foi
+uma só: o módulo final já tinha passado por **três** partidas do zero — 04:44,
+16:53 e 18:50 — e as três dizem a mesma coisa.
 
-```bash
-journalctl -k -b | grep nexus_sense
-#   capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
-#                                   PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
-#   Thermal states loaded            <- e NAO "Invalid state file" nem "Incomplete"
-#   Thermal states restored successfully
-cat /sys/module/nexus_sense/srcversion          # F9236711C6E76401FD38B7A
-cat /sys/firmware/acpi/platform_profile_choices # low-power quiet balanced balanced-performance
-cat /sys/firmware/acpi/platform_profile         # o perfil de antes do reinicio
-stat -c '%a %U:%G %n' /sys/devices/platform/acer-wmi/nitro_sense/*
-#   664 root:nexus_sense nos cinco, 444 root:root em version
-cat /sys/devices/platform/acer-wmi/hwmon/hwmon*/temp*_label   # CPU GPU "External 2"
-systemctl --user is-active nexus-sense-agent    # active
-journalctl -k -b | grep -c 'Failed to get profile'   # 0
+```
+capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+                                PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+srcversion  F9236711C6E76401FD38B7A   <- o do build final
+perfis      low-power quiet balanced balanced-performance
+perfil      balanced-performance      <- restaurado do estado salvo
+estado      "Thermal states loaded" nas tres; nenhum "Invalid" nem "Incomplete"
+atributos   os seis, 664 root:nexus_sense; version 444 root:root
+hwmon       acer: CPU, GPU, External 2 / ventoinhas CPU, GPU
+rfkill      acer-wireless, acer-bluetooth  (de volta aos indices 0 e 1)
+erro WMI    zero "Failed to get profile"
+agente      ativo
+bandeja     subiu sozinha, filha do systemd do usuario, 12 s depois do boot
+botao N     hwdb com f5=prog1 e autostart no lugar
 ```
 
-Mais a bandeja subindo sozinha. Tudo no lugar, a linha do roteiro vira `[x]`.
+**O par que fecha a 2.4 e a 2b de uma vez:** `Thermal states saved successfully`
+às 18:50:19, no desligamento, e `Thermal states loaded` às 18:50:37, na partida.
+É o validador lendo um arquivo gravado por um desligamento de verdade — e a
+gravação e a leitura já rodando sob `acer_op_lock`, sem travar nenhuma das duas.
 
-O `Thermal states loaded` da partida a frio é a conferência que mais importa:
-é a primeira vez que o validador da 2.4 lê um arquivo gravado pelo desligamento
-de verdade, e não por uma recarga do ensaio.
+Dezesseis linhas do driver no boot inteiro, todas de carga. Uma delas contém a
+palavra `failed` e não é defeito: `module verification failed: signature and/or
+required key missing` é o kernel avisando que o módulo não é assinado, como
+todo módulo de DKMS. Já estava no boot de 2026-10-08, com o driver antigo.
+
+De passagem, o número da etapa 1 se manteve em campo: no boot das 04:44 o agente
+gastou 2 min 29 s de CPU em 12 h 08 min — **0,34% de um núcleo**.
 
 ### Onde a etapa 3 começa
 
 Numa **sessão nova**, pelo instalador: seção 5 de
-[plano-melhorias.md](plano-melhorias.md). Antes dela, a partida a frio acima.
+[plano-melhorias.md](plano-melhorias.md). Nada pendente da etapa 2 a bloqueia.
 
 ---
 
