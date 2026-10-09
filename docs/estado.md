@@ -49,6 +49,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Aviso de DKMS no pacman          v1.1.9: falha de build grita em vez de silenciar
 [-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
+[ ] Melhorias, etapa 1 -- Python     agente e janela; ver plano-melhorias.md
+[ ] Melhorias, etapa 2 -- driver     quatro consertos e limpeza; sessao propria
+[ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
+[ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
 
 ### Concluído
