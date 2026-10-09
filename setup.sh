@@ -898,13 +898,16 @@ install_nexus_sense() {
   install -m 755 "${RAIZ}/packaging/scripts/apply-perms.sh" /usr/lib/nexus-sense/apply-perms.sh
 
   # --- os dois lancadores
+  # -P: sem ele o "-m" poe o diretorio corrente na frente do sys.path. O
+  # agente e a bandeja sobem em $HOME, e um tomli_w.py largado ali era
+  # executado no lugar do verdadeiro. O PYTHONPATH continua valendo.
   cat > /usr/bin/nexus-sense << 'EOL'
 #!/bin/sh
-PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -m nexus_sense.gui.app "$@"
+PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -P -m nexus_sense.gui.app "$@"
 EOL
   cat > /usr/bin/nexus-sense-agent << 'EOL'
 #!/bin/sh
-PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -m nexus_sense "$@"
+PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -P -m nexus_sense "$@"
 EOL
   chmod +x /usr/bin/nexus-sense /usr/bin/nexus-sense-agent
 
