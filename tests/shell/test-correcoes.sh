@@ -172,4 +172,170 @@ else
   echo "  OK   o wrapper WMI nao toma o lock de operacao (sem ciclo)"
 fi
 
+# --- a mensagem de erro nao dereferencia o objeto que acabou de testar
+#
+# "if (!obj || ...) pr_err(..., obj->buffer.length)": quando o firmware
+# nao devolve objeto, e a propria mensagem que derruba o kernel. Nao ha
+# como provocar no hardware -- o firmware sempre responde --, entao a
+# prova e o padrao nao existir. Plano de melhorias 2026-10, tarefa 2.1.
+for fn in battery_health_query battery_health_set; do
+  corpo=$(awk "/^static acpi_status ${fn}\(/,/^}/" "$S")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q '!obj ||'; then
+    echo "  FALHA ${fn} testa !obj e usa obj na mesma condicao"; fail=1
+  elif printf '%s' "$corpo" | grep -q 'if (!obj)'; then
+    echo "  OK   ${fn} trata obj nulo antes de ler dele"
+  else
+    echo "  FALHA ${fn} nao testa obj nulo"; fail=1
+  fi
+done
+
+# --- os _store de um byte nao truncam a entrada
+#
+# sscanf("%hhd") num u8 corta em silencio: "256" vira 0 e "257" vira 1, e
+# os dois passam pela validacao que vem depois. Escrever 256 em
+# battery_limiter desligava o limite de carga. kstrtou8 recusa o que nao
+# cabe, e tambem lixo depois do numero. Tarefa 2.2; a conferencia na
+# maquina -- escrever 256 e ver EINVAL com o valor intacto -- so se faz
+# com o modulo consertado carregado, porque antes dele a escrita vale.
+if grep -q 'sscanf(buf, "%hhd"' "$S"; then
+  echo "  FALHA ainda ha sscanf(\"%hhd\") num _store"; fail=1
+else
+  echo "  OK   nenhum sscanf(\"%hhd\") sobre u8"
+fi
+
+for fn in predator_usb_charging_store predator_battery_limit_store \
+          preadtor_battery_calibration_store predator_backlight_timeout_store; do
+  corpo=$(awk "/^static ssize_t ${fn}\(/,/^}/" "$S")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'kstrtou8(buf, 10, &val)'; then
+    echo "  OK   ${fn} le o byte com kstrtou8"
+  else
+    echo "  FALHA ${fn} nao usa kstrtou8"; fail=1
+  fi
+done
+
+# --- ventoinha e botao N tambem sao operacoes inteiras
+#
+# Ajustar ventoinha sao ate tres chamadas WMI mais o par de variaveis que
+# fan_speed devolve; o botao N le o perfil e a fonte, escreve e talvez
+# baixe as ventoinhas. Sem acer_op_lock, dois escritores se intercalam no
+# meio. Tarefa 2.3.
+corpo_de() {
+  # "&& !/;$/" pula o prototipo: sem isso a faixa abriria na declaracao
+  # antecipada e so fecharia no fim de OUTRA funcao.
+  awk "/^static [a-z_ ]*${1}\(/ && !/;\$/,/^}/" "$S"
+}
+
+for fn in predator_fan_speed_store acer_thermal_profile_cycle; do
+  if corpo_de "$fn" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+    echo "  OK   ${fn} roda sob o acer_op_lock"
+  else
+    echo "  FALHA ${fn} nao toma o acer_op_lock"; fail=1
+  fi
+done
+
+# A trava entra no _store, nao em acer_set_fan_speed: o profile_set chama
+# esta com a trava ja tomada, e mutex do kernel nao e reentrante.
+corpo=$(corpo_de 'acer_set_fan_speed')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_set_fan_speed"; exit 3; }
+if printf '%s' "$corpo" | grep -q 'acer_op_lock'; then
+  echo "  FALHA acer_set_fan_speed toma acer_op_lock: trava sozinha no profile_set"; fail=1
+else
+  echo "  OK   acer_set_fan_speed nao toma a trava que o chamador ja tem"
+fi
+
+# A ordem com a trava do nucleo do platform_profile. O nucleo toma a dele
+# e chama profile_set, que toma a nossa. platform_profile_notify toma a
+# dele tambem -- entao quem avisa nao pode estar com a nossa na mao.
+corpo=$(corpo_de 'acer_thermal_profile_change')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_thermal_profile_change"; exit 3; }
+if ! printf '%s' "$corpo" | grep -q 'platform_profile_notify'; then
+  echo "  FALHA acer_thermal_profile_change nao avisa o nucleo da troca"; fail=1
+elif printf '%s' "$corpo" | grep -q '(&acer_op_lock)'; then
+  echo "  FALHA platform_profile_notify e acer_op_lock na mesma funcao: ordem invertida"; fail=1
+else
+  echo "  OK   o aviso ao nucleo sai fora do acer_op_lock"
+fi
+
+if corpo_de 'acer_thermal_profile_cycle' | grep -q 'platform_profile_notify('; then
+  echo "  FALHA acer_thermal_profile_cycle avisa o nucleo com a trava tomada"; fail=1
+else
+  echo "  OK   a parte travada do botao N nao chama o nucleo"
+fi
+
+# --- o botao N nao avisa um perfil que nao chegou a registrar
+#
+# Se devm_platform_profile_register falhar nas dez tentativas,
+# platform_profile_device fica com um ERR_PTR, e o aviso o dereferenciava
+# no primeiro aperto do botao. platform_profile_support existia para
+# dizer exatamente isso e ninguem o lia; foi o Clang 23, com W=1, que
+# apontou a variavel escrita e nunca usada.
+if corpo_de 'acer_thermal_profile_change' | grep -B1 'platform_profile_notify(' \
+   | grep -q 'if (platform_profile_support)'; then
+  echo "  OK   o aviso ao nucleo depende de o perfil ter registrado"
+else
+  echo "  FALHA platform_profile_notify roda mesmo sem perfil registrado"; fail=1
+fi
+
+# --- o arquivo de estado e conferido antes de valer
+#
+# /etc/predator_state era lido direto para dentro de current_states. Um
+# arquivo curto ficava pela metade la dentro, com o log dizendo "using
+# defaults"; e um numero qualquer no disco -- ventoinha negativa, perfil
+# que o firmware nao anuncia -- seguia para o firmware. Tarefa 2.4; os
+# arquivos plantados sao ensaio de maquina, no portao.
+corpo=$(corpo_de 'acer_predator_state_load')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_predator_state_load"; exit 3; }
+
+if printf '%s' "$corpo" | grep -q 'kernel_read(file, (char \*)&current_states'; then
+  echo "  FALHA o estado e lido direto para dentro de current_states"; fail=1
+else
+  echo "  OK   o estado e lido para um temporario"
+fi
+
+l_valida=$(printf '%s\n' "$corpo" | grep -n 'acer_predator_state_valid(' | head -1 | cut -d: -f1)
+l_adota=$(printf '%s\n' "$corpo" | grep -n 'current_states = ' | head -1 | cut -d: -f1)
+if [ -n "$l_valida" ] && [ -n "$l_adota" ] && [ "$l_valida" -lt "$l_adota" ]; then
+  echo "  OK   o estado so e adotado depois de validado"
+else
+  echo "  FALHA o estado e adotado sem validacao (valida=${l_valida:-nunca} adota=${l_adota:-nunca})"; fail=1
+fi
+
+corpo=$(corpo_de 'acer_predator_state_valid')
+if printf '%s' "$corpo" | grep -q 'fan_speed > 100' \
+   && printf '%s' "$corpo" | grep -q 'fan_speed < 0' \
+   && printf '%s' "$corpo" | grep -q 'BIT(state->thermal_profile)'; then
+  echo "  OK   a validacao cobre ventoinha 0-100 e perfil anunciado"
+else
+  echo "  FALHA a validacao nao cobre ventoinha 0-100 e perfil anunciado"; fail=1
+fi
+
+# --- limpeza (tarefa 2.5)
+#
+# Nada aqui muda comportamento; as tres checagens existem para a limpeza
+# nao voltar atras calada. sysfs_emit conhece o tamanho da pagina, sprintf
+# nao. E o caminho da ventoinha escrevia duas linhas no log do kernel a
+# cada ajuste -- o unico ruido por-operacao que sobrou depois de
+# 2026-09-12.
+n=$(grep -c '[^n]sprintf(buf' "$S" || true)
+if [ "$n" -eq 0 ]; then
+  echo "  OK   os _show usam sysfs_emit"
+else
+  echo "  FALHA $n _show ainda com sprintf"; fail=1
+fi
+
+n=$(corpo_de 'acer_set_fan_speed' | grep -c 'pr_info(' || true)
+if [ "$n" -eq 0 ]; then
+  echo "  OK   ajustar a ventoinha nao escreve no log em repouso"
+else
+  echo "  FALHA acer_set_fan_speed tem $n pr_info por operacao"; fail=1
+fi
+
+if corpo_de 'acer_wmi_hwmon_read_string' | grep -q 'acer_wmi_temp_label'; then
+  echo "  OK   os sensores do hwmon tem rotulo"
+else
+  echo "  FALHA hwmon sem rotulos: temp1/temp2/temp3 nao dizem o que medem"; fail=1
+fi
+
 exit $fail

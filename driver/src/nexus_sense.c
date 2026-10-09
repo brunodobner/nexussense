@@ -177,7 +177,7 @@ enum acer_wmi_gaming_misc_setting
 static ssize_t version_show(struct device *dev, struct device_attribute *attr,
                             char *buf)
 {
-    return sprintf(buf, "%s\n", DRIVER_VERSION);
+    return sysfs_emit(buf, "%s\n", DRIVER_VERSION);
 }
 static DEVICE_ATTR_RO(version);
 
@@ -528,10 +528,22 @@ static bool has_cap(u32 cap)
  * contrario. Nao ha ciclo possivel porque o caminho interno --
  * acer_wmi_evaluate_method -- nunca toma o acer_op_lock.
  *
- * So as duas funcoes RMW tomam o de cima. Travar os pontos de entrada em
- * geral NAO funciona, e a tentativa travaria a maquina no carregamento:
- * acer_platform_probe registra rfkill, backlight, platform_profile e
- * hwmon, e o kernel chama os callbacks de volta de dentro dele.
+ * Quatro funcoes tomam o de cima, e so elas. Duas leem antes de escrever:
+ * predator_usb_charging_store e acer_predator_v4_platform_profile_set.
+ * Duas sao sequencias de varias chamadas: predator_fan_speed_store e
+ * acer_thermal_profile_cycle, o botao N. acer_set_fan_speed NAO toma --
+ * o profile_set a chama com a trava ja na mao.
+ *
+ * Ha uma terceira trava na conta, que nao e nossa: a do nucleo do
+ * platform_profile, tomada ANTES de ele chamar profile_set. Dai a ordem
+ * completa ser nucleo -> acer_op_lock -> acer_wmi_lock, e dai
+ * acer_thermal_profile_change so chamar platform_profile_notify depois
+ * de soltar acer_op_lock.
+ *
+ * Travar os pontos de entrada em geral NAO funciona, e a tentativa
+ * travaria a maquina no carregamento: acer_platform_probe registra
+ * rfkill, backlight, platform_profile e hwmon, e o kernel chama os
+ * callbacks de volta de dentro dele.
  */
 static DEFINE_MUTEX(acer_op_lock);
 
@@ -1028,25 +1040,6 @@ static int acer_gsensor_event(void)
 /* Fan Speed */
 static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed);
 
-//  static int acer_get_fan_speed(int fan) {
-//      if (quirks->predator_v4 || quirks->nitro_sense) {
-//          acpi_status status;
-//          u64 fanspeed;
-
-//          status = WMI_gaming_execute_u64(
-//              ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
-//              fan == 0 ? ACER_WMID_CMD_GET_PREDATOR_V4_CPU_FAN_SPEED :
-//                     ACER_WMID_CMD_GET_PREDATOR_V4_GPU_FAN_SPEED,
-//              &fanspeed);
-
-//          if (ACPI_FAILURE(status))
-//              return -EIO;
-
-//          return FIELD_GET(ACER_PREDATOR_V4_FAN_SPEED_READ_BIT_MASK, fanspeed);
-//      }
-//      return -EOPNOTSUPP;
-//  }
-
 static int
 acer_predator_v4_platform_profile_get(struct device *dev,
                                       enum platform_profile_option *profile)
@@ -1224,17 +1217,6 @@ acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
         pr_info(" - Performance profile supported\n");
     }
 
-    // Used to set the minimum platform profile to balanced but caused
-    // issues while retying to set the profile as it already found balanced and did'nt retry
-
-    // if (bitmap_empty(choices, PLATFORM_PROFILE_LAST))
-    // {
-    //     pr_warn("No thermal profiles detected, using defaults\n");
-    //     set_bit(PLATFORM_PROFILE_BALANCED, choices);
-    //     acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-    //     last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-    // }
-
     pr_info("Max performance profile: %d, Last non-turbo profile: %d\n",
             acer_predator_v4_max_perf, last_non_turbo_profile);
 
@@ -1258,7 +1240,6 @@ static int acer_platform_profile_setup(struct platform_device *device)
     int retry;
     int max_retries = 10;
     int retry_delay_ms = 100;
-    //int err;
 
     if (quirks->nitro_sense)
     {
@@ -1273,28 +1254,6 @@ static int acer_platform_profile_setup(struct platform_device *device)
             {
                 platform_profile_support = true;
                 pr_info("Platform profile registered successfully on attempt %d\n", retry + 1);
-
-                // Dont need the logs anymore
-                // // Log the available profiles
-                // if (platform_profile_device)
-                // {
-                //     unsigned long choices = 0;
-                //     err = acer_predator_v4_platform_profile_probe(NULL, &choices);
-                //     if (!err)
-                //     {
-                //         pr_info("Available platform profiles:\n");
-                //         if (test_bit(PLATFORM_PROFILE_LOW_POWER, &choices))
-                //             pr_info("- LOW_POWER\n");
-                //         if (test_bit(PLATFORM_PROFILE_QUIET, &choices))
-                //             pr_info("- QUIET\n");
-                //         if (test_bit(PLATFORM_PROFILE_BALANCED, &choices))
-                //             pr_info("- BALANCED\n");
-                //         if (test_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, &choices))
-                //             pr_info("- BALANCED_PERFORMANCE\n");
-                //         if (test_bit(PLATFORM_PROFILE_PERFORMANCE, &choices))
-                //             pr_info("- PERFORMANCE\n");
-                //     }
-                // }
 
                 return 0;
             }
@@ -1317,90 +1276,121 @@ static int acer_platform_profile_setup(struct platform_device *device)
     return 0;
 }
 
+/*
+ * O botao N. This mode key can rotate each mode or toggle turbo mode.
+ * On battery, only ECO and BALANCED mode are available.
+ *
+ * Le o perfil e a fonte de energia, escolhe o proximo, escreve e talvez
+ * baixe as ventoinhas: uma operacao so, sob acer_op_lock, como o
+ * profile_set. Sem isto, apertar o botao enquanto o agente troca o perfil
+ * intercala as duas sequencias.
+ */
+static int acer_thermal_profile_cycle(void)
+{
+    u8 current_tp;
+    int tp, err;
+    u64 on_AC;
+    acpi_status status;
+
+    guard(mutex)(&acer_op_lock);
+
+    err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, &current_tp);
+    if (err)
+        return err;
+    /* Check power source */
+    status = WMI_gaming_execute_u64(
+        ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
+        ACER_WMID_CMD_GET_PREDATOR_V4_BAT_STATUS, &on_AC);
+
+    if (ACPI_FAILURE(status))
+        return -EIO;
+
+    /* On AC - define next profile transitions */
+    if (!on_AC)
+    {
+        if (current_tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
+            tp = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
+        else
+            tp = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
+    }
+    else
+    {
+        switch (current_tp)
+        {
+        case ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO:
+            tp = cycle_gaming_thermal_profile
+                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
+                     : last_non_turbo_profile;
+            break;
+        case ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE:
+            tp = (acer_predator_v4_max_perf == current_tp)
+                     ? last_non_turbo_profile
+                     : acer_predator_v4_max_perf;
+            break;
+        case ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED:
+            tp = cycle_gaming_thermal_profile
+                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE
+                     : acer_predator_v4_max_perf;
+            break;
+        case ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET:
+            tp = cycle_gaming_thermal_profile
+                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED
+                     : acer_predator_v4_max_perf;
+            break;
+        case ACER_PREDATOR_V4_THERMAL_PROFILE_ECO:
+            tp = cycle_gaming_thermal_profile
+                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
+                     : acer_predator_v4_max_perf;
+            break;
+        default:
+            return -EOPNOTSUPP;
+        }
+    }
+
+    err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
+    if (err)
+        return err;
+
+    /* the quiter you become the more you'll be able to hear! */
+    if (tp == ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET || tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
+    {
+        acpi_status stat = acer_set_fan_speed(0, 0);
+        if (ACPI_FAILURE(stat))
+        {
+            return -EIO;
+        }
+    }
+    /* Store non-turbo profile for turbo mode toggle*/
+    if (tp != acer_predator_v4_max_perf)
+        last_non_turbo_profile = tp;
+
+    return 0;
+}
+
 static int acer_thermal_profile_change(void)
 {
+    int err;
+
+    if (!quirks->nitro_sense)
+        return 0;
+
+    err = acer_thermal_profile_cycle();
+    if (err)
+        return err;
+
     /*
-     * This mode key can rotate each mode or toggle turbo mode.
-     * On battery, only ECO and BALANCED mode are available.
+     * Fora do acer_op_lock, e a ordem importa. O nucleo do
+     * platform_profile toma a trava dele e so entao chama profile_set,
+     * que toma a nossa; platform_profile_notify toma a dele tambem.
+     * Avisar com a nossa ainda na mao inverteria a ordem -- botao N e
+     * uma escrita em .../profile ao mesmo tempo, e os dois param para
+     * sempre.
+     *
+     * E so se o registro deu certo: quando falha nas dez tentativas,
+     * platform_profile_device guarda um ERR_PTR, nao um dispositivo.
      */
-    if (quirks->nitro_sense)
-    {
-        u8 current_tp;
-        int tp, err;
-        u64 on_AC;
-        acpi_status status;
-        err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, &current_tp);
-        if (err)
-            return err;
-        /* Check power source */
-        status = WMI_gaming_execute_u64(
-            ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
-            ACER_WMID_CMD_GET_PREDATOR_V4_BAT_STATUS, &on_AC);
-
-        if (ACPI_FAILURE(status))
-            return -EIO;
-
-        /* On AC - define next profile transitions */
-        if (!on_AC)
-        {
-            if (current_tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
-                tp = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-            else
-                tp = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
-        }
-        else
-        {
-            switch (current_tp)
-            {
-            case ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO:
-                tp = cycle_gaming_thermal_profile
-                         ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
-                         : last_non_turbo_profile;
-                break;
-            case ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE:
-                tp = (acer_predator_v4_max_perf == current_tp)
-                         ? last_non_turbo_profile
-                         : acer_predator_v4_max_perf;
-                break;
-            case ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED:
-                tp = cycle_gaming_thermal_profile
-                         ? ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE
-                         : acer_predator_v4_max_perf;
-                break;
-            case ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET:
-                tp = cycle_gaming_thermal_profile
-                         ? ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED
-                         : acer_predator_v4_max_perf;
-                break;
-            case ACER_PREDATOR_V4_THERMAL_PROFILE_ECO:
-                tp = cycle_gaming_thermal_profile
-                         ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
-                         : acer_predator_v4_max_perf;
-                break;
-            default:
-                return -EOPNOTSUPP;
-            }
-        }
-
-        err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
-        if (err)
-            return err;
-
-        /* the quiter you become the more you'll be able to hear! */
-        if (tp == ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET || tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
-        {
-            acpi_status stat = acer_set_fan_speed(0, 0);
-            if (ACPI_FAILURE(stat))
-            {
-                return -EIO;
-            }
-        }
-        /* Store non-turbo profile for turbo mode toggle*/
-        if (tp != acer_predator_v4_max_perf)
-            last_non_turbo_profile = tp;
-
+    if (platform_profile_support)
         platform_profile_notify(platform_profile_device);
-    }
 
     return 0;
 }
@@ -1823,7 +1813,7 @@ static ssize_t predator_usb_charging_show(struct device *dev, struct device_attr
         return -ENODEV;
     }
     pr_debug("usb charging get status: %llu\n", result);
-    return sprintf(buf, "%d\n", acer_usb_charging_decode(result));
+    return sysfs_emit(buf, "%d\n", acer_usb_charging_decode(result));
 }
 
 static ssize_t predator_usb_charging_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
@@ -1831,7 +1821,13 @@ static ssize_t predator_usb_charging_store(struct device *dev, struct device_att
     acpi_status status;
     u64 result, current_raw, payload;
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    /*
+     * kstrtou8 e nao sscanf("%hhd"): este cortava em silencio o que nao
+     * cabe num byte -- "256" virava 0, "257" virava 1 -- e o valor cortado
+     * passava pela validacao abaixo. Vale para os quatro _store de um
+     * byte deste arquivo.
+     */
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
     if ((val != 0) && (val != 10) && (val != 20) && (val != 30))
         return -EINVAL;
@@ -1939,7 +1935,14 @@ static acpi_status battery_health_query(int mode, int *enabled)
 
     obj = output.pointer;
 
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 8)
+    /* Nulo sozinho e antes: a mensagem seguinte le obj->buffer.length, e
+     * com o teste de nulo na mesma condicao era ela que dereferenciava. */
+    if (!obj)
+    {
+        pr_err("No output getting battery health status\n");
+        return AE_ERROR;
+    }
+    if (obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 8)
     {
         pr_err("Unexpected output format getting battery health status, buffer "
                "length:%d\n",
@@ -1995,9 +1998,15 @@ static acpi_status battery_health_set(u8 function, u8 function_status)
 
     obj = output.pointer;
 
-    if (!obj || obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 4)
+    /* Mesmo defeito de battery_health_query: nulo sozinho e antes. */
+    if (!obj)
     {
-        pr_err("Unexpected output format getting battery health status, buffer "
+        pr_err("No output setting battery health status\n");
+        return AE_ERROR;
+    }
+    if (obj->type != ACPI_TYPE_BUFFER || obj->buffer.length != 4)
+    {
+        pr_err("Unexpected output format setting battery health status, buffer "
                "length:%d\n",
                obj->buffer.length);
         goto failed;
@@ -2030,7 +2039,7 @@ static ssize_t predator_battery_limit_show(struct device *dev,
     if (ACPI_FAILURE(status))
         return -ENODEV;
 
-    return sprintf(buf, "%d\n", enabled);
+    return sysfs_emit(buf, "%d\n", enabled);
 }
 
 static ssize_t predator_battery_limit_store(struct device *dev,
@@ -2038,7 +2047,7 @@ static ssize_t predator_battery_limit_store(struct device *dev,
                                             const char *buf, size_t count)
 {
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
 
     if ((val != 0) && (val != 1))
@@ -2061,7 +2070,7 @@ static ssize_t predator_battery_calibration_show(struct device *dev,
     if (ACPI_FAILURE(status))
         return -ENODEV;
 
-    return sprintf(buf, "%d\n", enabled);
+    return sysfs_emit(buf, "%d\n", enabled);
 }
 
 static ssize_t preadtor_battery_calibration_store(struct device *dev,
@@ -2069,7 +2078,7 @@ static ssize_t preadtor_battery_calibration_store(struct device *dev,
                                                   const char *buf, size_t count)
 {
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
 
     if ((val != 0) && (val != 1))
@@ -2098,7 +2107,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
 
     if (t_cpu_fan_speed == 100 && t_gpu_fan_speed == 100)
     {
-        pr_info("MAX FAN MODE!\n");
+        pr_debug("MAX FAN MODE!\n");
         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x820009, NULL);
         if (ACPI_FAILURE(status))
         {
@@ -2108,7 +2117,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
     }
     else if (t_cpu_fan_speed == 0 && t_gpu_fan_speed == 0)
     {
-        pr_info("AUTO FAN MODE!\n");
+        pr_debug("AUTO FAN MODE!\n");
         status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x410009, NULL);
         if (ACPI_FAILURE(status))
         {
@@ -2120,7 +2129,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
     {
         if (t_cpu_fan_speed == 0)
         {
-            pr_info("CUSTOM FAN MODE (GPU)\n");
+            pr_debug("CUSTOM FAN MODE (GPU)\n");
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x10001, NULL);
             if (ACPI_FAILURE(status))
             {
@@ -2142,7 +2151,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
         }
         else if (t_gpu_fan_speed == 0)
         {
-            pr_info("CUSTOM FAN MODE (CPU)\n");
+            pr_debug("CUSTOM FAN MODE (CPU)\n");
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0x400008, NULL);
             if (ACPI_FAILURE(status))
             {
@@ -2164,7 +2173,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
         }
         else
         {
-            pr_info("CUSTOM FAN MODE (MIXED)!\n");
+            pr_debug("CUSTOM FAN MODE (MIXED)!\n");
             // set gaming behvaiour mode to custom
             status = WMI_gaming_execute_u64(ACER_WMID_SET_GAMING_FAN_BEHAVIOR_METHODID, 0xC30009, NULL);
             if (ACPI_FAILURE(status))
@@ -2195,7 +2204,7 @@ static acpi_status acer_set_fan_speed(int t_cpu_fan_speed, int t_gpu_fan_speed)
 
     cpu_fan_speed = t_cpu_fan_speed;
     gpu_fan_speed = t_gpu_fan_speed;
-    pr_info("Fan speeds updated: CPU=%d, GPU=%d\n", cpu_fan_speed, gpu_fan_speed);
+    pr_debug("Fan speeds updated: CPU=%d, GPU=%d\n", cpu_fan_speed, gpu_fan_speed);
 
     return AE_OK;
 }
@@ -2204,7 +2213,7 @@ static ssize_t predator_fan_speed_show(struct device *dev,
                                        struct device_attribute *attr,
                                        char *buf)
 {
-    return sprintf(buf, "%d,%d\n", cpu_fan_speed, gpu_fan_speed);
+    return sysfs_emit(buf, "%d,%d\n", cpu_fan_speed, gpu_fan_speed);
 }
 
 static ssize_t predator_fan_speed_store(struct device *dev,
@@ -2247,6 +2256,13 @@ static ssize_t predator_fan_speed_store(struct device *dev,
         pr_err("Invalid GPU speed value.\n");
         return -EINVAL;
     }
+
+    /*
+     * Ate tres chamadas WMI e o par que fan_speed devolve: uma operacao
+     * so. A trava entra aqui e nao em acer_set_fan_speed, que o
+     * profile_set chama com ela ja tomada.
+     */
+    guard(mutex)(&acer_op_lock);
 
     acpi_status status = acer_set_fan_speed(t_cpu_fan_speed, t_gpu_fan_speed);
     if (ACPI_FAILURE(status))
@@ -2344,26 +2360,63 @@ static acpi_status acer_predator_state_restore(int value)
     return AE_OK;
 }
 
+/*
+ * O que esta no arquivo de estado segue para o firmware sem mais
+ * perguntas: as ventoinhas por acer_set_fan_speed, que so barra acima de
+ * 100, e o perfil por WMID_gaming_set_misc_setting, que nao barra nada.
+ * Entao a conferencia e aqui: ventoinha de 0 a 100, e perfil entre os
+ * que o firmware anuncia -- o bitmap tem oito bits.
+ */
+static bool acer_predator_state_valid(const struct acer_predator_state *state,
+                                      u8 supported_profiles)
+{
+    if (state->cpu_fan_speed < 0 || state->cpu_fan_speed > 100)
+        return false;
+    if (state->gpu_fan_speed < 0 || state->gpu_fan_speed > 100)
+        return false;
+    if (state->thermal_profile < 0 || state->thermal_profile >= BITS_PER_BYTE)
+        return false;
+
+    return supported_profiles & BIT(state->thermal_profile);
+}
+
 static int acer_predator_state_load(void)
 {
     u64 on_AC;
     struct file *file;
+    struct power_states loaded;
+    u8 supported_profiles;
     ssize_t len;
     acpi_status status;
 
     file = filp_open(STATE_FILE, O_RDONLY, 0);
     if (!IS_ERR(file))
     {
-
-        len = kernel_read(file, (char *)&current_states, sizeof(current_states), &file->f_pos);
+        /*
+         * Para um temporario, e so depois de conferido para o estado em
+         * uso. Lido direto, um arquivo curto ficava pela metade dentro de
+         * current_states enquanto o log dizia "using defaults".
+         */
+        len = kernel_read(file, (char *)&loaded, sizeof(loaded), &file->f_pos);
         filp_close(file, NULL);
 
-        if (len != sizeof(current_states))
+        if (len != sizeof(loaded))
         {
             pr_err("Incomplete state read, using defaults\n");
         }
+        else if (WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_SUPPORTED_PROFILES,
+                                              &supported_profiles))
+        {
+            pr_err("Cannot check the state file against the supported profiles, using defaults\n");
+        }
+        else if (!acer_predator_state_valid(&loaded.battery_state, supported_profiles) ||
+                 !acer_predator_state_valid(&loaded.ac_state, supported_profiles))
+        {
+            pr_err("Invalid state file, using defaults\n");
+        }
         else
         {
+            current_states = loaded;
             pr_info("Thermal states loaded\n");
         }
     }
@@ -2480,7 +2533,7 @@ static ssize_t predator_backlight_timeout_show(struct device *dev, struct device
         u8 timeout = (result >> 40) & 0xFF;
 
         /* 0xFF = funcao nao implementada, como no lcd_override. */
-        return sprintf(buf, "%d\n", timeout == 0xFF ? -1 : timeout ? 1 : 0);
+        return sysfs_emit(buf, "%d\n", timeout == 0xFF ? -1 : timeout ? 1 : 0);
     }
 }
 
@@ -2489,7 +2542,7 @@ static ssize_t predator_backlight_timeout_store(struct device *dev, struct devic
     acpi_status status;
     u64 result;
     u8 val;
-    if (sscanf(buf, "%hhd", &val) != 1)
+    if (kstrtou8(buf, 10, &val))
         return -EINVAL;
     if ((val != 0) && (val != 1))
         return -EINVAL;
@@ -2685,18 +2738,52 @@ static int acer_wmi_hwmon_read(struct device *dev, enum hwmon_sensor_types type,
     }
 }
 
+/*
+ * Rotulos, na ordem dos canais acima. Sem eles o hwmon mostra temp1,
+ * temp2 e temp3 e cabe a quem le adivinhar. O terceiro leva o nome que o
+ * firmware da ao sensor; o que ele mede nesta placa nao foi apurado.
+ */
+static const char *const acer_wmi_temp_label[] = {
+    [0] = "CPU",
+    [1] = "GPU",
+    [2] = "External 2",
+};
+
+static const char *const acer_wmi_fan_label[] = {
+    [0] = "CPU",
+    [1] = "GPU",
+};
+
+static int acer_wmi_hwmon_read_string(struct device *dev,
+                                      enum hwmon_sensor_types type, u32 attr,
+                                      int channel, const char **str)
+{
+    switch (type)
+    {
+    case hwmon_temp:
+        *str = acer_wmi_temp_label[channel];
+        return 0;
+    case hwmon_fan:
+        *str = acer_wmi_fan_label[channel];
+        return 0;
+    default:
+        return -EOPNOTSUPP;
+    }
+}
+
 static const struct hwmon_channel_info *const acer_wmi_hwmon_info[] = {
     HWMON_CHANNEL_INFO(temp,
-                       HWMON_T_INPUT,
-                       HWMON_T_INPUT,
-                       HWMON_T_INPUT),
+                       HWMON_T_INPUT | HWMON_T_LABEL,
+                       HWMON_T_INPUT | HWMON_T_LABEL,
+                       HWMON_T_INPUT | HWMON_T_LABEL),
     HWMON_CHANNEL_INFO(fan,
-                       HWMON_F_INPUT,
-                       HWMON_F_INPUT),
+                       HWMON_F_INPUT | HWMON_F_LABEL,
+                       HWMON_F_INPUT | HWMON_F_LABEL),
     NULL};
 
 static const struct hwmon_ops acer_wmi_hwmon_ops = {
     .read = acer_wmi_hwmon_read,
+    .read_string = acer_wmi_hwmon_read_string,
     .is_visible = acer_wmi_hwmon_is_visible,
 };
 

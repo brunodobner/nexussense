@@ -414,6 +414,29 @@ done
 Dentro do sensor vale a mesma regra: `temp1_input` costuma ser o pacote da
 CPU, mas a garantia está em `temp1_label` dizer `Package id 0`.
 
+### 19b. O índice do `rfkill` muda a cada recarga do módulo
+
+Mesma doença, outro subsistema, e bem mais rápida: o índice não espera o boot
+seguinte. Medido em 2026-10-09, no portão da etapa 2:
+
+```
+antes do ensaio       rfkill0 acer-wireless   rfkill1 acer-bluetooth
+depois de 6 recargas  rfkill14 acer-wireless  rfkill15 acer-bluetooth
+```
+
+O roteiro guardou `rfkill1` antes da primeira recarga e, minutos depois, mandou
+`rfkill block 1`. Resposta: `invalid identifier: 1`. O bloqueio não rodou, a
+leitura voltou vazia, e o portão reprovou o driver por um defeito do roteiro.
+
+**Procure pelo nome, na hora de usar**, e confira de novo antes de agir — aqui
+o índice errado poderia ser o do wifi (armadilha 25):
+
+```bash
+for r in /sys/class/rfkill/rfkill*; do
+    [ "$(cat "$r/name")" = acer-bluetooth ] && bt=$r
+done
+```
+
 ---
 
 ## 20. `nvidia-smi` acorda a dGPU adormecida
@@ -655,9 +678,40 @@ E há **dois escritores de verdade, em processos separados**: o agente
 (`nexus-sense-agent`) e a janela/bandeja (`nexus-sense`). Eu havia afirmado que
 só existia um; era suposição, e estava errada.
 
-Daí `acer_op_lock`, tomado só por essas duas funções, com
+Daí `acer_op_lock`, com
 **ordem obrigatória: `acer_op_lock` antes de `acer_wmi_lock`**. Não há ciclo
 possível porque o caminho interno nunca toma o de cima.
+
+Em 2026-10-09 entraram mais duas, que não leem antes de escrever mas são
+**sequências** de várias chamadas: `predator_fan_speed_store` (até três
+chamadas WMI, mais o par de variáveis que `fan_speed` devolve) e o botão N.
+
+### E uma terceira trava, que não é nossa
+
+O núcleo do `platform_profile` tem a dele, e ela entra na ordem sem aparecer no
+nosso arquivo:
+
+```
+escrita em .../profile    nucleo toma a dele  ->  profile_set  ->  acer_op_lock
+platform_profile_notify   toma a mesma trava do nucleo
+```
+
+O botão N troca o perfil e depois avisa o núcleo. Avisar **com `acer_op_lock`
+ainda na mão** inverte a ordem: um aperto do botão no instante de uma escrita em
+`profile`, e os dois ficam esperando um pelo outro para sempre — sem sinal que
+os tire de lá, porque `mutex_lock` não é interrompível.
+
+Por isso o botão ficou em duas funções: `acer_thermal_profile_cycle` faz a
+sequência sob a trava e a solta ao retornar; `acer_thermal_profile_change` só
+então chama `platform_profile_notify`.
+
+E a trava da ventoinha entra no `_store`, não em `acer_set_fan_speed`: o
+`profile_set` chama esta última com `acer_op_lock` já tomado, e mutex do kernel
+não é reentrante.
+
+**A regra, que é a da seção seguinte vista de outro lado:** antes de segurar uma
+trava sua ao chamar uma função do kernel, pergunte qual trava *ela* toma — e se
+o mesmo subsistema já chama você de volta com essa trava na mão.
 
 ### Por que NÃO travar todos os pontos de entrada
 
@@ -867,6 +921,37 @@ escrita recusada: com arquivo bufferizado o erro só sai no `flush` do
 fechamento, fora do `try`. Em sysfs, escreva com `os.write` num descritor, ou
 feche dentro do `try`. É a armadilha 11 de novo — cheque o efeito, não o
 comando.
+
+---
+
+## 28. Lista ordenada comparada com texto fixo depende do locale
+
+**Sintoma.** `test-arvore.sh` passa no terminal e reprova a própria árvore
+quando outro script o chama:
+
+```
+FALHA raiz inesperada: .gitignore LICENSE README.md pyproject.toml setup.sh
+```
+
+**Causa.** O teste fazia `find ... | sort` e comparava com uma lista escrita à
+mão. A ordem entre maiúsculas e minúsculas é do locale:
+
+```
+pt_BR.UTF-8    .gitignore LICENSE pyproject.toml README.md setup.sh
+LC_ALL=C       .gitignore LICENSE README.md pyproject.toml setup.sh
+```
+
+O roteiro do portão exportava `LC_ALL=C` — para as mensagens de erro saírem em
+inglês e o `grep` achar `Invalid argument` — e a variável desceu para a suíte.
+Um CI roda assim por padrão.
+
+**Regra.** Onde a saída de `sort` (ou de `ls`) é comparada com texto fixo, crave
+o locale no próprio comando: `LC_ALL=C sort`. E num script que chama outros,
+ponha `LC_ALL=C` só na frente do comando que precisa dele, não em `export`.
+
+**O que isto tem em comum com a 19b.** No portão de 2026-10-09 foram 58
+conferências certas e 2 reprovadas, e as duas eram do roteiro. Antes de mexer no
+código por causa de uma reprovação, reproduza a falha fora do roteiro.
 
 ---
 

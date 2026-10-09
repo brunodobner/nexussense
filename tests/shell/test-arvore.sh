@@ -39,8 +39,11 @@ falha() { echo "  FALHA $1"; fail=1; }
 # metadados que a raiz exige: pyproject (o pytest e o build leem dali) e
 # LICENSE, que o GitHub so reconhece na raiz -- o projeto e
 # GPL-3.0-or-later e precisa dizer isso onde se procura.
-raiz=$(find . -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')
-[ "$raiz" = ".gitignore LICENSE pyproject.toml README.md setup.sh " ] \
+# LC_ALL=C no sort: a ordem de maiusculas e minusculas e do locale, e a
+# lista esperada so vale num deles. Sem cravar, o teste passava em pt_BR
+# e reprovava sob LC_ALL=C -- que e como um CI roda.
+raiz=$(find . -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort | tr '\n' ' ')
+[ "$raiz" = ".gitignore LICENSE README.md pyproject.toml setup.sh " ] \
     && ok "raiz tem so setup.sh mais README, LICENSE, pyproject e .gitignore" \
     || falha "raiz inesperada: $raiz"
 

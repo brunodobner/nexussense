@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 1 fechada: v1.2.0; etapas 2 a 4 abertas)
+**Última atualização:** 2026-10-09 (melhorias, etapa 2: portão passou, v1.2.1, falta a partida a frio; etapas 3 e 4 abertas)
 
 ---
 
@@ -12,13 +12,13 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 2912 linhas (eram 5167) |
-| versão | **v1.2.0** — `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 2999 linhas (eram 5167) |
+| versão | **v1.2.1** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 18 testes: 16 passam, 2 pulam, 0 falham — **com e sem root** |
 | suíte Python | 362 passaram (`python3 -m pytest -q`), incluindo DBus privado |
-| build | `W=1` limpo sob Clang |
+| build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
 
 ---
 
@@ -50,7 +50,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [-] Levar os atributos ao mainline   ABANDONADO em 2026-09-12; ver decisoes 21
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
-[ ] Melhorias, etapa 2 -- driver     quatro consertos e limpeza; sessao propria
+[~] Melhorias, etapa 2 -- driver     v1.2.1: portao passou; falta conferir a partida a frio
 [ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
@@ -427,11 +427,155 @@ E seis consertos de comportamento, cada um com teste que falhou primeiro:
   vigor quando o modo foi ligado. Para mudar: desligar o modo, escolher o
   perfil de CPU desejado, religar.
 
-### Onde a etapa 2 começa
+### Onde a etapa 2 começou
 
-Numa **sessão nova**, pelo driver. Ler [armadilhas.md](armadilhas.md) e a
-seção 4 de [plano-melhorias.md](plano-melhorias.md): quatro consertos e uma
-limpeza opcional, com o portão do bitmask `0x00002c26` e reinício no fim.
+Numa sessão nova, pelo driver. O que ela fez está na seção seguinte.
+
+---
+
+## Melhorias de 2026-10, etapa 2 — o portão passou, falta a partida a frio
+
+A etapa do driver, no ramo `melhorias/2-driver`. **v1.2.0 → v1.2.1.** Tudo foi
+ao hardware antes do merge; o que falta é o reinício, que se confere na sessão
+seguinte — a lista está no fim desta seção.
+
+O que entrou, cada item com teste que falhou primeiro:
+
+| | conserto | prova na máquina |
+|---|---|---|
+| 2.1 | objeto nulo testado sozinho, antes da mensagem que lê dele | não há como provocar; o teste reprova o padrão |
+| 2.2 | os quatro `_store` de um byte usam `kstrtou8` | `256` devolve `EINVAL` nos quatro e o valor fica; valor válido continua aceito |
+| 2.3 | ventoinha e botão N sob `acer_op_lock`; o aviso ao núcleo sai fora da trava | 8 escritores, 480 escritas de ventoinha e perfil em 5 s: zero recusadas, par final inteiro, zero erro no kernel |
+| 2.4 | o arquivo de estado é lido para um temporário e conferido antes de valer | três arquivos plantados — 12 bytes, ventoinha −5, perfil não anunciado — caem nos padrões e o log diz o motivo |
+| 2.5 | rótulos no hwmon, `sysfs_emit`, log da ventoinha em `pr_debug`, 53 linhas comentadas fora | bitmask idêntico |
+| extra | o botão N só avisa o núcleo se o perfil chegou a registrar | — ver o primeiro item abaixo |
+
+**O portão**, medido em 2026-10-09 às 03:33, na tomada, bateria em 47%:
+
+```
+capability bitmask: 0x00002c26     identico nas 6 cargas do ensaio
+perfis      low-power quiet balanced balanced-performance
+atributos   os seis, 664 root:nexus_sense; version 444 root:root
+rfkill      bluetooth bloqueia (1) e desbloqueia (0); wireless intocado
+hwmon       presente, com rotulos: CPU, GPU, External 2 / CPU, GPU
+estado      sobrevive a recarga: balanced-performance, ventoinha 0,0
+estresse    16 leitores x 200 leituras, zero "Failed to get profile"
+W=1         limpo sob Clang 23, em 7.2.9-1-cachyos e 6.18.55-1-cachyos-lts
+suites      362 Python; shell 16 passam, 2 pulam -- identicas ao baseline
+```
+
+O módulo carregado tem `srcversion` `B530962B6CE5FDBCF23F2E9`, o mesmo do build
+`W=1` e o mesmo do arquivo que o DKMS instalou.
+
+### Cinco coisas que só apareceram executando
+
+1. **`W=1` não estava limpo em `master`.** O Clang 23 passou a acusar variável
+   global escrita e nunca lida, e `platform_profile_support` era uma. Atrás do
+   aviso havia defeito: se o registro do perfil falhasse, o botão N entregava um
+   `ERR_PTR` a `platform_profile_notify`. Virou a guarda que faltava. O "`W=1`
+   limpo" deste arquivo era de um compilador anterior — a afirmação envelhece
+   com o toolchain, e o baseline da etapa tem de incluir o build.
+2. **O portão reprovou duas vezes, e as duas eram do roteiro.** O índice do
+   rfkill muda a cada recarga (armadilha 19b), e uma lista ordenada comparada
+   com texto fixo depende do locale (armadilha 28). O segundo defeito era de
+   `test-arvore.sh` e foi consertado: um CI tropeçaria igual.
+3. **O diálogo de senha ficou 70 minutos aberto.** Nesse intervalo a bateria
+   foi de 60% a 43% com o cabo ligado, e a guarda do roteiro — tomada, acima de
+   45% — abortou antes de tocar em qualquer coisa. A condição se mede na hora de
+   rodar, não na hora de pedir.
+4. **Um comentário reprovou o teste que o protegia.** A explicação do conserto
+   2.1 citava o padrão proibido entre aspas, e o `grep` o achou. Teste de
+   `grep` sobre o fonte lê comentário também.
+5. **O botão N não chega ao driver.** É a de baixo, e merece seção própria.
+
+### O botão N: o que foi medido, e o que este arquivo dizia
+
+A tarefa 2.3 mexeu no caminho do botão N — `acer_thermal_profile_change` — e a
+única forma de exercitá-lo é o dedo. Três ensaios, 16 apertos ao todo, cada
+aperto confirmado pelo KDE no journal (`Started Nexus Sense - Controle do
+laptop`):
+
+```
+5 apertos, com um escritor regravando o perfil     nenhum travamento, ~200 escritas/s
+3 apertos, ninguem escrevendo                      o perfil nao mudou
+8 apertos, com o pr_debug do driver ligado         0 linhas "botao N: key_num"
+```
+
+O terceiro fecha a questão. A sonda foi provada antes — ler `usb_charging`
+produziu o `pr_debug` esperado, então o silêncio não é teste por vácuo
+(armadilha 14). **O evento WMI não chega: nesta máquina, hoje, o botão N só
+existe como tecla** (`0xf5` → `prog1` → atalho do KDE).
+
+Isso contradiz a seção 19 de [decisoes.md](decisoes.md) e o comentário no
+tratador de eventos do driver, que dizem que o botão dispara
+`WMID_GAMING_TURBO_KEY_EVENT` e percorre os perfis. O BIOS é o mesmo desde
+antes (V1.52, de 2025-12-26). **Não se sabe se o evento algum dia chegou neste
+modelo ou se a afirmação foi inferência** — o journal desta máquina só guarda o
+boot corrente, e não há como conferir o de setembro.
+
+Consequências:
+
+- **não é regressão desta etapa.** O ponto por onde o evento entraria,
+  `acer_wmi_notify`, não foi tocado, e é lá que fica o `pr_debug` que não
+  apareceu;
+- **a ordem de travas do botão N está provada por leitura e pelo teste
+  estático, não por hardware.** Não há como prová-la aqui: o caminho não roda;
+- `cycle_gaming_thermal_profile` e a decisão de mantê-lo ("botão em uso", em
+  [poda-subsistemas.md](poda-subsistemas.md)) ficam sem objeto se o evento de
+  fato nunca chega. **Não mexer por isso sozinho:** é hipótese a fechar na
+  etapa 4, com o `pr_debug` ligado na bateria e na tomada, antes de podar.
+
+Uma coisa para não repetir: no segundo ensaio o perfil foi a `low-power` e
+voltou, e por alguns minutos isso pareceu o botão funcionando. Era o app —
+`config.toml` foi gravado no mesmo décimo de segundo. É a armadilha 25 de novo:
+havia uma pessoa clicando na janela que o próprio aperto abre.
+
+### Visto e não consertado
+
+- **`battery_health_set` só reconhece falha se `uReturn` *e* `uReservedOut`
+  forem diferentes de zero.** Parece que deveria ser *ou*. Sem amostra do que o
+  firmware devolve numa recusa, trocar poderia reprovar escrita válida.
+- **`fan_speed` é lido sem trava.** São dois inteiros; um leitor no meio de uma
+  escrita pode ver o par misturado por alguns nanossegundos.
+- **`acer_predator_state_load` não toma `acer_op_lock`**, e roda no `probe` com
+  os atributos já criados. Um escritor que chegasse nesse instante se
+  intercalaria com a restauração.
+- **`dkms status | grep -q`** no instalador e nos testes deixa `echo: write
+  error: Broken pipe` na saída. Ruído, não defeito; é assunto da etapa 3.
+- **O que `temp3` mede não foi apurado.** O rótulo é o nome que o firmware dá
+  ao sensor, `External 2`.
+
+### O que falta: a partida a frio
+
+A etapa só se dá por fechada depois de um reinício. **No começo da sessão
+seguinte**, antes de qualquer outra coisa:
+
+```bash
+journalctl -k -b | grep nexus_sense
+#   capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+#                                   PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+#   Thermal states loaded            <- e NAO "Invalid state file" nem "Incomplete"
+#   Thermal states restored successfully
+cat /sys/module/nexus_sense/srcversion          # B530962B6CE5FDBCF23F2E9
+cat /sys/firmware/acpi/platform_profile_choices # low-power quiet balanced balanced-performance
+cat /sys/firmware/acpi/platform_profile         # o perfil de antes do reinicio
+stat -c '%a %U:%G %n' /sys/devices/platform/acer-wmi/nitro_sense/*
+#   664 root:nexus_sense nos cinco, 444 root:root em version
+cat /sys/devices/platform/acer-wmi/hwmon/hwmon*/temp*_label   # CPU GPU "External 2"
+systemctl --user is-active nexus-sense-agent    # active
+journalctl -k -b | grep -c 'Failed to get profile'   # 0
+```
+
+Mais a bandeja subindo sozinha. Tudo no lugar, a linha do roteiro vira `[x]`.
+
+O `Thermal states loaded` da partida a frio é a conferência que mais importa:
+é a primeira vez que o validador da 2.4 lê um arquivo gravado pelo desligamento
+de verdade, e não por uma recarga do ensaio.
+
+### Onde a etapa 3 começa
+
+Numa **sessão nova**, pelo instalador: seção 5 de
+[plano-melhorias.md](plano-melhorias.md). Antes dela, a partida a frio acima.
 
 ---
 

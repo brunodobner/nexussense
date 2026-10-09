@@ -144,6 +144,10 @@ e reiniciar agente e bandeja:
 
 ## 4. Etapa 2 — driver
 
+**Portão passado em 2026-10-09, v1.2.1. Falta a partida a frio**, que se
+confere na sessão seguinte. O resultado medido, o que a execução refutou e a
+lista do que conferir depois do reinício estão em [estado.md](estado.md).
+
 Ramo `melhorias/2-driver`. Sessão própria.
 
 | # | o quê | onde | como se prova |
@@ -153,6 +157,7 @@ Ramo `melhorias/2-driver`. Sessão própria.
 | 2.3 | `fan_speed_store` e `acer_thermal_profile_change` sob `acer_op_lock` | idem | 8 escritores paralelos de ventoinha e perfil, estado final coerente, zero erro no journal |
 | 2.4 | estado lido para um temporário, validado (ventoinha 0–100, perfil entre os anunciados) e só então adotado | `acer_predator_state_load` | arquivo plantado de 12 bytes, e outro com ventoinha negativa: os dois caem nos padrões e o log diz |
 | 2.5 | opcional — ver decisão D6: rótulos no hwmon, `sysfs_emit`, código comentado fora, `pr_info` do caminho de ventoinha para `pr_debug` | vários | bitmask idêntico |
+| extra | o aviso do botão N ao núcleo passa a depender de o perfil ter registrado — achado pelo `W=1` do Clang 23, que já reprovava em `master` | `acer_thermal_profile_change` | teste shell |
 
 Cuidados que não são óbvios:
 
@@ -167,6 +172,9 @@ Cuidados que não são óbvios:
 - **2.4 planta arquivo em `/etc/predator_state`**: cópia do original antes, e
   `trap` devolvendo, inclusive se o ensaio falhar no meio.
 - Parar agente e bandeja antes de recarregar o módulo; religar depois.
+- **O caminho do botão N não roda nesta máquina.** Medido em 2026-10-09 com o
+  `pr_debug` ligado: 8 apertos, nenhum evento no driver. A ordem de travas da
+  2.3 fica provada por leitura e teste estático; o porquê está em `estado.md`.
 
 ### Portão da etapa 2
 
