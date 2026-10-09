@@ -1011,22 +1011,53 @@ cleanup_nexus_sense() {
   fi
 }
 
+# Conta de sistema nao e usuario de desktop: uid abaixo de 1000 e root,
+# greeter (sddm, gdm, lightdm) ou servico.
+desktop_user_valid() {
+  local uid
+  uid=$(id -u "$1" 2>/dev/null) || return 1
+  [ "$uid" -ge 1000 ] && [ "$1" != "nobody" ]
+}
+
+# De quem e o desktop. O instalador roda como root e precisa saber: e essa
+# conta que entra no grupo nexus_sense, e e no home dela que o atalho do
+# botao N e escrito.
+#
+# Pergunta primeiro a quem chamou -- sudo deixa SUDO_USER, pkexec deixa
+# PKEXEC_UID -- e so depois as sessoes abertas. Toda resposta passa por
+# desktop_user_valid: a lista do loginctl traz a sessao do greeter antes da
+# da pessoa, e excluir "root" e "gdm" pelo nome deixava passar o sddm.
 detect_desktop_user() {
-  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+  local nome
+
+  if [ -n "${SUDO_USER:-}" ] && desktop_user_valid "$SUDO_USER"; then
     echo "$SUDO_USER"
     return 0
   fi
 
+  # So digitos: "id -nu" aceita nome tambem, e devolveria o proprio texto.
+  case "${PKEXEC_UID:-}" in
+    ''|*[!0-9]*) ;;
+    *)
+      nome=$(id -nu "$PKEXEC_UID" 2>/dev/null)
+      if [ -n "$nome" ] && desktop_user_valid "$nome"; then
+        echo "$nome"
+        return 0
+      fi
+      ;;
+  esac
+
   if command -v loginctl >/dev/null 2>&1; then
-    local session_user
-    session_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "root" && $3 != "gdm" { print $3; exit }')
-    if [ -n "$session_user" ] && id -u "$session_user" >/dev/null 2>&1; then
-      echo "$session_user"
-      return 0
-    fi
+    # Colunas: SESSION UID USER SEAT ...
+    for nome in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $3 }'); do
+      if desktop_user_valid "$nome"; then
+        echo "$nome"
+        return 0
+      fi
+    done
   fi
 
-  awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' /etc/passwd
+  getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }'
 }
 
 perform_install() {
