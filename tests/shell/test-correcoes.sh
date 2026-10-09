@@ -338,4 +338,32 @@ else
   echo "  FALHA hwmon sem rotulos: temp1/temp2/temp3 nao dizem o que medem"; fail=1
 fi
 
+# --- o que sobrou da 2.3: quem LE o par, e quem o restaura
+#
+# A 2.3 travou os escritores. Ficaram de fora o leitor de fan_speed --
+# dois inteiros, lidos enquanto um escritor troca o par -- e as duas
+# funcoes de estado, que rodam no probe e no remove com os atributos no
+# ar: um escritor que chegasse nesse instante se intercalaria com a
+# restauracao.
+for fn in predator_fan_speed_show acer_predator_state_load acer_predator_state_save; do
+  corpo=$(corpo_de "$fn")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+    echo "  OK   ${fn} roda sob o acer_op_lock"
+  else
+    echo "  FALHA ${fn} nao toma o acer_op_lock"; fail=1
+  fi
+done
+
+# As duas de dentro sao chamadas com a trava ja tomada.
+for fn in acer_predator_state_restore acer_predator_state_update; do
+  corpo=$(corpo_de "$fn")
+  [ -n "$corpo" ] || { echo "  ERRO alvo ausente: ${fn}"; exit 3; }
+  if printf '%s' "$corpo" | grep -q 'acer_op_lock'; then
+    echo "  FALHA ${fn} toma acer_op_lock: trava sozinha no probe ou no remove"; fail=1
+  else
+    echo "  OK   ${fn} nao toma a trava que o chamador ja tem"
+  fi
+done
+
 exit $fail

@@ -528,11 +528,15 @@ static bool has_cap(u32 cap)
  * contrario. Nao ha ciclo possivel porque o caminho interno --
  * acer_wmi_evaluate_method -- nunca toma o acer_op_lock.
  *
- * Quatro funcoes tomam o de cima, e so elas. Duas leem antes de escrever:
+ * Sete funcoes tomam o de cima, e so elas. Duas leem antes de escrever:
  * predator_usb_charging_store e acer_predator_v4_platform_profile_set.
  * Duas sao sequencias de varias chamadas: predator_fan_speed_store e
- * acer_thermal_profile_cycle, o botao N. acer_set_fan_speed NAO toma --
- * o profile_set a chama com a trava ja na mao.
+ * acer_thermal_profile_cycle, o botao N. Uma le o par que as outras
+ * escrevem: predator_fan_speed_show. E as duas de estado,
+ * acer_predator_state_load e _save, que rodam no probe e no remove.
+ *
+ * As de dentro NAO tomam, porque sao chamadas com a trava ja na mao:
+ * acer_set_fan_speed, acer_predator_state_restore e _update.
  *
  * Ha uma terceira trava na conta, que nao e nossa: a do nucleo do
  * platform_profile, tomada ANTES de ele chamar profile_set. Dai a ordem
@@ -2213,6 +2217,10 @@ static ssize_t predator_fan_speed_show(struct device *dev,
                                        struct device_attribute *attr,
                                        char *buf)
 {
+    /* O par e escrito sob acer_op_lock. Lido fora dela, podia sair com
+     * metade de um ajuste e metade do seguinte. */
+    guard(mutex)(&acer_op_lock);
+
     return sysfs_emit(buf, "%d,%d\n", cpu_fan_speed, gpu_fan_speed);
 }
 
@@ -2389,6 +2397,17 @@ static int acer_predator_state_load(void)
     ssize_t len;
     acpi_status status;
 
+    /*
+     * Restaurar sao varias chamadas -- o perfil, depois as ventoinhas -- e
+     * isto roda no probe com os atributos ja criados: um escritor que
+     * chegasse agora entraria no meio.
+     *
+     * A trava nao aninha. As reentradas do probe (armadilha 24) acontecem
+     * dentro dos registros de rfkill, platform_profile e hwmon; aqui
+     * dentro nada chama o nucleo de volta, so o firmware e o arquivo.
+     */
+    guard(mutex)(&acer_op_lock);
+
     file = filp_open(STATE_FILE, O_RDONLY, 0);
     if (!IS_ERR(file))
     {
@@ -2454,6 +2473,10 @@ static int acer_predator_state_save(void)
     acpi_status status;
     struct file *file;
     ssize_t len;
+
+    /* Mesma razao de acer_predator_state_load: le o perfil e o par das
+     * ventoinhas, e os dois tem de ser do mesmo instante. */
+    guard(mutex)(&acer_op_lock);
 
     status = WMI_gaming_execute_u64(
         ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
