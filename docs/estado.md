@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 3: v1.2.3 em `master`, portão passado, **falta conferir a partida a frio**; etapa 4 aberta)
+**Última atualização:** 2026-10-09 (melhorias, etapa 3 fechada: v1.2.3, partida a frio conferida; etapa 4 aberta)
 
 ---
 
@@ -51,7 +51,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
 [x] Melhorias, etapa 2 -- driver     v1.2.2: bitmask identico, partida a frio conferida
-[ ] Melhorias, etapa 3 -- instalador v1.2.3 em master, portao passado; so falta a partida a frio
+[x] Melhorias, etapa 3 -- instalador v1.2.3: desinstala o que instala, partida a frio conferida
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
 
@@ -659,10 +659,11 @@ como `Started Nexus Sense - Controle do laptop`, o que serve de sonda sem root.
 
 ---
 
-## Melhorias de 2026-10, etapa 3 — portão passado, falta a partida a frio
+## Melhorias de 2026-10, etapa 3 — fechada, e onde a etapa 4 começa
 
 A etapa do instalador, no ramo `melhorias/3-instalador`. **v1.2.2 → v1.2.3.**
-O baseline capturado antes da primeira edição conferiu com o esperado: 362 na
+Foi ao hardware antes do merge, e a partida a frio foi conferida no mesmo dia —
+o resultado está no fim desta seção. O baseline capturado antes da primeira edição conferiu com o esperado: 362 na
 suíte Python; shell 16 passam e 2 pulam, idêntico sob `LC_ALL=C`.
 
 O que entrou, cada item com teste que falhou primeiro:
@@ -799,47 +800,53 @@ botao N       banco hwdb recompilado responde KEYBOARD_KEY_f5=prog1; teclado
 - **`shellcheck` não está instalado nesta máquina**, e `test-setup-deps.sh`
   pula essa parte. O CI da etapa 4 é quem vai rodar.
 
-### O estado da máquina, e a partida a frio que falta
+### A partida a frio, que fecha a etapa
 
-**A máquina está com a v1.2.3 instalada**, do commit `c0ba977` — o que veio
-depois dele em `master` é só documentação. Três coisas estão diferentes do
-normal, e as três se resolvem no reinício:
-
-- **agente e bandeja estão parados**, de propósito, desde 19:25;
-- **a sessão aberta antes do portão não escreve nos atributos**: ela carrega o
-  gid 950 e o grupo agora é 948. Sem root a suíte dá 17 passam e 3 pulam —
-  `test-permissoes.sh` pula com "sessão fora do grupo";
-- **o perfil térmico foi devolvido à mão** para `balanced-performance`: a
-  limpeza apaga `/etc/predator_state`.
-
-A etapa só se dá por fechada depois disto, conferido na **sessão seguinte**:
+Conferida em 2026-10-09 às 20:02, três minutos depois do reinício das 19:59.
 
 ```
-modulo       nexus_sense carregado; srcversion F9236711C6E76401FD38B7A;
-             capability bitmask 0x00002c26
-estado       "Thermal states loaded"; perfil balanced-performance
-permissoes   os seis 664 root:nexus_sense, gid 948; version 444 root:root
-sessao       id mostra 948(nexus_sense), sem 950 nem 1001 soltos
-agente       ativo; linha de comando com "python3 -P -m nexus_sense"
-bandeja      subiu sozinha, filha do systemd do usuario; tambem com -P
-botao N      systemd-hwdb query responde f5=prog1; um aperto aparece no
-             journal do usuario como "Started Nexus Sense - Controle do laptop"
-atalho       grep -n damx ~/.config/kglobalshortcutsrc  -> vazio
-suites       362 Python; shell 18 passam, 2 pulam, sem root
+capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+                                PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+srcversion  F9236711C6E76401FD38B7A   <- o mesmo: driver intocado
+perfis      low-power quiet balanced balanced-performance
+perfil      balanced-performance      <- restaurado do estado salvo
+estado      "Thermal states saved successfully" 19:59:06, no desligamento
+            "Thermal states loaded" 19:59:27, na partida
+atributos   os seis, 664 root:nexus_sense, gid 948; version 444 root:root
+sessao      id mostra 948(nexus_sense); o 950 e o 1001 soltos sumiram
+erro WMI    zero "Failed to get profile"; 18 linhas do driver, todas de carga
+agente      ativo desde 19:59:39; "python3 -P -m nexus_sense"
+bandeja     subiu sozinha as 19:59:39, filha do systemd do usuario, com -P
+hwdb        banco responde f5=prog1; teclado (event3) ja com prog1 de partida
+atalho      "Launch (1)" em nexus-sense.desktop; nenhuma linha damx
+suites      362 Python; shell 18 passam, 2 pulam -- sem root e sob LC_ALL=C
 ```
 
-Uma dessas linhas é aposta e não certeza: **o atalho do `damx.desktop`**. Ele
-foi apagado do arquivo com o `kglobalacceld` rodando, que o tinha lido no login.
-Se o daemon regravar o arquivo ao sair, a entrada volta — e aí a remoção tem de
-passar pelo DBus dele, não pelo `kwriteconfig6`. O atalho vivo não corre esse
-risco: foi apagado e reescrito com o mesmo valor.
+**O gesto humano:** o usuário apertou o botão N e a janela abriu. O journal do
+usuário registrou `Started Nexus Sense - Controle do laptop` às 20:02:57 e às
+20:03:03, com uma instância só da interface no ar. Nenhum comando verifica que
+a janela desenha na tela; por isso a linha só fechou com olho humano.
+
+Três coisas que o reinício resolveu, como previsto: agente e bandeja, parados
+de propósito desde 19:25, voltaram sozinhos; a sessão nova carrega o gid 948 e
+`test-permissoes.sh` voltou a passar, com escrita sem root confirmada; e o
+perfil, devolvido à mão antes de desligar, atravessou o desligamento pelo
+arquivo de estado.
+
+**A aposta do atalho ganhou.** O `damx.desktop` tinha sido apagado do
+`kglobalshortcutsrc` com o `kglobalacceld` rodando, e havia o risco de o daemon
+regravar o arquivo ao sair. Não regravou: depois do reinício o arquivo segue
+sem nenhuma linha `damx`.
 
 ### Onde a etapa 4 começa
 
-Depois da partida a frio. Seção 6 de [plano-melhorias.md](plano-melhorias.md):
+Numa **sessão nova**. Seção 6 de [plano-melhorias.md](plano-melhorias.md):
 itens independentes, cada um recusável sozinho. O CI entra primeiro — pytest e
-shellcheck a cada push pegariam o item 6 acima antes do commit. O que esta etapa
-viu e deixou está na lista "Visto e não consertado", logo acima.
+shellcheck a cada push pegariam o item 6 da lista de cima antes do commit. O
+que esta etapa viu e deixou está em "Visto e não consertado", acima.
+
+**Ponto de partida:** `master` em v1.2.3. O baseline esperado é 362 na suíte
+Python e, na shell, 18 passam e 2 pulam — sem root, com root e sob `LC_ALL=C`.
 
 ---
 

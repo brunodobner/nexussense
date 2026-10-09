@@ -196,9 +196,8 @@ seguinte**, e só então a etapa se dá por fechada em `estado.md`.
 
 ## 5. Etapa 3 — instalador e empacotamento
 
-**Portão passado em 2026-10-09, v1.2.3 em `master`. Falta a partida a frio**,
-que se confere no começo da sessão seguinte. O resultado medido, o que a
-execução refutou e a lista do que conferir estão em [estado.md](estado.md).
+**Fechada em 2026-10-09, v1.2.3**, com a partida a frio conferida. O resultado
+medido e o que a execução refutou estão em [estado.md](estado.md).
 
 Ramo `melhorias/3-instalador`. Sessão própria.
 
