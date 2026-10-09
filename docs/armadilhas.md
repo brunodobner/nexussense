@@ -414,6 +414,29 @@ done
 Dentro do sensor vale a mesma regra: `temp1_input` costuma ser o pacote da
 CPU, mas a garantia está em `temp1_label` dizer `Package id 0`.
 
+### 19b. O índice do `rfkill` muda a cada recarga do módulo
+
+Mesma doença, outro subsistema, e bem mais rápida: o índice não espera o boot
+seguinte. Medido em 2026-10-09, no portão da etapa 2:
+
+```
+antes do ensaio       rfkill0 acer-wireless   rfkill1 acer-bluetooth
+depois de 6 recargas  rfkill14 acer-wireless  rfkill15 acer-bluetooth
+```
+
+O roteiro guardou `rfkill1` antes da primeira recarga e, minutos depois, mandou
+`rfkill block 1`. Resposta: `invalid identifier: 1`. O bloqueio não rodou, a
+leitura voltou vazia, e o portão reprovou o driver por um defeito do roteiro.
+
+**Procure pelo nome, na hora de usar**, e confira de novo antes de agir — aqui
+o índice errado poderia ser o do wifi (armadilha 25):
+
+```bash
+for r in /sys/class/rfkill/rfkill*; do
+    [ "$(cat "$r/name")" = acer-bluetooth ] && bt=$r
+done
+```
+
 ---
 
 ## 20. `nvidia-smi` acorda a dGPU adormecida
@@ -898,6 +921,37 @@ escrita recusada: com arquivo bufferizado o erro só sai no `flush` do
 fechamento, fora do `try`. Em sysfs, escreva com `os.write` num descritor, ou
 feche dentro do `try`. É a armadilha 11 de novo — cheque o efeito, não o
 comando.
+
+---
+
+## 28. Lista ordenada comparada com texto fixo depende do locale
+
+**Sintoma.** `test-arvore.sh` passa no terminal e reprova a própria árvore
+quando outro script o chama:
+
+```
+FALHA raiz inesperada: .gitignore LICENSE README.md pyproject.toml setup.sh
+```
+
+**Causa.** O teste fazia `find ... | sort` e comparava com uma lista escrita à
+mão. A ordem entre maiúsculas e minúsculas é do locale:
+
+```
+pt_BR.UTF-8    .gitignore LICENSE pyproject.toml README.md setup.sh
+LC_ALL=C       .gitignore LICENSE README.md pyproject.toml setup.sh
+```
+
+O roteiro do portão exportava `LC_ALL=C` — para as mensagens de erro saírem em
+inglês e o `grep` achar `Invalid argument` — e a variável desceu para a suíte.
+Um CI roda assim por padrão.
+
+**Regra.** Onde a saída de `sort` (ou de `ls`) é comparada com texto fixo, crave
+o locale no próprio comando: `LC_ALL=C sort`. E num script que chama outros,
+ponha `LC_ALL=C` só na frente do comando que precisa dele, não em `export`.
+
+**O que isto tem em comum com a 19b.** No portão de 2026-10-09 foram 58
+conferências certas e 2 reprovadas, e as duas eram do roteiro. Antes de mexer no
+código por causa de uma reprovação, reproduza a falha fora do roteiro.
 
 ---
 
