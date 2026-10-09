@@ -11,6 +11,7 @@ sao stat e nao acionam o `show()` do driver -- por isso continuam de
 graca e nao aparecem aqui.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -49,7 +50,7 @@ class SysfsEspiao(Sysfs):
 
 
 class RuntimeFalso:
-    """powerprofilesctl e nvidia-settings de mentira, sem tocar na maquina."""
+    """O ppd e a GPU de mentira, sem tocar na maquina."""
 
     def __init__(self):
         self.ppd = "balanced"
@@ -62,15 +63,11 @@ class RuntimeFalso:
         self.powermizer = "0"
 
     def __call__(self, args, **_kwargs):
-        if args == ["powerprofilesctl", "get"]:
-            return subprocess.CompletedProcess(args, 0, self.ppd + "\n", "")
-        if args[:2] == ["powerprofilesctl", "set"]:
-            self.ppd = args[2]
-            return subprocess.CompletedProcess(args, 0, "", "")
-        if "-q" in args:
-            return subprocess.CompletedProcess(args, 0, self.powermizer + "\n", "")
-        if "-a" in args:
-            self.powermizer = args[-1].rsplit("=", 1)[1]
+        if args[:1] == ["busctl"] and "get-property" in args:
+            resposta = json.dumps({"type": "s", "data": self.ppd})
+            return subprocess.CompletedProcess(args, 0, resposta, "")
+        if args[:1] == ["busctl"] and "set-property" in args:
+            self.ppd = args[-1]
             return subprocess.CompletedProcess(args, 0, "", "")
         raise AssertionError(args)
 
@@ -146,3 +143,40 @@ def test_a_bandeja_continua_atualizando_a_janela_visivel(qtbot, fake_root):
     controlador.refresh()
 
     assert espiao.lidos.count("profile") == 2
+
+
+def test_o_agente_le_o_perfil_uma_vez_por_passada(tmp_path):
+    """Ler o perfil e uma chamada WMI, e das caras: 4,7 ms de CPU, medido
+    em 2026-10-09, contra 0,17 ms de um sensor. Em modo maximo o agente
+    lia duas vezes por passada -- uma para decidir, outra para conferir
+    se o modo continuava de pe -- quando a segunda ja sabia a resposta."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True, maximum_saved_ppd="balanced"), caminho)
+    espiao = SysfsEspiao(raiz)
+    agente = Agent(espiao, caminho)
+    runtime = RuntimeFalso()
+    agente._maximum = MaximumMode(
+        agente._maximum.controls, caminho, runtime, gpu=runtime
+    )
+    agente.tick()
+
+    espiao.lidos.clear()
+    agente.tick()
+
+    assert espiao.lidos.count("profile") == 1
+
+
+def test_uma_acao_na_janela_rele_o_aparelho_uma_vez(qtbot, fake_root):
+    """O `changed` de uma pagina chegava a janela por dois caminhos: o
+    direto, e de volta pela bandeja. Eram dois `read_state` por clique --
+    27 ms cada, medido, com cinco chamadas WMI dentro."""
+    espiao, _controlador, janela = _monta_par(qtbot, fake_root)
+    janela.show()
+    qtbot.waitExposed(janela)
+    pagina = janela.pages[0][2]
+
+    espiao.lidos.clear()
+    pagina.changed.emit()
+
+    assert espiao.lidos.count("fan_speed") == 1

@@ -81,8 +81,11 @@ def _connect_state(controlador, janela):
     controlador.state_refreshed.connect(
         lambda: janela.refresh(update_session=False) if janela.isVisible() else None
     )
+    # Sem notificar de volta: o `changed` ja fez a janela se reler, pelo
+    # caminho direto. O eco pela bandeja era um segundo read_state por
+    # clique -- 27 ms, medido, com cinco chamadas WMI dentro.
     for _, _, pagina in janela.pages:
-        pagina.changed.connect(controlador.refresh)
+        pagina.changed.connect(lambda: controlador.refresh(notify=False))
 
 
 def _abre(janela):

@@ -163,12 +163,21 @@ class WriteError(Exception):
 
 # As tres causas que acontecem de verdade nesta maquina. Qualquer outra
 # cai no texto generico com o errno junto, para nao esconder novidade.
-def _traduz(erro, alvo, valor):
+def _traduz(erro, alvo, valor, on_ac=None):
     if erro.errno in (_errno.EACCES, _errno.EPERM):
         return (
             f"sem permissão para escrever em {alvo}. Confira se você está no "
             "grupo nexus_sense; se acabou de entrar nele, é preciso relogar "
             "para a sessão herdar o grupo."
+        )
+    if erro.errno == _errno.EOPNOTSUPP and on_ac:
+        # Cabo ligado e recusa mesmo assim: abaixo de ~40% de bateria o
+        # firmware ainda se diz fora da tomada. Mandar "ligue o cabo" a
+        # quem esta com ele ligado parece travamento. Ver armadilha 27.
+        return (
+            f"o firmware recusou {valor!r} mesmo com o cabo ligado: ele só "
+            "aceita este valor com a bateria por volta de 40% ou mais. Tente "
+            "de novo quando a carga subir."
         )
     if erro.errno == _errno.EOPNOTSUPP:
         return (
@@ -236,7 +245,9 @@ class Controls:
         try:
             self.sysfs.write(caminho, valor)
         except OSError as erro:
-            raise WriteError(_traduz(erro, alvo, valor)) from erro
+            raise WriteError(
+                _traduz(erro, alvo, valor, self.sysfs.on_ac())
+            ) from erro
 
 
 class SystemInfo(NamedTuple):

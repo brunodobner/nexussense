@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 from nexus_sense.device import Controls, read_state, read_system
@@ -7,24 +8,28 @@ from nexus_sense.sysfs import Sysfs
 
 from conftest import build_tree
 
-PPD_LIST = """  balanced:
-    CpuDriver:      intel_pstate
-    PlatformDriver: placeholder
-
-* performance:
-    CpuDriver:      intel_pstate
-    PlatformDriver: placeholder
-"""
-
-PPD_LIST_DISPUTANDO = """  balanced:
-    CpuDriver:      intel_pstate
-    PlatformDriver: platform_profile
-"""
+def _perfis(*drivers):
+    """A resposta do busctl para `Profiles`. None e o perfil sem
+    PlatformDriver -- a chave falta, como no 'performance' desta maquina."""
+    dados = []
+    for driver in drivers:
+        perfil = {"CpuDriver": {"type": "s", "data": "intel_pstate"}}
+        if driver is not None:
+            perfil["PlatformDriver"] = {"type": "s", "data": driver}
+        dados.append(perfil)
+    return json.dumps({"type": "aa{sv}", "data": dados})
 
 
-def runner_ppd(saida_list, perfil="performance", codigo=0):
+PPD_PERFIS = _perfis("placeholder", "placeholder", None)
+PPD_PERFIS_DISPUTANDO = _perfis("platform_profile")
+
+
+def runner_ppd(perfis, perfil="performance", codigo=0):
     def runner(args, **kwargs):
-        texto = perfil + "\n" if args[-1] == "get" else saida_list
+        if args[-1] == "ActiveProfile":
+            texto = json.dumps({"type": "s", "data": perfil})
+        else:
+            texto = perfis
         return subprocess.CompletedProcess(args, codigo, stdout=texto, stderr="")
 
     return runner
@@ -58,7 +63,7 @@ def test_arvore_vazia_nao_derruba_o_sistema(tmp_path):
 
 def test_ppd_ausente_nao_e_erro():
     def explode(args, **kwargs):
-        raise FileNotFoundError("powerprofilesctl")
+        raise FileNotFoundError("busctl")
 
     estado = ppd_state(runner=explode)
     assert estado.present is False
@@ -69,14 +74,22 @@ def test_ppd_com_placeholder_nao_disputa_o_perfil():
     """Medido nesta maquina: o ppd 0.30 dirige o intel_pstate e nao se
     ligou ao platform_profile. Por isso ele diz 'performance' enquanto o
     platform_profile diz 'balanced', sem conflito. Ver spec secao 2.11."""
-    estado = ppd_state(runner=runner_ppd(PPD_LIST))
+    estado = ppd_state(runner=runner_ppd(PPD_PERFIS))
     assert estado.present is True
     assert estado.profile == "performance"
     assert estado.drives_platform is False
 
 
+def test_ppd_parado_conta_como_ausente():
+    """Com o servico fora do ar o busctl sai 1. Nao ha o que disputar com
+    quem nao esta rodando, entao a tela trata como ausente."""
+    estado = ppd_state(runner=runner_ppd("", codigo=1))
+    assert estado.present is False
+    assert estado.drives_platform is False
+
+
 def test_ppd_ligado_ao_platform_profile_e_sinalizado():
-    estado = ppd_state(runner=runner_ppd(PPD_LIST_DISPUTANDO))
+    estado = ppd_state(runner=runner_ppd(PPD_PERFIS_DISPUTANDO))
     assert estado.drives_platform is True
 
 

@@ -94,3 +94,23 @@ def test_recusa_do_driver_vira_frase_sobre_a_bateria(fake_root, monkeypatch):
 def test_a_mensagem_tambem_e_o_str_da_excecao(fake_root):
     erro = WriteError("qualquer coisa")
     assert str(erro) == "qualquer coisa" == erro.message
+
+
+def test_recusa_com_o_cabo_ligado_fala_dos_40_por_cento(tmp_path, monkeypatch):
+    """Abaixo de 40% de bateria o firmware recusa os perfis de tomada
+    mesmo com o cabo ligado. "Ligue o cabo" para quem esta com ele ligado
+    foi lido como travamento. Ver armadilha 27."""
+    def recusa(caminho, valor):
+        raise OSError(errno.EOPNOTSUPP, "Operation not supported")
+
+    for on_ac, esperado, proibido in (
+        (True, "40%", "Ligue o cabo"),
+        (False, "Ligue o cabo", "40%"),
+    ):
+        raiz = build_tree(tmp_path / f"cabo-{on_ac}", on_ac=on_ac)
+        controles = Controls(Sysfs(raiz))
+        monkeypatch.setattr(controles.sysfs, "write", recusa)
+        with pytest.raises(WriteError) as capturado:
+            controles.set_profile("balanced-performance")
+        assert esperado in capturado.value.message
+        assert proibido not in capturado.value.message

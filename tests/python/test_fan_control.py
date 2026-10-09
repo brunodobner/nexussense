@@ -112,7 +112,50 @@ def test_mover_o_cursor_escreve_o_par(qtbot, fake_root):
     p.fan_buttons["manual"].click()
     p.fan_sliders["cpu"].setValue(60)
     p.fan_sliders["gpu"].setValue(45)
-    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "60,45"
+    alvo = fake_root / SENSE / "fan_speed"
+    qtbot.waitUntil(lambda: alvo.read_text().strip() == "60,45", timeout=2000)
+
+
+def test_arrastar_o_cursor_escreve_quando_ele_para(qtbot, fake_root):
+    """Cada passo do arrasto era uma escrita no firmware seguida de uma
+    releitura completa do aparelho. O cursor agora escreve quando para."""
+    p = pagina(qtbot, fake_root)
+    p.fan_buttons["manual"].click()
+    escritas = []
+    p.controls.sysfs.write = lambda caminho, valor: escritas.append(valor)
+
+    for valor in range(1, 21):
+        p.fan_sliders["cpu"].setValue(valor)
+    assert escritas == []
+
+    qtbot.waitUntil(lambda: escritas != [], timeout=2000)
+    qtbot.wait(300)
+    assert escritas == ["20,0"]
+
+
+def test_repintura_nao_puxa_de_volta_o_cursor_com_escrita_pendente(qtbot, fake_root):
+    """A bandeja repinta a janela a cada 5 s. Se isso cair entre o
+    arrasto e a escrita, o cursor nao pode voltar ao valor antigo -- a
+    escrita pendente levaria o valor antigo junto."""
+    p = pagina(qtbot, fake_root)
+    p.fan_buttons["manual"].click()
+    p.fan_sliders["cpu"].setValue(60)
+
+    p.apply_state(read_state(Sysfs(fake_root)))
+
+    assert p.fan_sliders["cpu"].value() == 60
+    alvo = fake_root / SENSE / "fan_speed"
+    qtbot.waitUntil(lambda: alvo.read_text().strip() == "60,0", timeout=2000)
+
+
+def test_escolher_automatico_cancela_a_escrita_pendente_do_cursor(qtbot, fake_root):
+    p = pagina(qtbot, fake_root)
+    p.fan_buttons["manual"].click()
+    p.fan_sliders["cpu"].setValue(60)
+    p.fan_buttons["auto"].click()
+
+    qtbot.wait(400)
+    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "0,0"
 
 
 def test_clicar_no_trilho_move_direto_ao_ponto(qtbot, fake_root):

@@ -32,15 +32,19 @@ def main(argv=None):
     )
 
     sysfs = Sysfs(args.root)
-    if not sysfs.module_loaded():
-        logging.error("o módulo do driver não está carregado; nada a fazer")
-        return 1
-
     agente = Agent(sysfs, args.config or default_path(), interval=args.interval)
 
     if args.once:
+        if not sysfs.module_loaded():
+            logging.error("o módulo do driver não está carregado; nada a fazer")
+            return 1
         agente.tick()
         return 0
+
+    # Sem o modulo o laco entra assim mesmo, e espera. Sair com erro aqui
+    # nao encerrava nada: a unit tem Restart=always e reabria o agente a
+    # cada 3 s, indefinidamente -- o limite de 5 partidas em 10 s nunca e
+    # atingido nesse ritmo. Quem avisa da ausencia e o proprio tick.
 
     parar = threading.Event()
     for sinal in (signal.SIGTERM, signal.SIGINT):

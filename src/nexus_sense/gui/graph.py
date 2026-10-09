@@ -20,6 +20,7 @@ from PySide6.QtCore import QElapsedTimer, QTimer, Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
+from .poller import INTERVALO_PADRAO
 from .style import is_dark, palette_for
 
 TEMP_MIN = 20
@@ -37,7 +38,10 @@ MARGEM_BASE = 9
 # separacao de 2,9 e 13,4. Ver interface.md secao 2.
 COR_CPU = "#4A78C8"
 COR_GPU = "#D2688F"
-ANIMATION_DURATION_MS = 100
+# A ponta leva exatamente um intervalo de sondagem para chegar a amostra
+# nova, entao a linha desliza sem parar em vez de andar aos trancos. Com
+# 120 amostras a 1 Hz, a caixa cobre os ultimos dois minutos.
+ANIMATION_DURATION_MS = INTERVALO_PADRAO
 FRAME_INTERVAL_MS = 16
 
 
