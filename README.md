@@ -64,8 +64,8 @@ A instalação completa:
 A GUI usa PySide6 e `dbus-python` (no Arch/CachyOS: `pyside6` e
 `python-dbus`). O extra Python `gui` declara essas dependências. A bandeja
 com scroll requer Qt com dispatcher GLib; sem ele, usa `QSystemTrayIcon`.
-O instalador também obtém `powerprofilesctl` e `nvidia-settings`, usados pelo
-modo **Desempenho máximo**, e confirma as dependências antes de copiar o app.
+O instalador também obtém o `power-profiles-daemon`, usado pelo modo
+**Desempenho máximo**, e confirma as dependências antes de copiar o app.
 
 ## Componentes
 
@@ -137,7 +137,7 @@ reescrito, e a GUI .NET original foi substituída por uma em PySide6.
 | `original/Linuwu-Sense/src/linuwu_sense.c` | `driver/src/nexus_sense.c` | ~200 linhas |
 | `original/Linuwu-Sense/Makefile` | `driver/Makefile` | 66+/74− |
 | `original/Linuwu-Sense/linuwu_sense.service` | `packaging/systemd/nexus_sense.service` | reescrita |
-| `original/nitro-key-detection.sh` | `packaging/scripts/nitro-key-detection.sh` | 13+/3− |
+| `original/nitro-key-detection.sh` | — | removido: era um serviço root lendo o teclado inteiro; o botão abre o app por hwdb e atalho do desktop |
 | `original/Linuwu-Sense/LICENSE` | `driver/LICENSE` | intocado |
 | — | `driver/dkms.conf` | inteiramente nosso |
 | — | `src/` (janela, bandeja, agente) | escrito do zero |

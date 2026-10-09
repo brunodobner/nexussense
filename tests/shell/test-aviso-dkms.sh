@@ -37,7 +37,7 @@ else
 fi
 
 # --- armadilha 6: 'dkms status' sai 0 ate para pacote inexistente
-if grep -q 'grep -q installed' "$S"; then
+if grep -q 'dkms status.*| *grep installed' "$S"; then
   echo "  OK   procura a palavra 'installed', nao o codigo de saida"
 else
   echo "  FALHA confia no exit code do dkms status (armadilha 6)"; falhas=$((falhas + 1))

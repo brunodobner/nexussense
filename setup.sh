@@ -20,7 +20,7 @@
 # A versao e a do PROJETO, nao a do modulo. O driver tem a sua propria em
 # DRIVER_VERSION (nexus_sense.c), que alimenta o pacote DKMS -- sao dois
 # espacos de numeracao de proposito. Ver docs/decisoes.md secao 7.
-SCRIPT_VERSION="1.2.2"
+SCRIPT_VERSION="1.2.3"
 # Caminhos de instalacoes ANTIGAS, mantidos so para a limpeza encontra-los.
 # Nada deste projeto e instalado neles: o pacote vai para
 # /usr/lib/nexus-sense e os lancadores para /usr/bin. Ver docs/decisoes.md
@@ -205,8 +205,9 @@ comprehensive_cleanup() {
   # qualquer processo da maquina podia recarregar o driver por ele. Some
   # junto e nao volta -- o Nexus Sense nao tem socket nenhum.
   rm -f /var/run/DAMX.sock /run/DAMX.sock
-  rm -f /etc/xdg/autostart/nexus-sense-autostart.desktop
   rm -rf /opt/DAMX
+
+  cleanup_nexus_sense
   refresh_desktop_database
 
   # Remove the driver. Under DKMS 'make uninstall' is not enough: it drops
@@ -218,7 +219,7 @@ comprehensive_cleanup() {
   #
   # Roda antes do novo ser registrado, e por isso vive na limpeza.
   for antigo in linuwu_sense; do
-    if dkms status 2> /dev/null | grep -q "^${antigo}"; then
+    if dkms status 2> /dev/null | grep "^${antigo}" > /dev/null; then
       echo "Removendo o pacote DKMS antigo: ${antigo}"
       for v in $(dkms status 2> /dev/null | grep "^${antigo}" \
                  | sed -E "s|^${antigo}[/,] *([^,]+).*|\\1|" | sort -u); do
@@ -233,6 +234,12 @@ comprehensive_cleanup() {
     fi
     modprobe -r "${antigo}" &> /dev/null || true
     find /lib/modules -name "${antigo}.ko*" -delete &> /dev/null || true
+    # O grupo do nome antigo tambem sobreviveu a renomeacao: o usuario
+    # seguia dentro dele, sem atributo nenhum que o usasse.
+    if getent group "${antigo}" > /dev/null; then
+      echo "Removendo o grupo antigo: ${antigo}"
+      groupdel "${antigo}" || true
+    fi
   done
 
   if [ -d "$DRIVER_DIR" ]; then
@@ -334,20 +341,25 @@ unbind_button_from_nexus() {
   home=$(getent passwd "$user" | cut -d: -f6)
   [ -f "${home}/.config/kglobalshortcutsrc" ] || return 0
 
-  current=$(runuser -u "$user" -- env HOME="$home" kreadconfig6 --file kglobalshortcutsrc \
-              --group services --group nexus-sense.desktop --key _launch 2>/dev/null)
+  # damx.desktop e a entrada da linhagem antiga: o instalador do DAMX
+  # escrevia o mesmo valor sob o nome dele, e a renomeacao nao a levou.
+  # Ficava viva, apontando para um .desktop que nao existe mais.
+  local entrada key
+  for entrada in nexus-sense.desktop damx.desktop; do
+    current=$(runuser -u "$user" -- env HOME="$home" kreadconfig6 --file kglobalshortcutsrc \
+                --group services --group "$entrada" --key _launch 2>/dev/null)
 
-  if [ "$current" = "Launch (1)" ]; then
-    # kwriteconfig6 has no --delete-group: keys go one at a time.
-    echo "Removing the Nexus Sense button shortcut..."
-    local key
-    for key in _launch _k_friendly_name; do
-      runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
-        --group services --group nexus-sense.desktop --key "$key" --delete &> /dev/null || true
-    done
-  elif [ -n "$current" ]; then
-    echo "Keeping the custom Nexus Sense shortcut '${current}' (not set by this installer)."
-  fi
+    if [ "$current" = "Launch (1)" ]; then
+      # kwriteconfig6 has no --delete-group: keys go one at a time.
+      echo "Removing the button shortcut of ${entrada}..."
+      for key in _launch _k_friendly_name; do
+        runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
+          --group services --group "$entrada" --key "$key" --delete &> /dev/null || true
+      done
+    elif [ -n "$current" ]; then
+      echo "Keeping the custom shortcut '${current}' of ${entrada} (not set by this installer)."
+    fi
+  done
 }
 
 # Function to clean up nitro key detection service
@@ -428,6 +440,25 @@ is_llvm_kernel() {
   return 1
 }
 
+# Pacotes de headers dos kernels BOOTAVEIS, no Arch e derivados.
+#
+# Cada kernel grava o nome do proprio pacote em
+# /lib/modules/<versao>/pkgbase, e os headers dele sao "<pkgbase>-headers".
+# Pedir o "linux-headers" generico so serve a quem roda o kernel "linux":
+# numa maquina so com linux-cachyos ele instala headers de um kernel que
+# nao existe -- o diretorio so-headers da armadilha 22b -- e deixa sem
+# headers o kernel que da boot.
+#
+# vmlinuz e o discriminador de "bootavel", o mesmo de install_drivers. O
+# argumento existe para o teste plantar uma arvore.
+arch_header_packages() {
+  local raiz="${1:-/lib/modules}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] && [ -r "${d}pkgbase" ] || continue
+    printf '%s-headers\n' "$(cat "${d}pkgbase")"
+  done | sort -u
+}
+
 # Install build dependencies based on distribution.
 # Kernel headers are required for any module build; DKMS is required for
 # the module to survive kernel upgrades. Neither base-devel nor
@@ -435,10 +466,14 @@ is_llvm_kernel() {
 install_build_deps() {
   if command -v pacman &> /dev/null; then
     # Arch-based (including CachyOS, Manjaro, EndeavourOS).
-    # linux-headers covers the stock kernel; other kernels (linux-lts,
-    # linux-cachyos, ...) need their own -headers package, which
-    # check_kernel_headers reports on.
-    pacman -S --needed --noconfirm base-devel linux-headers dkms
+    local headers
+    headers=$(arch_header_packages)
+    if [ -z "$headers" ]; then
+      echo -e "${YELLOW}Nenhum kernel com pkgbase em /lib/modules: instale os headers do seu kernel a mao.${NC}"
+    fi
+    # $headers sem aspas de proposito: e uma lista, um pacote por palavra.
+    # shellcheck disable=SC2086
+    pacman -S --needed --noconfirm base-devel dkms $headers
     if is_llvm_kernel; then
       pacman -S --needed --noconfirm clang llvm lld
     fi
@@ -458,10 +493,12 @@ install_build_deps() {
 # Dependências de execução da janela, bandeja e agente. O pacote Python é
 # copiado para /usr/lib, então estes módulos precisam vir do gerenciador da
 # distribuição, no mesmo Python usado por /usr/bin/nexus-sense.
+#
+# A GPU não entra aqui: o PowerMizer fala com a NVML, que vem com o driver
+# da NVIDIA, e onde ela falta o modo máximo segue sem essa parte.
 runtime_dependencies_ok() {
   python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null &&
-    command -v powerprofilesctl &> /dev/null &&
-    command -v nvidia-settings &> /dev/null
+    command -v powerprofilesctl &> /dev/null
 }
 
 install_runtime_deps() {
@@ -470,20 +507,20 @@ install_runtime_deps() {
   echo -e "${YELLOW}Installing Nexus Sense runtime dependencies...${NC}"
   if command -v pacman &> /dev/null; then
     pacman -S --needed --noconfirm pyside6 python-dbus python-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v apt-get &> /dev/null; then
     apt-get update
     apt-get install -y python3-pyside6.qtcore python3-pyside6.qtgui \
       python3-pyside6.qtwidgets python3-pyside6.qtdbus python3-dbus python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v dnf &> /dev/null; then
     dnf install -y python3-pyside6 python3-dbus python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   elif command -v zypper &> /dev/null; then
     zypper install -y python3-PySide6 python3-dbus-python python3-tomli-w \
-      power-profiles-daemon nvidia-settings
+      power-profiles-daemon
   else
-    echo -e "${RED}Unknown package manager. Install PySide6, dbus-python, tomli-w, powerprofilesctl and nvidia-settings.${NC}"
+    echo -e "${RED}Unknown package manager. Install PySide6, dbus-python, tomli-w and power-profiles-daemon.${NC}"
     return 1
   fi
 
@@ -650,10 +687,6 @@ EOL
 bind_button_to_nexus() {
   local user home rc current
 
-  # Lido por configure_nitro_button logo depois: com o botao ja vinculado,
-  # o servico de deteccao vira alternativa, nao necessidade.
-  NITRO_KEY_BOUND=0
-
   print_shortcut_instructions() {
     echo -e "${BLUE}To open Nexus Sense with the button: your desktop's keyboard${NC}"
     echo -e "${BLUE}settings -> Shortcuts -> add the Nexus Sense application, and${NC}"
@@ -678,7 +711,6 @@ bind_button_to_nexus() {
               --group services --group nexus-sense.desktop --key _launch 2>/dev/null)
   if [ -n "$current" ]; then
     echo -e "${GREEN}Nexus Sense already has the shortcut '${current}'; leaving it alone.${NC}"
-    NITRO_KEY_BOUND=1
     return 0
   fi
 
@@ -689,7 +721,6 @@ bind_button_to_nexus() {
        --group services --group nexus-sense.desktop --key _launch "Launch (1)" 2>/dev/null &&
      runuser -u "$user" -- env HOME="$home" kwriteconfig6 --file kglobalshortcutsrc \
        --group services --group nexus-sense.desktop --key _k_friendly_name "Nexus Sense" 2>/dev/null; then
-    NITRO_KEY_BOUND=1
     echo -e "${GREEN}Button bound to Nexus Sense for user ${user}.${NC}"
     echo -e "${YELLOW}KWin reads shortcut bindings at login: log out and back in${NC}"
     echo -e "${YELLOW}to activate it.${NC}"
@@ -853,7 +884,10 @@ install_drivers() {
 
   # 'dkms status' exits 0 even for a package that does not exist, so the
   # test must look for the word, not the exit code.
-  if ! dkms status "nexus_sense/${ver}" | grep -q installed; then
+  #
+  # Sem "grep -q": ele sai no primeiro acerto, e o dkms -- que imprime uma
+  # linha por kernel -- escreve a seguinte num cano fechado e reclama.
+  if ! dkms status "nexus_sense/${ver}" | grep installed > /dev/null; then
     echo -e "${RED}Error: DKMS reports no installed module for nexus_sense/${ver}${NC}"
     pause
     return 1
@@ -866,6 +900,42 @@ install_drivers() {
   echo -e "${GREEN}Nexus Sense installed via DKMS for ${built} kernel(s).${NC}"
   [ "$pulados" -gt 0 ] && echo -e "${BLUE}${pulados} kernel(s) com headers mas sem imagem bootavel foram pulados.${NC}"
   return 0
+}
+
+# Cria o grupo nexus_sense e poe nele o usuario do desktop -- e so anuncia
+# o que de fato fez.
+#
+# Numa reinstalacao o usuario ja esta dentro. Dizer "adicionado" e "so vale
+# depois de relogar" toda vez manda relogar sem motivo, e ensina a ignorar
+# o aviso no dia em que ele for verdade.
+ensure_nexus_group() {
+  local alvo mudou=0
+
+  if ! getent group nexus_sense > /dev/null; then
+    groupadd -r nexus_sense
+    echo -e "${YELLOW}Grupo nexus_sense criado.${NC}"
+    mudou=1
+  fi
+
+  alvo=$(detect_desktop_user)
+  if [ -n "$alvo" ]; then
+    if id -nG "$alvo" 2>/dev/null | tr ' ' '\n' | grep -qx nexus_sense; then
+      echo -e "${BLUE}Usuário ${alvo} já está no grupo nexus_sense.${NC}"
+    else
+      usermod -aG nexus_sense "$alvo"
+      echo -e "${BLUE}Usuário ${alvo} adicionado ao grupo nexus_sense.${NC}"
+      mudou=1
+    fi
+  fi
+
+  [ "$mudou" -eq 1 ] || return 0
+
+  # A spec exige que o instalador diga isto em voz alta ao criar o grupo.
+  echo -e "${YELLOW}Atenção: quem estiver no grupo nexus_sense pode alterar${NC}"
+  echo -e "${YELLOW}as ventoinhas e o perfil térmico sem senha. O driver limita${NC}"
+  echo -e "${YELLOW}a ventoinha a 0-100 e 0 significa automático, então o pior${NC}"
+  echo -e "${YELLOW}caso é modesto -- mas é uma permissão que antes não existia.${NC}"
+  echo -e "${YELLOW}O grupo só vale depois de relogar.${NC}"
 }
 
 # Instala o Nexus Sense: o pacote Python, os dois lancadores, os icones,
@@ -898,13 +968,16 @@ install_nexus_sense() {
   install -m 755 "${RAIZ}/packaging/scripts/apply-perms.sh" /usr/lib/nexus-sense/apply-perms.sh
 
   # --- os dois lancadores
+  # -P: sem ele o "-m" poe o diretorio corrente na frente do sys.path. O
+  # agente e a bandeja sobem em $HOME, e um tomli_w.py largado ali era
+  # executado no lugar do verdadeiro. O PYTHONPATH continua valendo.
   cat > /usr/bin/nexus-sense << 'EOL'
 #!/bin/sh
-PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -m nexus_sense.gui.app "$@"
+PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -P -m nexus_sense.gui.app "$@"
 EOL
   cat > /usr/bin/nexus-sense-agent << 'EOL'
 #!/bin/sh
-PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -m nexus_sense "$@"
+PYTHONPATH=/usr/lib/nexus-sense exec /usr/bin/python3 -P -m nexus_sense "$@"
 EOL
   chmod +x /usr/bin/nexus-sense /usr/bin/nexus-sense-agent
 
@@ -929,22 +1002,7 @@ EOL
     /etc/xdg/autostart/nexus-sense-autostart.desktop
 
   # --- o grupo, e o aviso que ele exige
-  if ! getent group nexus_sense > /dev/null; then
-    groupadd -r nexus_sense
-    echo -e "${YELLOW}Grupo nexus_sense criado.${NC}"
-  fi
-  local alvo
-  alvo=$(detect_desktop_user)
-  if [ -n "$alvo" ]; then
-    usermod -aG nexus_sense "$alvo"
-    echo -e "${BLUE}Usuário ${alvo} adicionado ao grupo nexus_sense.${NC}"
-  fi
-  # A spec exige que o instalador diga isto em voz alta ao criar o grupo.
-  echo -e "${YELLOW}Atenção: quem estiver no grupo nexus_sense pode alterar${NC}"
-  echo -e "${YELLOW}as ventoinhas e o perfil térmico sem senha. O driver limita${NC}"
-  echo -e "${YELLOW}a ventoinha a 0-100 e 0 significa automático, então o pior${NC}"
-  echo -e "${YELLOW}caso é modesto -- mas é uma permissão que antes não existia.${NC}"
-  echo -e "${YELLOW}O grupo só vale depois de relogar.${NC}"
+  ensure_nexus_group
 
   # --- a regra udev que aplica o grupo aos seis atributos
   install -m 644 "${RAIZ}/packaging/udev/60-nexus-sense.rules" \
@@ -966,187 +1024,106 @@ EOL
   return 0
 }
 
-configure_nitro_button() {
-  echo -e "${YELLOW}Configuring Nitro/PredatorSense Button Hardware Code...${NC}"
+# Desfaz install_nexus_sense, item por item.
+#
+# Ate 2026-10-09 a desinstalacao so tirava o autostart: lancadores, pacote,
+# regra udev, unit do agente, .desktop, icones e grupo ficavam para tras.
+#
+# Tres coisas ficam de proposito:
+#   ~/.config/nexus-sense   e escolha do usuario, nao do instalador. Ver
+#                           plano-melhorias.md, D5.
+#   o grupo nexus_sense     esta limpeza roda tambem antes de reinstalar, e
+#                           recriar o grupo troca o gid. Quem o remove e a
+#                           desinstalacao: cleanup_nexus_group.
+#   agente e bandeja em execucao   sao processos da sessao do usuario e
+#                           saem com ela. O disable abaixo so impede que
+#                           voltem na proxima.
+cleanup_nexus_sense() {
+  echo "Removendo o aplicativo Nexus Sense..."
 
-  # Ask user if they want to setup the key with 10 second timeout.
-  # Default to No so installs/updates do not silently add a keyboard hook service.
-  # Predator machines have the same dedicated button (the PredatorSense key) —
-  # it even sends the same code as the Nitro key on the models tested so far.
-  #
-  # install_nitro_key_hwdb runs before this and usually already makes the
-  # button open DAMX, without any daemon. When it did, say so: this service
-  # would duplicate working behaviour at a real cost -- it runs as root and
-  # reads every key on the keyboard, passwords included. It stays available
-  # for environments with no global shortcuts, but nobody should install it
-  # by accident.
-  if [ "${NITRO_KEY_BOUND:-0}" = "1" ]; then
-    echo -e "${GREEN}The button already opens Nexus Sense through a desktop shortcut.${NC}"
-    echo -e "${BLUE}The detection service below is an alternative for desktops${NC}"
-    echo -e "${BLUE}without global shortcuts. It runs as root and watches every${NC}"
-    echo -e "${BLUE}key on the keyboard, so install it only if the shortcut did${NC}"
-    echo -e "${BLUE}not work for you.${NC}"
-    echo -e "${YELLOW}Install the key detection service anyway? (y/N) - Waiting 10 seconds...${NC}"
-  else
-    echo -e "${YELLOW}Do you want to setup your Nitro/PredatorSense Key? (y/N) - Waiting 10 seconds...${NC}"
-  fi
-  read -t 10 -n 1 -r response
-  
-  # Default to No if timeout or empty response
-  if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
-    echo -e "\n${BLUE}No response detected. Skipping Nitro button setup.${NC}"
-    response="N"
-  fi
+  # --- a unit de usuario do agente
+  # O disable vem antes do rm: e pela secao [Install] da unit que o
+  # systemctl sabe qual link desfazer.
+  systemctl --global disable nexus-sense-agent.service &> /dev/null || true
+  rm -f /usr/lib/systemd/user/nexus-sense-agent.service
 
-  # Check if user wants to skip
-  if [[ ! "$response" =~ ^[Yy]$ ]]; then
-    echo -e "${BLUE}Skipping button configuration. You can run setup again later to enable it.${NC}"
-    return 0
-  fi
+  # --- a regra udev
+  rm -f /etc/udev/rules.d/60-nexus-sense.rules
+  udevadm control --reload &> /dev/null || true
 
-  if ! command -v evtest &> /dev/null; then
-    echo -e "${BLUE}Installing evtest for hardware detection...${NC}"
-    if command -v apt-get &> /dev/null; then
-      apt-get update && apt-get install -y evtest
-    elif command -v dnf &> /dev/null; then
-      dnf install -y evtest
-    elif command -v pacman &> /dev/null; then
-      pacman -S --noconfirm --needed evtest
-    else
-      echo -e "${RED}Could not install evtest automatically. Install it with your package manager and re-run setup.${NC}"
-      return 1
-    fi
-  fi
+  # --- icones e lancadores do desktop
+  find /usr/share/icons/hicolor -type f -name 'nexus-sense*' -delete 2>/dev/null || true
+  rm -f "${DESKTOP_FILE_DIR}/nexus-sense.desktop"
+  rm -f /etc/xdg/autostart/nexus-sense-autostart.desktop
 
-  DEVICE=$(grep -A 5 -B 5 "AT Translated Set 2 keyboard" /proc/bus/input/devices | grep -m 1 "event" | sed 's/.*event\([0-9]\+\).*/\/dev\/input\/event\1/')
-
-  # Codigo de reserva, usado quando a captura falha. Depende do
-  # mapeamento em vigor: com a regra hwdb deste instalador o botao emite
-  # prog1 (148); sem ela, a entrada generica Acer do systemd o entrega
-  # como presentation (425). Cravar um dos dois daria o errado na metade
-  # dos casos.
-  FALLBACK_KEY=425
-  if [ -n "$DEVICE" ] && udevadm info "$DEVICE" 2>/dev/null | grep -q 'KEYBOARD_KEY_f5=prog1'; then
-    FALLBACK_KEY=148
-  fi
-
-  mkdir -p /etc/damx
-
-  if [ -z "$DEVICE" ]; then
-    echo -e "${RED}Error: Keyboard hardware not found! Using fallback code ${FALLBACK_KEY}.${NC}"
-    echo "NITRO_KEY=$FALLBACK_KEY" > /etc/damx/nitro_key.conf
-    return 1
-  fi
-
-  echo -e "${GREEN}Keyboard detected at: $DEVICE${NC}"
-  echo -e "${YELLOW}>>> PLEASE PRESS YOUR NITRO / PREDATORSENSE BUTTON NOW (Waiting 30 seconds)... <<<${NC}"
-
-  # On both Nitro and Predator EC keyboards the button arrives as scancode
-  # 0xf5, which the kernel maps to keycode 425 unless an hwdb quirk remaps
-  # it (some models get prog1/148). Capturing beats hardcoding either one.
-  CAPTURED_CODE=$(timeout 30 evtest "$DEVICE" | grep -m 1 "type 1 (EV_KEY).*value 1" | sed -n 's/.*code \([0-9]*\).*/\1/p')
-
-  if [ -n "$CAPTURED_CODE" ]; then
-    echo -e "${GREEN}Success! Button code captured: ${CAPTURED_CODE}${NC}"
-    echo "NITRO_KEY=$CAPTURED_CODE" > /etc/damx/nitro_key.conf
-  else
-    echo -e "${RED}Timeout or no key detected. Falling back to code ${FALLBACK_KEY}.${NC}"
-    echo -e "${YELLOW}If you DID press the button: key remappers like keyd or kmonad grab the${NC}"
-    echo -e "${YELLOW}keyboard exclusively, so this capture (and the detection service) never${NC}"
-    echo -e "${YELLOW}sees the key. Stop the remapper and re-run setup, or bind the key in the${NC}"
-    echo -e "${YELLOW}remapper's own config instead.${NC}"
-    echo "NITRO_KEY=$FALLBACK_KEY" > /etc/damx/nitro_key.conf
-  fi
-  
-  # Install NitroKeyDetection.sh as a service
-  install_nitro_service
+  # --- os dois lancadores e o pacote
+  rm -f /usr/bin/nexus-sense
+  rm -f /usr/bin/nexus-sense-agent
+  rm -rf /usr/lib/nexus-sense
 }
 
+# Remove o grupo nexus_sense. So a desinstalacao chama (decisao D5); a
+# limpeza que antecede uma reinstalacao, nao.
+#
+# "groupadd -r" nao devolve o gid que o groupdel liberou: pega o menor gid
+# de sistema em uso e desce um. Medido em 2026-10-09: 950 -> 948, com o 950
+# livre. Apagar e recriar o grupo a cada reinstalacao trocava o gid toda
+# vez, e a sessao aberta -- agente e bandeja inclusive -- ficava sem
+# escrita nos atributos ate relogar. Ver armadilha 29.
+cleanup_nexus_group() {
+  if getent group nexus_sense > /dev/null; then
+    groupdel nexus_sense \
+      || echo -e "${YELLOW}Nao foi possivel remover o grupo nexus_sense.${NC}"
+  fi
+}
+
+# Conta de sistema nao e usuario de desktop: uid abaixo de 1000 e root,
+# greeter (sddm, gdm, lightdm) ou servico.
+desktop_user_valid() {
+  local uid
+  uid=$(id -u "$1" 2>/dev/null) || return 1
+  [ "$uid" -ge 1000 ] && [ "$1" != "nobody" ]
+}
+
+# De quem e o desktop. O instalador roda como root e precisa saber: e essa
+# conta que entra no grupo nexus_sense, e e no home dela que o atalho do
+# botao N e escrito.
+#
+# Pergunta primeiro a quem chamou -- sudo deixa SUDO_USER, pkexec deixa
+# PKEXEC_UID -- e so depois as sessoes abertas. Toda resposta passa por
+# desktop_user_valid: a lista do loginctl traz a sessao do greeter antes da
+# da pessoa, e excluir "root" e "gdm" pelo nome deixava passar o sddm.
 detect_desktop_user() {
-  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && id -u "$SUDO_USER" >/dev/null 2>&1; then
+  local nome
+
+  if [ -n "${SUDO_USER:-}" ] && desktop_user_valid "$SUDO_USER"; then
     echo "$SUDO_USER"
     return 0
   fi
 
+  # So digitos: "id -nu" aceita nome tambem, e devolveria o proprio texto.
+  case "${PKEXEC_UID:-}" in
+    ''|*[!0-9]*) ;;
+    *)
+      nome=$(id -nu "$PKEXEC_UID" 2>/dev/null)
+      if [ -n "$nome" ] && desktop_user_valid "$nome"; then
+        echo "$nome"
+        return 0
+      fi
+      ;;
+  esac
+
   if command -v loginctl >/dev/null 2>&1; then
-    local session_user
-    session_user=$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3 != "root" && $3 != "gdm" { print $3; exit }')
-    if [ -n "$session_user" ] && id -u "$session_user" >/dev/null 2>&1; then
-      echo "$session_user"
-      return 0
-    fi
+    # Colunas: SESSION UID USER SEAT ...
+    for nome in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{ print $3 }'); do
+      if desktop_user_valid "$nome"; then
+        echo "$nome"
+        return 0
+      fi
+    done
   fi
 
-  awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }' /etc/passwd
-}
-
-install_nitro_service() {
-  echo -e "${YELLOW}Installing Nitro Key Detection Service...${NC}"
-
-  NITRO_SCRIPT="${RAIZ}/packaging/scripts/nitro-key-detection.sh"
-  TARGET_USER=$(detect_desktop_user)
-
-  if [ -z "$TARGET_USER" ] || ! id -u "$TARGET_USER" >/dev/null 2>&1; then
-    echo -e "${RED}Error: Could not determine desktop user for Nitro key launcher.${NC}"
-    return 1
-  fi
-
-  echo -e "${BLUE}The button will launch Nexus Sense for user: ${TARGET_USER}${NC}"
-  
-  # Check if NitroKeyDetection.sh exists
-  if [ ! -f "$NITRO_SCRIPT" ]; then
-    echo -e "${RED}Error: nitro-key-detection.sh not found at ${NITRO_SCRIPT}${NC}"
-    return 1
-  fi
-  
-  # Make the script executable
-  chmod +x "$NITRO_SCRIPT"
-  
-  # Copy script to /usr/local/bin
-  cp "$NITRO_SCRIPT" /usr/local/bin/
-  chmod +x "/usr/local/bin/nitro-key-detection.sh"
-  
-  # Create systemd service file
-  cat > /etc/systemd/system/nitro-key-detection.service << EOF
-[Unit]
-Description=Nitro/PredatorSense Key Detection Service
-After=multi-user.target
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/nitro-key-detection.sh
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-User=root
-Environment=DAMX_TARGET_USER=${TARGET_USER}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-  # Reload systemd, enable and start the service
-  systemctl daemon-reload
-  systemctl enable nitro-key-detection.service
-  systemctl start nitro-key-detection.service
-  
-  # Check if service is running
-  if systemctl is-active --quiet nitro-key-detection.service; then
-    echo -e "${GREEN}✓ Nitro Key Detection Service installed and running successfully!${NC}"
-    echo -e "${GREEN}Service status: $(systemctl status nitro-key-detection.service --no-pager | grep Active)${NC}"
-  else
-    echo -e "${RED}✗ Service installation failed. Checking logs...${NC}"
-    journalctl -u nitro-key-detection.service -n 10 --no-pager
-    return 1
-  fi
-  
-  echo -e "${BLUE}Service commands:${NC}"
-  echo -e "  Start: systemctl start nitro-key-detection.service"
-  echo -e "  Stop:  systemctl stop nitro-key-detection.service"
-  echo -e "  Status: systemctl status nitro-key-detection.service"
-  echo -e "  Logs:  journalctl -u nitro-key-detection.service -f"
+  getent passwd | awk -F: '$3 >= 1000 && $3 < 60000 && $1 != "nobody" { print $1; exit }'
 }
 
 perform_install() {
@@ -1181,12 +1158,10 @@ perform_install() {
   NEXUS_RESULT=$?
 
   # O remap de keycode e do teclado, nao do driver: precisa rodar mesmo
-  # quando a instalacao pula os drivers (opcao 2 do menu), e antes da
-  # captura em configure_nitro_button -- senao ela grava o keycode antigo.
+  # quando a instalacao pula os drivers (opcao 2 do menu). Ele e o atalho
+  # do desktop sao o caminho inteiro do botao: nao ha servico lendo o
+  # teclado. Ver docs/plano-melhorias.md, decisao D4.
   install_nitro_key_hwdb
-
-  #Setup NitroButton shortcut
-  configure_nitro_button
 
   # Check if all installations were successful
   if [ $DRIVER_RESULT -eq 0 ] && [ $NEXUS_RESULT -eq 0 ]; then
@@ -1210,6 +1185,7 @@ perform_install() {
 uninstall() {
   echo -e "${YELLOW}Uninstalling Nexus Sense...${NC}"
   comprehensive_cleanup
+  cleanup_nexus_group
   echo -e "${GREEN}Nexus Sense uninstalled successfully!${NC}"
   pause
   return 0

@@ -37,7 +37,21 @@ else
   echo "  OK   nenhuma versao cravada em install_drivers"
 fi
 
-if dkms status "nexus_sense/$VER" 2>/dev/null | grep -q installed; then
+# "dkms status | grep -q" deixa "echo: write error: Broken pipe" na saida:
+# o grep sai no primeiro acerto e o dkms, que imprime uma linha por kernel,
+# escreve a seguinte num cano fechado. Visto no portao da etapa 2, como
+# root. Quem le a saida inteira nao fecha o cano antes da hora.
+ruidosos=$(grep -nE 'dkms status[^|#]*\| *grep -q' "$S" "$ROOT"/tests/shell/*.sh \
+           "$ROOT"/packaging/scripts/*.sh 2>/dev/null | grep -vE '^[^:]+:[0-9]+:\s*#')
+if [ -z "$ruidosos" ]; then
+  echo "  OK   nenhum dkms status lido por grep -q"
+else
+  echo "  FALHA grep -q fecha o cano na cara do dkms status:"
+  printf '%s\n' "$ruidosos" | sed "s|$ROOT/||; s/^/        /"
+  fail=1
+fi
+
+if dkms status "nexus_sense/$VER" 2>/dev/null | grep installed > /dev/null; then
   echo "  OK   dkms registra nexus_sense/$VER como installed"
 else
   echo "  FALHA dkms nao tem nexus_sense/$VER installed"; fail=1
@@ -59,7 +73,7 @@ for kver in $(ls /lib/modules); do
     continue
   fi
   achou_bootavel=1
-  if dkms status "nexus_sense/$VER" -k "$kver" 2>/dev/null | grep -q installed; then
+  if dkms status "nexus_sense/$VER" -k "$kver" 2>/dev/null | grep installed > /dev/null; then
     printf '  OK   compilado para %s\n' "$kver"
   else
     printf '  FALHA nao compilado para %s\n' "$kver"; fail=1

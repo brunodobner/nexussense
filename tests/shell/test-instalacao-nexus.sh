@@ -51,11 +51,14 @@ confere "avisa sobre a permissao nova"      'ventoinhas e o perfil'
 confere "recarrega o udev"                  'udevadm control'
 confere "remove variantes antigas do tray"  "status/nexus-sense-tray\*"
 confere "instala controle do perfil da CPU" 'power-profiles-daemon'
-confere "instala controle da GPU NVIDIA"    'nvidia-settings'
 
 # Nenhum arquivo privilegiado deve reaparecer sem decisao: se alguem
 # ressuscitar o helper, este teste acusa.
-if grep -q 'pkexec\|polkit-1/actions' "$S"; then
+#
+# Le o codigo, nao os comentarios: detect_desktop_user consulta PKEXEC_UID
+# para saber quem chamou, e o comentario que explica isso cita o pkexec
+# sem que o instalador o execute.
+if grep -v '^\s*#' "$S" | grep -q 'pkexec\|polkit-1/actions'; then
     echo "  FALHA o instalador voltou a mexer com polkit/pkexec"
     falhas=$((falhas + 1))
 else

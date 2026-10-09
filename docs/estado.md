@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 2 fechada: v1.2.2, partida a frio conferida; etapas 3 e 4 abertas)
+**Última atualização:** 2026-10-09 (melhorias, etapa 3: v1.2.3 em `master`, portão passado, **falta conferir a partida a frio**; etapa 4 aberta)
 
 ---
 
@@ -13,10 +13,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
-| versão | **v1.2.2** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.3** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 18 testes: 16 passam, 2 pulam, 0 falham — **com e sem root** |
+| suíte shell | 20 testes: 18 passam, 2 pulam, 0 falham — **com e sem root** |
 | suíte Python | 362 passaram (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
 
@@ -51,7 +51,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [ ] Gatilho por programa aberto      bloco na tela Desempenho; precisa de plano proprio
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
 [x] Melhorias, etapa 2 -- driver     v1.2.2: bitmask identico, partida a frio conferida
-[ ] Melhorias, etapa 3 -- instalador seis tarefas; sessao propria
+[ ] Melhorias, etapa 3 -- instalador v1.2.3 em master, portao passado; so falta a partida a frio
 [ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
 ```
 
@@ -267,7 +267,7 @@ Depois da virada, o estado é este:
 /usr/share/applications/nexus-sense.desktop
 /usr/share/icons/hicolor/…              app + 4 níveis × 2 polaridades + máximo dourado
 /etc/udev/rules.d/60-nexus-sense.rules
-grupo nexus_sense (gid 950), com brunodobner dentro
+grupo nexus_sense (gid 948 desde 2026-10-09; era 950), com brunodobner dentro
 /usr/src/nexus_sense-25.701
 /etc/modules-load.d/nexus_sense.conf
 /etc/systemd/system/nexus_sense.service
@@ -656,6 +656,190 @@ etapa 2:
 exercitado 16 vezes na etapa 2 — o botão N chega como tecla, o hwdb a traduz em
 `prog1` e o atalho do KDE abre o app. Cada aperto aparece no journal do usuário
 como `Started Nexus Sense - Controle do laptop`, o que serve de sonda sem root.
+
+---
+
+## Melhorias de 2026-10, etapa 3 — portão passado, falta a partida a frio
+
+A etapa do instalador, no ramo `melhorias/3-instalador`. **v1.2.2 → v1.2.3.**
+O baseline capturado antes da primeira edição conferiu com o esperado: 362 na
+suíte Python; shell 16 passam e 2 pulam, idêntico sob `LC_ALL=C`.
+
+O que entrou, cada item com teste que falhou primeiro:
+
+| | conserto | prova |
+|---|---|---|
+| 3.1 | lançadores com `python3 -P` | medido antes: os dois importavam um `tomli_w.py` plantado no diretório corrente. Depois, os lançadores **instalados**, rodados como usuário de dentro do diretório plantado, respondem `1.2.3` e não o importam |
+| 3.2 | `cleanup_nexus_sense` desfaz `install_nexus_sense` item por item | varredura depois da limpeza: nada. `~/.config/nexus-sense` ficou |
+| 3.3 | saem `configure_nitro_button`, `install_nitro_service` e o `nitro-key-detection.sh` | −338 linhas; a limpeza do serviço antigo ficou |
+| 3.4 | `detect_desktop_user` consulta `PKEXEC_UID` e recusa uid abaixo de 1000 | com as fontes trocadas por funções, a versão antiga devolvia `sddm` em 10 de 11 casos; sob o `pkexec` do portão devolveu `brunodobner` |
+| 3.5 | sai `nvidia-settings`; no Arch, headers pelo `pkgbase` de cada kernel bootável | nesta máquina deriva `linux-cachyos-headers` e `linux-cachyos-lts-headers`, e os dois existem no repositório |
+| 3.6 | a regra udev do dispositivo dispara também em `bind` | ver abaixo |
+| extra | "adicionado ao grupo" e "só vale depois de relogar" só quando acontece | no portão completo o grupo foi recriado e ele disse; no curto o usuário já estava dentro e ele disse isso |
+| extra | `dkms status` lido até o fim, sem `grep -q` | como root: forma antiga 20 de 20 com `Broken pipe`, forma nova 0 de 20 |
+| extra | a reinstalação preserva o grupo; sai o atalho morto do `damx.desktop` | achados do portão — ver abaixo |
+
+**Dois portões**, os dois na tomada, bateria em 80%, agente e bandeja parados
+antes. O completo (19:25:52 a 19:26:53) desinstalou tudo e reinstalou na mesma
+chamada de root, como o plano manda. O curto (19:31:39 a 19:32:03) refez só o
+caminho de reinstalação, depois dos dois consertos que o primeiro motivou.
+
+```
+portao completo   57 OK, 1 FALHA, 3 NOTA   sobre a73fc58
+portao curto      40 OK, 0 FALHA, 0 NOTA   sobre c0ba977
+```
+
+O que os dois mediram:
+
+```
+limpeza       varredura estendida: nenhum arquivo; nenhuma unit de sistema nem
+              de usuario; grupos nexus_sense e linuwu_sense removidos; atalho
+              removido; acer_wmi nativo assumiu; DKMS sem registro
+instalacao    perform_install devolveu 0; pacote identico ao fonte; regra udev,
+              unit, .desktop, autostart, gancho do pacman e scripts identicos
+              ao repositorio; 75 icones; enable global do agente no lugar
+driver        srcversion F9236711C6E76401FD38B7A (o mesmo: driver intocado)
+              DKMS installed em 7.2.9-1-cachyos e 6.18.55-1-cachyos-lts
+              bitmask 0x00002c26 nas 32 cargas do completo e nas 4 do curto
+              zero mensagem de erro do kernel nos dois
+permissoes    os seis 664 root:nexus_sense; version 444 root:root
+rfkill        acer-wireless=0 acer-bluetooth=0 antes, com o nativo, e depois
+suite root    master: 16 passam, 2 pulam. Ramo: 18 passam, 2 pulam -- a
+              diferenca sao os dois testes novos. Identica sob LC_ALL=C
+```
+
+**A tarefa 3.6, medida.** A ordem dos eventos numa recarga, vista do kernel:
+
+```
+2160.547403  add   /devices/platform/acer-wmi                    (platform)
+2160.561275  add   .../platform-profile/platform-profile-0       (platform-profile)
+2160.576431  bind  /devices/platform/acer-wmi                    (platform)
+```
+
+O `bind` sai 29 ms depois do `add`, e é nesse intervalo que o `probe` cria os
+atributos. Três séries de dez recargas, cada uma com uma regra só instalada:
+
+```
+A  so add     10 de 10 com permissao certa
+B  so bind    10 de 10
+C  final      10 de 10     (add|change|bind)
+```
+
+**A corrida nunca perdeu nesta máquina** — a série A deu dez de dez. O plano
+dizia "ganha por margem" e a medição confirma a margem, não uma falha. O `bind`
+é robustez: é o evento que vem depois do `probe` por construção, e a série B
+prova que ele basta sozinho.
+
+**O que a armadilha 21 manda, conferido antes do reinício** (19:32, estado
+final, depois do portão curto):
+
+```
+autostart     /etc/xdg/autostart/nexus-sense-autostart.desktop identico ao do
+              repositorio
+botao N       banco hwdb recompilado responde KEYBOARD_KEY_f5=prog1; teclado
+              (event3) com prog1 depois de reaplicar o udev; atalho do KDE
+              "Launch (1)" em [services][nexus-sense.desktop]
+```
+
+### Sete coisas que só apareceram executando
+
+1. **O gid do grupo mudou: 950 → 948.** Eu tinha previsto 950 — "951 a 999
+   estão ocupados" — supondo que o `groupadd -r` pegasse o primeiro livre. Ele
+   pega o menor em uso e desce um (949 é o `seat`). A sessão em curso ficou com
+   o 950 solto e sem escrita nos atributos. E não era acidente do portão: a
+   limpeza roda antes de **toda** reinstalação, então cada uma trocaria o gid.
+   O grupo agora só sai em `uninstall`. Armadilha 29.
+2. **O roteiro reprovou uma instalação certa.** Ele cobrava o arquivo
+   `61-damx-nitro-key.hwdb`. O systemd 262 passou a trazer `pnNitro*ANV*15-52`
+   no `60-keyboard.hwdb` dele; o instalador achou `prog1` no banco recompilado
+   e, com razão, não gravou nada. `/etc/udev/hwdb.d/` está vazio e vai
+   continuar. A conferência é pelo banco — armadilhas 21 e 23, atualizadas.
+3. **Havia um atalho morto no KDE.** `[services][damx.desktop]` com
+   `_launch=Launch (1)`, do instalador da linhagem antiga: mesma tecla do
+   atalho vivo, apontando para um `.desktop` que não existe. O
+   `unbind_button_from_nexus` passou a tratar as duas entradas.
+4. **A varredura da armadilha 8 era cega para este projeto.** Procura `damx`,
+   `linuwu` e `divacer`, e o `-maxdepth 4` não desce até os ícones. Teria
+   voltado vazia com o aplicativo inteiro no disco. E grupo não é arquivo: o
+   `linuwu_sense` (gid 1001) sobreviveu um mês à renomeação, com o usuário
+   dentro. A armadilha ganhou a varredura estendida.
+5. **O `Broken pipe` só existe como root.** Sem root, 0 de 40 tentativas; como
+   root, 20 de 20. O conserto entrou antes da prova e a prova veio no portão —
+   se ela tivesse dado zero também como root, o commit descreveria um defeito
+   que eu não vi.
+6. **Dois commits entraram sem a suíte inteira rodada.** `9c42cf4` e `79238b6`
+   deixaram `test-instalacao-nexus.sh` vermelho: o comentário novo citava o
+   `pkexec` e a guarda contra polkit lia comentário. Consertado em `0a82767`,
+   e a guarda agora lê só código. É a lição 4 da etapa 2, de novo — e a regra
+   que ficou: a suíte inteira antes de cada commit, não só o teste da tarefa.
+7. **A versão subiu antes do portão, não no merge.** `__version__` viaja dentro
+   do pacote instalado; subir no merge deixaria o instalado diferente de
+   `master` por uma linha.
+
+### Visto e não consertado
+
+- **A desinstalação não encerra o agente nem a bandeja que estiverem
+  rodando.** São processos da sessão; o `--global disable` só impede que voltem
+  na próxima. Encerrá-los na limpeza os tiraria também de quem reinstala.
+- **A fiação nova da remoção do grupo não foi ao hardware.** O `groupdel` rodou
+  no portão completo, de dentro da limpeza. Depois ele mudou de lugar —
+  `cleanup_nexus_group`, chamada por `uninstall` — e isso está provado por
+  teste estático. Rodar `uninstall` de novo trocaria o gid outra vez.
+- **`runtime_dependencies_ok` ainda pergunta por `powerprofilesctl`**, que o
+  código não chama desde a etapa 1 (é `busctl`). Hoje serve de indício de que o
+  daemon está instalado; numa distro em que outro pacote fornece a mesma
+  interface DBus, o indício falha.
+- **`install_build_deps` só roda quando falta `make` ou `dkms`.** Com as
+  ferramentas presentes e os headers de um kernel faltando, ninguém os instala:
+  `check_kernel_headers` avisa e segue. A 3.5 consertou *quais* headers pedir,
+  não *quando*.
+- **`is_llvm_kernel` olha o kernel em execução** para decidir se instala
+  `clang` — a armadilha 2, no instalador. O build em si já decide por
+  kernel-alvo; isto só afeta quais pacotes são pedidos.
+- **`shellcheck` não está instalado nesta máquina**, e `test-setup-deps.sh`
+  pula essa parte. O CI da etapa 4 é quem vai rodar.
+
+### O estado da máquina, e a partida a frio que falta
+
+**A máquina está com a v1.2.3 instalada**, do commit `c0ba977` — o que veio
+depois dele em `master` é só documentação. Três coisas estão diferentes do
+normal, e as três se resolvem no reinício:
+
+- **agente e bandeja estão parados**, de propósito, desde 19:25;
+- **a sessão aberta antes do portão não escreve nos atributos**: ela carrega o
+  gid 950 e o grupo agora é 948. Sem root a suíte dá 17 passam e 3 pulam —
+  `test-permissoes.sh` pula com "sessão fora do grupo";
+- **o perfil térmico foi devolvido à mão** para `balanced-performance`: a
+  limpeza apaga `/etc/predator_state`.
+
+A etapa só se dá por fechada depois disto, conferido na **sessão seguinte**:
+
+```
+modulo       nexus_sense carregado; srcversion F9236711C6E76401FD38B7A;
+             capability bitmask 0x00002c26
+estado       "Thermal states loaded"; perfil balanced-performance
+permissoes   os seis 664 root:nexus_sense, gid 948; version 444 root:root
+sessao       id mostra 948(nexus_sense), sem 950 nem 1001 soltos
+agente       ativo; linha de comando com "python3 -P -m nexus_sense"
+bandeja      subiu sozinha, filha do systemd do usuario; tambem com -P
+botao N      systemd-hwdb query responde f5=prog1; um aperto aparece no
+             journal do usuario como "Started Nexus Sense - Controle do laptop"
+atalho       grep -n damx ~/.config/kglobalshortcutsrc  -> vazio
+suites       362 Python; shell 18 passam, 2 pulam, sem root
+```
+
+Uma dessas linhas é aposta e não certeza: **o atalho do `damx.desktop`**. Ele
+foi apagado do arquivo com o `kglobalacceld` rodando, que o tinha lido no login.
+Se o daemon regravar o arquivo ao sair, a entrada volta — e aí a remoção tem de
+passar pelo DBus dele, não pelo `kwriteconfig6`. O atalho vivo não corre esse
+risco: foi apagado e reescrito com o mesmo valor.
+
+### Onde a etapa 4 começa
+
+Depois da partida a frio. Seção 6 de [plano-melhorias.md](plano-melhorias.md):
+itens independentes, cada um recusável sozinho. O CI entra primeiro — pytest e
+shellcheck a cada push pegariam o item 6 acima antes do commit. O que esta etapa
+viu e deixou está na lista "Visto e não consertado", logo acima.
 
 ---
 

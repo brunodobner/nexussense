@@ -99,4 +99,94 @@ else
   echo "  FALHA nao remove a regra hwdb"; fail=1
 fi
 
+# A desinstalacao tem de remover o que install_nexus_sense poe. Ate
+# 2026-10-09 so o autostart saia: lancadores, pacote, regra udev, unit do
+# agente, .desktop, icones e grupo ficavam para tras, e a varredura da
+# armadilha 8 nao os via -- ela procura os nomes da linhagem antiga.
+app=$(sed -n '/^cleanup_nexus_sense() {/,/^}/p' "$S")
+if [ -n "$app" ]; then
+  echo "  OK   cleanup_nexus_sense existe"
+else
+  echo "  FALHA cleanup_nexus_sense ausente"; fail=1
+fi
+
+if printf '%s' "$trecho" | grep -qE '^\s*cleanup_nexus_sense\s*$'; then
+  echo "  OK   comprehensive_cleanup chama cleanup_nexus_sense"
+else
+  echo "  FALHA comprehensive_cleanup nao remove o aplicativo"; fail=1
+fi
+
+# Padroes ancorados no fim do caminho: "/usr/bin/nexus-sense" e prefixo de
+# "/usr/bin/nexus-sense-agent", e um grep solto aprovaria um pelo outro.
+remove() {  # $1=descricao  $2=padrao (ERE)
+  if printf '%s' "$app" | grep -v '^\s*#' | grep -qE -- "$2"; then
+    echo "  OK   remove $1"
+  else
+    echo "  FALHA nao remove $1"; fail=1
+  fi
+}
+
+remove 'o lancador da interface'    '/usr/bin/nexus-sense( |$)'
+remove 'o lancador do agente'       '/usr/bin/nexus-sense-agent( |$)'
+remove 'o pacote Python'            'rm -rf /usr/lib/nexus-sense$'
+remove 'a regra udev'               '/etc/udev/rules\.d/60-nexus-sense\.rules$'
+remove 'a unit do agente'           '/usr/lib/systemd/user/nexus-sense-agent\.service$'
+remove 'o enable global do agente'  '--global disable nexus-sense-agent\.service'
+remove 'o lancador do menu'         '/nexus-sense\.desktop"?$'
+remove 'o autostart da bandeja'     '/nexus-sense-autostart\.desktop$'
+remove 'os icones'                  "hicolor .*-name 'nexus-sense\*' -delete"
+
+# O disable le a secao [Install] da unit: tem de rodar com ela no disco.
+ordem=$(printf '%s' "$app" | grep -v '^\s*#' \
+        | grep -nE -- '--global disable|rm -f /usr/lib/systemd/user/' | cut -d: -f1 | tr '\n' ' ')
+set -- $ordem
+if [ "$#" -eq 2 ] && [ "$1" -lt "$2" ]; then
+  echo "  OK   desabilita a unit antes de apaga-la"
+else
+  echo "  FALHA ordem errada entre o disable e o rm da unit: $ordem"; fail=1
+fi
+
+# A configuracao e escolha do usuario e fica (decisao D5).
+if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' | grep -qF '.config/nexus-sense'; then
+  echo "  FALHA a desinstalacao apaga ~/.config/nexus-sense"; fail=1
+else
+  echo "  OK   ~/.config/nexus-sense fica"
+fi
+
+# O grupo sai na desinstalacao (decisao D5) -- e SO nela. A limpeza tambem
+# roda antes de toda reinstalacao, e "groupadd -r" nao devolve o gid que o
+# groupdel liberou: pega o menor gid de sistema em uso e desce um. Medido no
+# portao de 2026-10-09: 950 -> 948, com o 950 livre. Apagar o grupo na
+# limpeza trocava o gid a cada reinstalacao, e a sessao aberta -- agente e
+# bandeja inclusive -- ficava sem escrita nos atributos ate relogar.
+desinstala=$(sed -n '/^uninstall() {/,/^}/p' "$S")
+grupo=$(sed -n '/^cleanup_nexus_group() {/,/^}/p' "$S")
+
+if printf '%s' "$grupo" | grep -v '^\s*#' | grep -q 'groupdel nexus_sense'; then
+  echo "  OK   cleanup_nexus_group remove o grupo"
+else
+  echo "  FALHA cleanup_nexus_group ausente ou nao remove o grupo"; fail=1
+fi
+
+ordem=$(printf '%s' "$desinstala" | grep -nE '^\s*(comprehensive_cleanup|cleanup_nexus_group)\s*$' \
+        | sed 's/^[0-9]*:\s*//' | tr '\n' ' ')
+if [ "$ordem" = "comprehensive_cleanup cleanup_nexus_group " ]; then
+  echo "  OK   a desinstalacao remove o grupo, depois da limpeza"
+else
+  echo "  FALHA uninstall nao remove o grupo: '$ordem'"; fail=1
+fi
+
+if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' | grep -qE 'groupdel nexus_sense|cleanup_nexus_group'; then
+  echo "  FALHA a limpeza da reinstalacao apaga o grupo: o gid muda a cada uma"; fail=1
+else
+  echo "  OK   a reinstalacao preserva o grupo e o gid"
+fi
+
+# O grupo do nome antigo sobreviveu a renomeacao do driver.
+if printf '%s' "$trecho" | grep -q 'groupdel "${antigo}"'; then
+  echo "  OK   remove o grupo do nome antigo"
+else
+  echo "  FALHA nao remove o grupo linuwu_sense"; fail=1
+fi
+
 exit $fail

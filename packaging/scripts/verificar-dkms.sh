@@ -34,7 +34,7 @@ for caminho in /lib/modules/*/; do
     # vmlinuz e o discriminador de kernel bootavel: headers sem o pacote
     # do kernel criam o diretorio sem imagem nenhuma. Ver install_drivers.
     [ -e "${caminho}vmlinuz" ] || continue
-    if ! dkms status "nexus_sense/${versao}" -k "$kver" 2>/dev/null | grep -q installed; then
+    if ! dkms status "nexus_sense/${versao}" -k "$kver" 2>/dev/null | grep installed > /dev/null; then
         faltando="${faltando} ${kver}"
     fi
 done

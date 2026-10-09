@@ -196,6 +196,10 @@ seguinte**, e só então a etapa se dá por fechada em `estado.md`.
 
 ## 5. Etapa 3 — instalador e empacotamento
 
+**Portão passado em 2026-10-09, v1.2.3 em `master`. Falta a partida a frio**,
+que se confere no começo da sessão seguinte. O resultado medido, o que a
+execução refutou e a lista do que conferir estão em [estado.md](estado.md).
+
 Ramo `melhorias/3-instalador`. Sessão própria.
 
 | # | o quê | onde | teste |
@@ -206,6 +210,8 @@ Ramo `melhorias/3-instalador`. Sessão própria.
 | 3.4 | `detect_desktop_user` consulta `PKEXEC_UID` e recusa uid abaixo de 1000 | idem | shell, com a variável plantada |
 | 3.5 | dependências: sai `nvidia-settings`, que o código não usa mais; headers pelo `pkgbase` de cada kernel instalado, não `linux-headers` genérico (armadilha 22b) | `runtime_dependencies_ok`, `install_runtime_deps`, `install_build_deps` | `test-setup-deps.sh` |
 | 3.6 | regra udev também em `bind`, emitido depois que o `probe` termina — hoje ela corre contra a criação dos atributos e ganha por margem | `packaging/udev/60-nexus-sense.rules` | `test-permissoes.sh`; e na máquina, recarga do módulo 10 vezes com permissão conferida a cada uma |
+| extra | o grupo só sai em `uninstall`; a limpeza que antecede a reinstalação o preserva — achado do portão, armadilha 29 | `cleanup_nexus_group` | `test-uninstall.sh`; e na máquina, reinstalação com o gid medido antes e depois |
+| extra | o instalador só anuncia a entrada no grupo quando ela acontece; `dkms status` sem `grep -q`; o atalho morto do `damx.desktop` sai | `ensure_nexus_group`, `install_drivers`, `unbind_button_from_nexus` | `test-usuario-desktop.sh`, `test-install-drivers.sh`, `test-nitro-key.sh` |
 
 ### Portão da etapa 3
 
@@ -255,6 +261,6 @@ verificação, não por pergunta: eram técnicas, e a máquina respondia.
 | D2 | na bateria, o PPD guardado é devolvido **uma vez** na troca; depois vale o que o usuário escolher | "suspenso na bateria" não é "preso". Depende de a medição da 1.7 confirmar o defeito |
 | D3 | a janela atualiza **tudo uma vez por segundo**, GPU inclusive; o gráfico cobre 2 min em vez de 12 s | escolha do usuário em 2026-10-09, contra a recomendação de manter 10 Hz e espaçar só a GPU |
 | D4 | o serviço root de tecla **sai** | nesta máquina ele nunca foi instalado: sem unit, sem script em `/usr/local/bin`, sem `/etc/damx`. O botão já abre o app por hwdb (`KEYBOARD_KEY_f5=prog1`) e atalho do KDE (`Launch (1)`) |
-| D5 | a desinstalação apaga o grupo `nexus_sense`; `~/.config/nexus-sense` **fica** | o grupo é do instalador; a configuração é escolha do usuário (decisão 17) |
+| D5 | a desinstalação apaga o grupo `nexus_sense`; `~/.config/nexus-sense` **fica** | o grupo é do instalador; a configuração é escolha do usuário (decisão 17). **Só a desinstalação**: a limpeza que antecede uma reinstalação preserva o grupo, porque recriá-lo troca o gid — medido no portão da etapa 3, armadilha 29 |
 | D6 | a limpeza do driver (2.5) **entra**, por último e em commit separado; sai se o portão reprovar | — |
 | D7 | a etapa 4 **tem CI** | repositório privado com Actions habilitado (`gh api …/actions/permissions`) |
