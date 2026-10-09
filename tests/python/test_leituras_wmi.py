@@ -143,3 +143,25 @@ def test_a_bandeja_continua_atualizando_a_janela_visivel(qtbot, fake_root):
     controlador.refresh()
 
     assert espiao.lidos.count("profile") == 2
+
+
+def test_o_agente_le_o_perfil_uma_vez_por_passada(tmp_path):
+    """Ler o perfil e uma chamada WMI, e das caras: 4,7 ms de CPU, medido
+    em 2026-10-09, contra 0,17 ms de um sensor. Em modo maximo o agente
+    lia duas vezes por passada -- uma para decidir, outra para conferir
+    se o modo continuava de pe -- quando a segunda ja sabia a resposta."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True, maximum_saved_ppd="balanced"), caminho)
+    espiao = SysfsEspiao(raiz)
+    agente = Agent(espiao, caminho)
+    runtime = RuntimeFalso()
+    agente._maximum = MaximumMode(
+        agente._maximum.controls, caminho, runtime, gpu=runtime
+    )
+    agente.tick()
+
+    espiao.lidos.clear()
+    agente.tick()
+
+    assert espiao.lidos.count("profile") == 1

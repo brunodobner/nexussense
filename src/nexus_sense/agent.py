@@ -183,6 +183,9 @@ class Agent:
         if decisao.profile is not None:
             try:
                 self.sysfs.write(self.sysfs.profile_path(), decisao.profile)
+                # O que acabou de ser escrito e o perfil em vigor: quem
+                # vem depois nao precisa perguntar de novo ao firmware.
+                perfil = decisao.profile
                 self.log.info("perfil -> %s (%s)", decisao.profile, decisao.reason)
             except OSError as erro:
                 # Acontece de verdade: sem a regra udev aplicada, ou numa
@@ -191,22 +194,22 @@ class Agent:
                     "não foi possível escrever o perfil %s: %s", decisao.profile, erro
                 )
 
-        self._reconcile_maximum(decisao.config, now_on_ac)
+        self._reconcile_maximum(decisao.config, now_on_ac, perfil)
 
         return decisao
 
-    def _reconcile_maximum(self, config, on_ac):
-        """Mantém o modo após login, suspensão e alterações externas."""
+    def _reconcile_maximum(self, config, on_ac, perfil_atual):
+        """Mantém o modo após login, suspensão e alterações externas.
+
+        `perfil_atual` vem da passada: o que ela leu, ou o que ela mesma
+        escreveu. Reler aqui custava uma segunda chamada WMI -- 4,7 ms de
+        CPU, medido -- para ouvir uma resposta que o `tick` ja tinha.
+        """
         if not config.maximum_mode:
             self._release_gpu()
             return
         active = on_ac is True
         if active:
-            # Releitura de proposito: o tick ja pode ter escrito o perfil
-            # acima. Le so o arquivo do perfil -- um `read_state` aqui
-            # arrastaria os cinco atributos do grupo sense, cada um uma
-            # chamada WMI, para usar um campo so.
-            perfil_atual = self._read_profile()
             try:
                 if perfil_atual != THERMAL_PROFILE:
                     self._maximum.controls.set_profile(THERMAL_PROFILE)
