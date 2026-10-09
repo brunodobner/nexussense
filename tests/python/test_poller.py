@@ -7,16 +7,57 @@ from nexus_sense.gui.window import Window
 from nexus_sense.sysfs import Sysfs
 
 
-def test_o_painel_atualiza_a_cada_decimo_de_segundo(fake_root):
+def test_o_painel_atualiza_uma_vez_por_segundo(fake_root):
+    """Eram dez. Medido em 2026-10-09 com a janela aberta: 44,6% de um
+    nucleo, a maior parte em `nvidia-smi` chamado dez vezes por segundo.
+    Temperatura nao muda nessa escala; a escolha por 1 Hz foi do usuario.
+    Ver docs/plano-melhorias.md, decisao D3."""
     p = Poller(Sysfs(fake_root))
-    assert p._timer.interval() == 100
+    assert p._timer.interval() == 1000
+
+
+class SysfsContaVendor(Sysfs):
+    """Conta quantos `vendor` foram lidos: e o rastro da varredura do PCI."""
+
+    def __init__(self, root):
+        super().__init__(root)
+        self.vendors = 0
+
+    def read(self, path):
+        from pathlib import Path
+
+        if Path(path).name == "vendor":
+            self.vendors += 1
+        return super().read(path)
+
+
+def test_a_gpu_e_procurada_no_pci_uma_vez_so(fake_root):
+    """Achar a dGPU e varrer /sys/bus/pci/devices inteiro lendo o vendor
+    de cada dispositivo -- 1,0 ms medido, e era a cada passada. O
+    endereco dela nao muda com a maquina ligada."""
+    # Adormecida, para o teste nao chamar o nvidia-smi de verdade.
+    caminho = fake_root / "sys/bus/pci/devices/0000:01:00.0/power/runtime_status"
+    caminho.write_text("suspended\n")
+    espiao = SysfsContaVendor(fake_root)
+    p = Poller(espiao)
+
+    for _ in range(3):
+        amostra = p.read_now()
+
+    assert amostra.gpu.asleep is True
+    assert espiao.vendors == 1
 
 
 def test_a_leitura_traz_ventoinhas_e_temperaturas(fake_root):
     amostra = Poller(Sysfs(fake_root)).read_now()
     assert amostra.fans == (2079, 1870)
-    assert amostra.acer_temps == (25, 43, 43)
     assert amostra.cpu_temp == 47.0
+
+
+def test_a_amostra_nao_carrega_o_que_ninguem_exibe(fake_root):
+    """As tres temperaturas do EC eram lidas a cada passada -- uma
+    chamada WMI cada -- e nenhuma pagina as mostrava."""
+    assert "acer_temps" not in Poller(Sysfs(fake_root)).read_now()._fields
 
 
 def test_com_a_gpu_dormindo_a_amostra_diz_adormecida(fake_root):
@@ -32,7 +73,6 @@ def test_com_a_gpu_dormindo_a_amostra_diz_adormecida(fake_root):
 def test_arvore_vazia_devolve_amostra_vazia(tmp_path):
     amostra = Poller(Sysfs(tmp_path)).read_now()
     assert amostra.fans is None
-    assert amostra.acer_temps == ()
     assert amostra.gpu is None
 
 

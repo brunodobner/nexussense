@@ -141,8 +141,10 @@ def gpu_asleep(sysfs, bdf):
         return False
 
 
-def read_gpu(sysfs, runner=subprocess.run):
+def read_gpu(sysfs, runner=subprocess.run, bdf=None):
     """Le a GPU sem nunca acorda-la.
+
+    `bdf` poupa a varredura do PCI a quem ja sabe onde a placa esta.
 
     A ordem importa e e a razao de ser desta funcao: primeiro o
     runtime_status, que e um arquivo; so se ele disser 'active' e que o
@@ -150,7 +152,8 @@ def read_gpu(sysfs, runner=subprocess.run):
     dGPU acesa permanentemente, gastando bateria para exibir um numero.
     Ver spec secao 10.2.
     """
-    bdf = nvidia_device(sysfs)
+    if bdf is None:
+        bdf = nvidia_device(sysfs)
     if bdf is None:
         return None
 

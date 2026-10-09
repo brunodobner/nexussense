@@ -37,6 +37,14 @@ def test_o_grafico_interpola_sem_consultar_novamente_o_sensor():
     assert interpolated_value(40.0, None, 0.5) is None
 
 
+def test_a_ponta_leva_um_intervalo_de_sondagem_para_chegar():
+    """E o que faz a linha deslizar sem parar entre uma amostra e outra.
+    Com a duracao menor que o intervalo ela andaria aos trancos."""
+    from nexus_sense.gui import graph, poller
+
+    assert graph.ANIMATION_DURATION_MS == poller.INTERVALO_PADRAO
+
+
 def test_a_animacao_repinta_em_aproximadamente_60_fps(qtbot):
     g = TemperatureGraph()
     qtbot.addWidget(g)

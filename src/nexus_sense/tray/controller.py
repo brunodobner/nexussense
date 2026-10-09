@@ -65,7 +65,6 @@ class TrayController(QObject):
         self.maximum_active = self.maximum.active(self.state.on_ac)
         amostra = Sample(
             fans=telemetry.fan_rpm(self.sysfs),
-            acer_temps=(),
             cpu_temp=telemetry.cpu_package_temp(self.sysfs),
             gpu=None,          # de proposito: a bandeja nao acorda a GPU
             battery=None,
