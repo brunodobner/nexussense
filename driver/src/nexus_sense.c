@@ -448,15 +448,6 @@ static const struct dmi_system_id acer_quirks[] __initconst = {
     },
     {}};
 
-/*
- * The profile used before turbo mode. This variable is needed for
- * returning from turbo mode when the mode key is in toggle mode.
- */
-static int last_non_turbo_profile = INT_MIN;
-
-/* The most performant supported profile */
-static int acer_predator_v4_max_perf;
-
 enum acer_predator_v4_thermal_profile
 {
     ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET = 0x00,
@@ -1083,7 +1074,7 @@ static int
 acer_predator_v4_platform_profile_set(struct device *dev,
                                       enum platform_profile_option profile)
 {
-    int err, tp;
+    int tp;
     acpi_status status;
     u64 on_AC;
 
@@ -1141,14 +1132,7 @@ acer_predator_v4_platform_profile_set(struct device *dev,
         return -EOPNOTSUPP;
     }
 
-    err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
-    if (err)
-        return err;
-
-    if (tp != acer_predator_v4_max_perf)
-        last_non_turbo_profile = tp;
-
-    return 0;
+    return WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
 }
 
 static int
@@ -1176,53 +1160,32 @@ acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_ECO, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_LOW_POWER, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
         pr_info(" - Low Power profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_QUIET, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET;
         pr_info(" - Quiet profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_BALANCED, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
         pr_info(" - Balanced profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE;
-
-        if (last_non_turbo_profile < 0)
-        {
-            last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE;
-        }
         pr_info(" - Balanced Performance profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_PERFORMANCE, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO;
-
-        if (last_non_turbo_profile < 0)
-        {
-            last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO;
-        }
         pr_info(" - Performance profile supported\n");
     }
-
-    pr_info("Max performance profile: %d, Last non-turbo profile: %d\n",
-            acer_predator_v4_max_perf, last_non_turbo_profile);
 
     return 0;
 }

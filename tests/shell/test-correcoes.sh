@@ -279,6 +279,15 @@ else
   echo "  FALHA o tratador perdeu as teclas de funcao ou o aviso de funcao desconhecida"; fail=1
 fi
 
+# O que caiu junto, por dependencia. As duas variaveis so existiam para o
+# botao N decidir para onde ir: o perfil de antes do turbo, e o mais alto
+# que o firmware anuncia. Sem ele sobravam escritas, e uma linha de log
+# no carregamento que as imprimia.
+esperar_ausente 'last_non_turbo_profile' \
+  'o perfil de antes do turbo, que so o botao N lia, saiu'
+esperar_ausente 'acer_predator_v4_max_perf' \
+  'o perfil mais alto, que so o botao N lia, saiu'
+
 # --- o driver nao chama o nucleo do platform_profile de volta
 #
 # O nucleo toma a trava dele e chama profile_set, que toma acer_op_lock.
