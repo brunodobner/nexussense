@@ -2498,6 +2498,7 @@ As três camadas da seção 1 de [plano-melhorias.md](plano-melhorias.md):
 | estática | `bash -n` em todo `.sh`, links dos documentos resolvendo, raiz intacta — `test-arvore.sh` |
 | suítes contra o baseline | Python: 387, igual. Shell: de 21 para **23 passam**, 2 pulam, os mesmos dois — a diferença são os dois testes novos. Idêntica sob `LC_ALL=C` |
 | ensaio na máquina | E2, E3 e E3b, acima |
+| CI, no ramo | no primeiro push o shellcheck reprovou: 4 avisos, todos em `lib-arvore-termica.sh` (uma variável lida só por quem importa o arquivo, e três `var=` vazias). Consertado; no segundo push, shellcheck, pytest e a suíte shell — como usuário e como root — verdes, com os testes novos rodando no container |
 
 E uma quarta, que esta sessão acrescentou: **43 mutações do roteiro, 42
 reprovadas e uma equivalente.** O corredor agora mora no repositório,
@@ -2523,6 +2524,8 @@ O que o usuário decidiu no caminho, além do que está na seção da 4f:
   do fish. Os três ensaios rodaram por bloco.
 - **Os traços dos ensaios estão fora do repositório**, em
   `~/.local/state/nexus-sense/`. Não é tmpfs, mas também não é o git.
+- **O job das suítes no CI passou de ~1 para ~7 minutos.** Os dois testes do
+  ensaio rodam duas vezes lá, como usuário e como root, num container lento.
 
 ### Onde a sessão 2 começa
 
