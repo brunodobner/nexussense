@@ -495,9 +495,21 @@ install_build_deps() {
 #
 # A GPU não entra aqui: o PowerMizer fala com a NVML, que vem com o driver
 # da NVIDIA, e onde ela falta o modo máximo segue sem essa parte.
+#
+# O perfil de CPU se pergunta como o codigo o usa: "busctl --system" para o
+# nome org.freedesktop.UPower.PowerProfiles (src/nexus_sense/ppd.py). O
+# powerprofilesctl, que esta funcao procurava, ninguem chama desde a etapa 1
+# -- e onde outro pacote serve o mesmo nome ele nem vem instalado.
 runtime_dependencies_ok() {
-  python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null &&
-    command -v powerprofilesctl &> /dev/null
+  python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null || return 1
+  command -v busctl &> /dev/null || return 1
+
+  # "list" traz os nomes com dono e os ativaveis, e nao ativa ninguem. A
+  # saida vai inteira para a variavel antes da busca: um "grep -q" no cano
+  # sai no primeiro acerto e deixa o busctl escrevendo para ninguem.
+  local nomes
+  nomes=$(busctl --system list --no-legend 2> /dev/null | awk '{ print $1 }')
+  grep -qxF 'org.freedesktop.UPower.PowerProfiles' <<< "$nomes"
 }
 
 install_runtime_deps() {
@@ -524,7 +536,8 @@ install_runtime_deps() {
   fi
 
   if ! runtime_dependencies_ok; then
-    echo -e "${RED}Error: Python runtime dependencies are still unavailable.${NC}"
+    echo -e "${RED}Error: runtime dependencies are still unavailable: the Python modules,${NC}"
+    echo -e "${RED}busctl, or org.freedesktop.UPower.PowerProfiles on the system bus.${NC}"
     return 1
   fi
 }

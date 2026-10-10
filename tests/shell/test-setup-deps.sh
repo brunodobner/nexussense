@@ -105,6 +105,104 @@ else
   echo "  PULADO sem pacman ou sem pkgbase: derivacao so conferida na arvore plantada"
 fi
 
+# ─── funcoes do instalador, rodadas com um PATH so de dublês ─────────
+# O PATH do ensaio tem o que o teste poe la e mais nada. Um dublê que
+# faltasse deixaria a funcao alcancar o binario de verdade -- o pacman, como
+# root, no CI -- e um binario que "nao existe" tem de nao existir mesmo: o
+# command -v do bash devolve ate arquivo nao executavel quando nao acha
+# outro (armadilha 30).
+BIN="$T/bin"
+mkdir -p "$BIN"
+for c in bash cat sort grep awk sed tr cut basename dirname; do
+  real=$(command -v "$c") || { echo "  ERRO alvo ausente: $c"; exit 3; }
+  ln -s "$real" "$BIN/$c"
+done
+CHAMADAS="$T/chamadas"
+
+duble() {  # $1=nome  $2=corpo; toda chamada fica em $CHAMADAS
+  printf '#!/bin/bash\necho "%s $*" >> "%s"\n%s\n' "$1" "$CHAMADAS" "$2" > "$BIN/$1"
+  chmod +x "$BIN/$1"
+}
+sem() { rm -f "$BIN/$1"; }
+
+roda() {  # roda "$1" dentro do setup.sh importado, so com os dublês
+  : > "$CHAMADAS"
+  PATH="$BIN" "$BIN/bash" -c "source '$S'; $1" > "$T/saida" 2>&1
+}
+
+espera() {  # $1=descricao  $2=codigo esperado  $3=o que rodar
+  roda "$3"
+  local rc=$?
+  if [ "$rc" -eq "$2" ]; then
+    echo "  OK   $1"
+  else
+    echo "  FALHA $1 (esperado $2, veio $rc)"; fail=1
+  fi
+}
+
+# --- runtime_dependencies_ok pergunta pelo que o codigo usa
+# O perfil de CPU sai por "busctl --system" para um nome no barramento
+# (src/nexus_sense/ppd.py) desde a etapa 1. O instalador perguntava pelo
+# powerprofilesctl, que ninguem chama mais: onde outro pacote fornece o
+# mesmo nome (tuned-ppd), ele mandava instalar o que ja estava servido.
+PPD="$ROOT/src/nexus_sense/ppd.py"
+exigir "$PPD"
+NOME=$(grep -oP '^SERVICE = "\K[^"]+' "$PPD")
+[ -n "$NOME" ] || { echo "  ERRO alvo ausente: SERVICE em ppd.py"; exit 3; }
+
+# O formato e o do busctl desta maquina: NAME PID PROCESS USER CONNECTION ...
+OUTROS='org.freedesktop.Accounts - - - (activatable) - - -
+org.freedesktop.UPower 827 upowerd root :1.17 upower.service - -
+net.hadess.PowerProfiles 1450 power-profiles- root :1.41 power-profiles-daemon.service - -'
+barramento() {  # $1=linhas que o "busctl list" devolve
+  duble busctl "case \"\$*\" in *list*) cat << 'EOL'
+$1
+EOL
+;; *) exit 1 ;; esac"
+}
+
+duble python3 'exit 0'
+sem powerprofilesctl
+
+barramento "$OUTROS
+$NOME - - - (activatable) - - -"
+espera "servico ativavel no barramento, sem powerprofilesctl: serve" 0 runtime_dependencies_ok
+if grep -q '^busctl --system .*list' "$CHAMADAS" && ! grep -vE '^(python3|busctl --system .*list)' "$CHAMADAS" | grep -q .; then
+  echo "  OK   ... e so listou os nomes: nao ativou o servico para perguntar"
+else
+  echo "  FALHA ... chamadas inesperadas: $(tr '\n' ';' < "$CHAMADAS")"; fail=1
+fi
+
+barramento "$OUTROS
+$NOME 1450 power-profiles- root :1.41 power-profiles-daemon.service - -"
+espera "servico com dono no barramento: serve" 0 runtime_dependencies_ok
+
+# org.freedesktop.UPower e prefixo do nome procurado, e net.hadess e o
+# nome legado, que o codigo nao usa: nenhum dos dois serve.
+barramento "$OUTROS"
+duble powerprofilesctl 'exit 0'
+espera "powerprofilesctl instalado e o nome fora do barramento: nao serve" 1 runtime_dependencies_ok
+sem powerprofilesctl
+
+duble busctl 'exit 1'
+espera "sem barramento de sistema: nao serve" 1 runtime_dependencies_ok
+
+sem busctl
+duble powerprofilesctl 'exit 0'
+espera "sem busctl: nao serve, com ou sem powerprofilesctl" 1 runtime_dependencies_ok
+sem powerprofilesctl
+
+barramento "$NOME - - - (activatable) - - -"
+duble python3 'exit 1'
+espera "modulos Python faltando: nao serve" 1 runtime_dependencies_ok
+duble python3 'exit 0'
+
+if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'command -v powerprofilesctl'; then
+  echo "  FALHA o instalador ainda pergunta pelo powerprofilesctl"; fail=1
+else
+  echo "  OK   o instalador nao pergunta pelo powerprofilesctl"
+fi
+
 # nvidia-settings saiu: o PowerMizer fala com a NVML direto desde
 # 2026-09-07 e nada mais no codigo chama o binario.
 if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'nvidia-settings'; then
