@@ -77,6 +77,25 @@ def remote(tmp_path):
         log.close()
 
 
+@pytest.fixture
+def bus_address():
+    """Um dbus-daemon so do teste, sem ninguem dentro. Devolve o endereco."""
+    daemon = subprocess.Popen(['dbus-daemon', '--session', '--nofork', '--print-address=1'],
+                              stdout=subprocess.PIPE, text=True)
+    try:
+        yield daemon.stdout.readline().strip()
+    finally:
+        daemon.terminate()
+        daemon.wait(timeout=5)
+
+
+def private_env(address):
+    env = {**os.environ, 'DBUS_SESSION_BUS_ADDRESS': address,
+           'QT_QPA_PLATFORM': 'offscreen', 'PYTHONPATH': str(ROOT / 'src')}
+    env.pop('QT_NO_GLIB', None)
+    return env
+
+
 def layout(menu):
     revision, root = menu.GetLayout(0, -1, dbus.Array([], signature='s'))
     assert isinstance(revision, dbus.UInt32)
@@ -173,3 +192,46 @@ assert not any(str(n).startswith('org.kde.StatusNotifierItem-') for n in dbus.Se
     result = subprocess.run(['dbus-run-session', '--', sys.executable, '-c', code],
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
+
+
+TRAY_CODE = """
+import sys
+from PySide6.QtCore import QTimer
+from PySide6.QtDBus import QDBusConnection
+from PySide6.QtWidgets import QApplication
+from nexus_sense.device import Controls
+from nexus_sense.sysfs import Sysfs
+from nexus_sense.tray import build_tray
+app = QApplication([])
+print('barramento:', QDBusConnection.sessionBus().isConnected(), flush=True)
+s = Sysfs(sys.argv[1])
+controlador, modo = build_tray(s, Controls(s))
+print('bandeja:', modo, flush=True)
+QTimer.singleShot(700, app.quit)
+app.exec()
+print('depois do laco', flush=True)
+"""
+
+
+def test_barramento_sem_watcher_cai_na_reserva_e_o_processo_segue(bus_address, tmp_path):
+    """Em subprocesso porque era o processo inteiro que morria: publish()
+    fechava a conexao privada, e a libdbus encerra com _exit(1) quem perde
+    o barramento -- no laco de eventos, depois de register() ja ter
+    devolvido False. Dentro do pytest levaria a suite junto.
+
+    A primeira linha da saida e a guarda contra passar por vacuo: sem ela
+    um endereco errado viraria o caso "sem barramento", que e outro."""
+    bus = dbus.bus.BusConnection(bus_address)
+    try:
+        assert not bus.name_has_owner(WATCHER)
+    finally:
+        bus.close()
+    tree = build_tree(tmp_path / 'sysfs', module='nexus_sense')
+    result = subprocess.run([sys.executable, '-c', TRAY_CODE, str(tree)], env=private_env(bus_address),
+                            capture_output=True, text=True, timeout=20)
+    lines = result.stdout.splitlines()
+    assert lines[:1] == ['barramento: True'], result.stderr
+    assert result.returncode == 0, result.stderr
+    assert lines[1] in ('bandeja: qsystemtrayicon', 'bandeja: nenhuma')
+    assert lines[2:] == ['depois do laco']
+    assert 'Traceback' not in result.stderr

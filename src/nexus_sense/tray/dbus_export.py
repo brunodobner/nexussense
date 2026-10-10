@@ -199,12 +199,26 @@ def publish(item, name):
         bus = dbus.SessionBus(private=True, mainloop=DBusGMainLoop())
     except dbus.exceptions.DBusException:
         return False
+    owner = exported = None
     try:
         owner = dbus.service.BusName(name, bus, do_not_queue=True)
         exported = ItemExport(bus, item)
         watcher = bus.get_object("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher")
         watcher.RegisterStatusNotifierItem(name, dbus_interface="org.kde.StatusNotifierWatcher")
     except dbus.exceptions.DBusException:
+        # Sem watcher (ou com o nome ja tomado): desfazer tudo, para nao
+        # deixar SNI pela metade no barramento. A ordem decide duas coisas.
+        #
+        #   o nome sai antes da conexao   BusName.__del__ chama release_name,
+        #                                 e numa conexao fechada isso vira
+        #                                 traceback no stderr
+        #   quem fecha somos nos          a libdbus encerra com _exit(1) o
+        #                                 processo que perde o barramento --
+        #                                 e so no laco de eventos, quando
+        #                                 esta funcao ja devolveu False e
+        #                                 ninguem mais associa as duas coisas
+        owner = exported = None
+        bus.set_exit_on_disconnect(False)
         bus.close()
         return False
     item._export = exported
