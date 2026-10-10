@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4b fechada: v1.2.4, a janela deixa a dGPU dormir; 4c a 4f abertas)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4c fechada: v1.2.5, a bandeja sobrevive ao watcher; 4d a 4f abertas)
 
 ---
 
@@ -13,11 +13,11 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
-| versão | **v1.2.4** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.5** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 21 testes: 19 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
-| suíte Python | 380 passam, 1 xfail (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte Python | 387 passam (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
@@ -55,7 +55,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 3 -- instalador v1.2.3: desinstala o que instala, partida a frio conferida
 [x] Melhorias, etapa 4a -- CI        suites e shellcheck por push, modulo semanal
 [x] Melhorias, etapa 4b -- GPU       v1.2.4: a janela deixa a dGPU dormir; temperatura fica no nvidia-smi
-[ ] Melhorias, etapa 4c -- bandeja   registro SNI: tres defeitos, dois vistos pelo CI
+[x] Melhorias, etapa 4c -- bandeja   v1.2.5: o item volta com o watcher; sem ele, ou sem barramento, cai na reserva
 [ ] Melhorias, etapa 4d -- instalador cinco sobras da etapa 3; reinstalacao no portao
 [ ] Melhorias, etapa 4e -- botao N   o evento WMI chega? medir na bateria antes de podar
 [ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
@@ -1289,6 +1289,221 @@ a 4c que o tira.
 - se algum ensaio depender de a dGPU dormir, o `coolercontrold` tem de estar
   parado (armadilha 31);
 - pedido de root vai em prosa até o comando estar completo.
+
+---
+
+## Melhorias de 2026-10, etapa 4c — fechada, e onde a 4d começa
+
+Os três defeitos do registro SNI da seção 6 de
+[plano-melhorias.md](plano-melhorias.md), e mais dois que a execução achou.
+Ramo `melhorias/4c-bandeja`, em 2026-10-10, **v1.2.4 → v1.2.5.**
+
+O baseline capturado antes da primeira edição conferiu com o esperado: 380
+passam e 1 xfail na suíte Python; shell 19 passam e 2 pulam, idêntico sob
+`LC_ALL=C`.
+
+### A reprodução, antes de mexer
+
+Fora da suíte, com o roteiro do plano — `QApplication`,
+`register(StatusNotifierItem())`, 700 ms de laço, uma linha depois dele — e
+cada caso com o seu barramento:
+
+```
+                                  antes (e56738b)                    depois (a087869)
+caso 2  sem barramento            register LEVANTA DBusException     devolve False, a linha de
+                                  (FileNotFound)                     depois sai, codigo 0
+caso 3  barramento sem watcher    devolve False; traceback de        devolve False, a linha de
+                                  BusName.__del__; a linha de        depois sai, codigo 0,
+                                  depois NUNCA sai; codigo 1         stderr limpo
+controle, com watcher falso       devolve True, a linha sai, 0       igual
+```
+
+O controle é o que impede o caso 3 de ser lido por vácuo (armadilha 14): no
+mesmo roteiro, com um watcher no barramento, a linha de depois do laço sai.
+
+E o que o plano não mandava medir — o aplicativo inteiro, `gui.app
+--tray-only`, nos mesmos cenários:
+
+```
+caso 2   "já havia uma instância: pedi para ela aparecer", codigo 0     vivo, "bandeja: nenhuma"
+caso 3   traceback, codigo 1                                           vivo, "bandeja: nenhuma"
+```
+
+### O que entrou
+
+| commit | o quê | teste que falhou primeiro |
+|---|---|---|
+| `9731adf` | caso 2: `publish()` abre a conexão dentro do `try`. O `xfail` de `test_build_tray_diz_qual_bandeja_subiu` sai no mesmo commit, e a asserção aperta: sem barramento o modo é uma das duas reservas, nunca `sni` | o próprio xfail estrito, com `XPASS(strict)` |
+| `d0551fc` | caso 3: o desmonte avisa a libdbus de que quem fecha é o código (`set_exit_on_disconnect`) e solta o nome antes de fechar a conexão | subprocesso em barramento próprio: `assert 1 == 0` |
+| `d2e463c` | caso 1: `publish()` escuta `NameOwnerChanged` do nome do watcher e chama `RegisterStatusNotifierItem` cada vez que ele ganha dono | três, com um watcher falso que anota quem se registrou — todos na espera pelo segundo registro |
+| `5d0c271` | **fora do plano:** sem barramento, `main()` não disputa o nome da instância única (`bus_available`, em `gui/single.py`) | subprocesso com o aplicativo inteiro: "já havia uma instância" |
+| `73af430` | versão nos três lugares, antes do portão | — |
+| `a087869` | **fora do plano, achado no portão:** `flush` na linha `bandeja: <modo>` | o teste do aplicativo, sem o `PYTHONUNBUFFERED` que escondia o defeito |
+
+Nove mutações dos consertos, nove reprovações. Suíte Python de 380 e 1 xfail
+para **387, sem xfail**; shell 19 passam e 2 pulam, mesmos nomes do baseline,
+idêntica sob `LC_ALL=C` — rodadas antes de cada commit.
+
+**Como o caso 1 ficou.** A pergunta é "o nome tem dono?", não "o dono mudou?":
+um watcher pode soltar o nome e pedi-lo de novo sem morrer, e volta com o
+mesmo nome único. A chamada não espera a resposta — quem a faz é o laço de
+eventos da interface. A recusa vira uma linha no stderr (`bandeja: o watcher
+voltou e recusou o registro: ...`) e não derruba nada. Os três testes: o
+watcher morre e outro sobe; o mesmo processo solta e retoma o nome; o que
+volta recusa.
+
+**Por que o achado do `claim` entrou.** `claim()` devolve `False` para "o nome
+já é de outro" e para "não há barramento", e `main()` lia os dois como o
+primeiro. Sem ele, o conserto do caso 2 nunca rodaria no aplicativo: ele saía
+antes de `build_tray`.
+
+### O portão
+
+Em 2026-10-10, de 04:30 a 04:38. Duas reinstalações com root
+(`install_nexus_sense`, por `pkexec`): a segunda porque o próprio portão achou
+o defeito do `flush`. Antes de tudo o roteiro rodou contra o pacote **antigo**,
+para provar que reprova — 6 OK e 7 FALHA, nos lugares certos.
+
+```
+reinstalacao, nas duas    13 OK, 0 FALHA: pacote identico ao fonte, --version 1.2.5,
+                          gid 948 antes e depois, os seis atributos 664 root:nexus_sense
+   o pacote INSTALADO, rodando de /, em barramento proprio, com isca de nvidia-smi
+      caso 2              vivo, "bandeja: nenhuma"
+      caso 3              vivo, "bandeja: nenhuma", sem traceback
+      caso 1              o watcher falso cai, outro sobe e recebe o item de novo, uma vez
+
+reinicio de agente e bandeja
+   na primeira            6 OK, 1 FALHA: o journal nao trazia "bandeja: sni"
+   depois do flush        7 OK, 0 FALHA: pids novos, uma instancia, um item SNI,
+                          item no watcher da sessao, journal "bandeja: sni"
+
+o gesto: systemctl --user restart plasma-kded6.service, as 04:37:46,9
+   kded6 de volta         0,3 s depois; pid 1565 -> 542251
+   dono do nome           :1.20 -> :1.583
+   item do Nexus Sense    registrado de novo em ate 0,2 s, no MESMO processo (pid 540498)
+   3 s depois             4 itens no watcher, os quatro que havia: Nexus Sense,
+                          arch-update-tray, fcitx5, Claude desktop
+   journal da bandeja     nada recusado, nenhum traceback
+```
+
+**O gesto humano:** o reinício durou 0,3 s, rápido demais para acompanhar — o
+usuário viu ícones sumindo e aparecendo, sem distinguir quais. O que o olho
+dele confirmou foi o estado final: perguntado depois, com a bandeja parada, o
+ícone do Nexus Sense estava lá. Dos outros três a prova é só a lista do
+watcher.
+
+O gesto não era este. O primeiro foi outro, e estragou — é o item 1 da lista
+abaixo e a armadilha 33.
+
+### O que a execução refutou
+
+1. **"Descarregar o módulo do watcher solta o nome."** Era a premissa do gesto
+   "mais contido" — `unloadModule` e `loadModule` de `statusnotifierwatcher`
+   no `kded6`, em vez de reiniciá-lo. Não solta: o dono continuou `:1.20`, o
+   módulo novo nasceu com a lista vazia e ninguém foi avisado. Das 04:35:07 às
+   04:37:47 o watcher da sessão ficou com **zero itens**, com os quatro vivos
+   no barramento. Quem consertou foi o gesto do plano. Armadilha 33.
+2. **"Consertar `publish()` conserta o caso 2."** No aplicativo ele nem
+   chegava lá: `claim()` falhava antes, e a falha era lida como "já há outra
+   instância".
+3. **"A linha `bandeja: <modo>` está no journal."** O roteiro do portão a
+   cobrava, e [verificacao-manual.md](verificacao-manual.md) mandava "confirmar
+   no terminal". Sob a unit não há terminal: zero linhas `bandeja:` no boot
+   inteiro, treze linhas no total, todas do systemd.
+4. **"No caso 3 o processo sai com 1, e é só."** Sai, e antes disso despeja um
+   traceback de `BusName.__del__`: o nome era solto numa conexão já fechada.
+5. **"Há teste para o caso sem host."**
+   `test_sem_host_ou_sem_glib_nao_deixa_sni_parcial` chama `register()`, confere
+   o `False` e termina — sem rodar o laço, que é onde o processo morria. Passou
+   por meses com o defeito no lugar. Armadilha 32.
+
+### Oito coisas que só apareceram executando
+
+1. **O usuário rodou o comando de contingência.** O pedido do gesto trazia, num
+   bloco com botão de rodar, só o comando de *retorno*, com o rótulo "se minha
+   sessão cair". Foi o que ele apertou. Era inofensivo (`loadModule` de módulo
+   já carregado não recarrega — conferido), mas é a lição 3 da 4b outra vez, do
+   outro lado: bloco executável leva **a ação pedida**, e só ela. Os dois gestos
+   seguintes foram assim, e ele os disparou na hora em que estava olhando.
+2. **O ramo "a premissa falhou" do roteiro era o estrago.** Ele imprimiu
+   `REFUTADO` e recarregou o módulo, como desenhado — e recarregar é que zerou
+   a lista. Eu tinha descrito esse ramo ao usuário como neutro.
+3. **O gesto foi rápido demais para o olho.** O `kded6` ficou fora 0,3 s. O
+   usuário viu ícones sumindo e aparecendo, sem conseguir dizer quais.
+4. **Duas mutações "reprovaram" pelo motivo errado.** Uma deixou erro de
+   sintaxe no arquivo mutado; outra passou dois arquivos de teste como um
+   caminho só, e o pytest não rodou nada. O roteiro de mutação passou a conferir
+   a sintaxe e a exigir que a troca case exatamente uma vez. Refeitas, as nove
+   reprovam pelo motivo certo. É a armadilha 14 dentro do instrumento.
+5. **O endereço "que não existe" não pode ser longo.** No primeiro roteiro ele
+   ficava no scratchpad, passou dos 108 bytes de um caminho de socket, e o erro
+   foi `BadAddress: Socket name too long` — outro erro, da mesma classe, por
+   acaso. Para reproduzir "sem barramento" o caminho tem de ser curto.
+6. **`$NOME_PID` de um `coproc { ...; }` é o do subshell**, não o do
+   `dbus-daemon` dentro dele. Matar esse PID deixou dois daemons órfãos, e o
+   `tee` do roteiro ficou esperando por eles até o tempo limite. Daemon em
+   segundo plano com `&`, `$!`, e o endereço por `--print-address=3` num
+   arquivo. Os órfãos saíram por PID (armadilha 10).
+7. **Um roteiro avulso rodou o aplicativo sem a isca do `nvidia-smi`.** Em
+   modo `nenhuma` a janela abre e sonda: foram uns 8 s de chamadas de verdade.
+   A placa já estava `active`, segurada pelo `coolercontrold`, e o estado não
+   mudou — mas é a armadilha 30. Os roteiros do portão levam a isca, e
+   conferem no ambiente do processo que ela está na frente.
+8. **`busctl list` num barramento recém-subido mostra meia centena de nomes.**
+   São os ativáveis, lidos dos arquivos de serviço da máquina. "Sem ninguém
+   dentro" se confere com `--acquired`.
+
+### Visto e não consertado
+
+- **Watcher que chega depois não promove a reserva.** Sem watcher na partida a
+  bandeja cai em `qsystemtrayicon` ou `nenhuma` e fica lá até o aplicativo
+  reiniciar, mesmo que o watcher suba um segundo depois. Na sessão do Plasma o
+  `kded6` sobe antes do autostart; a janela em que isso morde é a de um
+  `kded6` caído.
+- **Sob `--tray-only`, o modo `nenhuma` abre a janela.** É o desenho ("nem
+  isso: o app abre a janela direto"), e agora é alcançável: um login sem
+  watcher abre a janela sozinho.
+- **O registro de novo não tem segunda tentativa.** Um watcher que ganhe o
+  nome antes de exportar o objeto recusaria a chamada, e fica a linha no
+  stderr. O do `kded6` exporta antes; é o que `KStatusNotifierItem` também
+  supõe.
+- **A conexão do item continua com `exit_on_disconnect`** enquanto registrada:
+  se o barramento de sessão cair, a libdbus encerra o processo com 1. Só o
+  desmonte deliberado foi tratado.
+- **`install_nexus_sense` regrava as units e recarrega só o systemd do
+  sistema.** O gerenciador do usuário fica com `NeedDaemonReload=yes` e avisa a
+  cada `restart`. O conteúdo é idêntico, sem efeito hoje. É da 4d.
+- **O teste do "mesmo dono retoma o nome" ficou sem exemplo real.** Foi
+  escrito pensando no `kded6`, que não faz isso. A regra do D-Bus continua
+  sendo a que ele cobra.
+- **Depois do reinício do `kded6`, 24 módulos carregados em vez de 25.** Falta
+  o `desktopnotifier`, 15 s depois. Não foi apurado se ele carrega sob demanda.
+- **O que o `kded6` faz ao recarregar um módulo** — manter o nome e zerar a
+  lista — não é deste projeto, e nenhum cliente SNI tem como perceber.
+
+### Onde a 4d começa
+
+Numa **sessão nova**. Sub-etapa 4d de [plano-melhorias.md](plano-melhorias.md):
+cinco sobras do instalador, todas em `setup.sh`, com teste em shell antes.
+
+**Ponto de partida:** `master` em v1.2.5, com o CI verde. O baseline esperado é
+387 passam na suíte Python, sem xfail e, na shell, 19 passam e 2 pulam — sem
+root e sob `LC_ALL=C`.
+
+**O que vale para o portão dela**, e apareceu neste:
+
+- o roteiro do portão roda primeiro contra o que está instalado, e tem de
+  reprovar; só depois a reinstalação;
+- a reinstalação é `pkexec /bin/bash -c "cd /home/brunodobner/Claude/Nitrosense;
+  source ./setup.sh; install_nexus_sense"`, e leva 4 s; o gid se mede antes e
+  depois (948), no mesmo comando;
+- depois dela o `systemctl --user` avisa `NeedDaemonReload=yes` nas duas units:
+  é um dos achados acima, e cabe na 4d;
+- o que se confere pelo journal da bandeja agora existe: `bandeja: sni`;
+- bloco com botão de rodar leva a ação pedida, e só ela; contingência vai em
+  prosa;
+- **nunca `uninstall`** (armadilha 29), e nunca `unloadModule` no `kded6`
+  (armadilha 33).
 
 ---
 

@@ -1132,6 +1132,94 @@ serviço de root é root: num `pkexec` só, que o religa sozinho por tempo limit
 
 ---
 
+## 32. Fechar a própria conexão D-Bus mata o processo — depois, e calado
+
+**Sintoma.** O processo sai com código 1, sem traceback e sem mensagem, alguns
+milissegundos depois de uma função que devolveu normalmente. Dentro do pytest:
+a suíte morre no meio, com 1, sem dizer em qual teste.
+
+**Causa.** A libdbus marca toda conexão de barramento com `exit_on_disconnect`.
+Quando a conexão cai ela chama `_exit(1)` — e "cair" inclui o `close()` que o
+próprio código fez. O `_exit` não acontece no `close()`: acontece quando o laço
+de eventos despacha o `Disconnected`, com a função que fechou já de volta e
+ninguém mais ligando uma coisa à outra.
+
+Era o que matava a bandeja num desktop sem `StatusNotifierWatcher`:
+`publish()` desistia do registro, fechava a conexão privada, devolvia `False`
+para cair na reserva — e a reserva nunca rodava.
+
+```python
+bus.set_exit_on_disconnect(False)   # quem fecha somos nos
+bus.close()
+```
+
+E a ordem do desmonte importa: `BusName.__del__` chama `release_name`, e numa
+conexão já fechada isso despeja um traceback no stderr. Solte o nome antes.
+
+**Como verificar.** Um teste que só chama a função e olha o retorno passa —
+`test_sem_host_ou_sem_glib_nao_deixa_sni_parcial` passou por meses com o
+defeito no lugar. A morte é do laço: rode-o por alguns décimos de segundo e
+imprima uma linha depois dele. E em subprocesso, porque é o processo inteiro
+que sai.
+
+**Três parentes, da mesma sessão** — todos são "o retorno não disse o que
+aconteceu":
+
+- *`False` que quer dizer duas coisas.* `claim()` devolvia `False` para "o nome
+  já é de outro" e para "não há barramento". `main()` lia os dois como o
+  primeiro: sem barramento, o aplicativo dizia "já havia uma instância" e saía
+  com 0, antes de chegar à bandeja. O conserto do registro SNI para esse mesmo
+  cenário não rodaria nunca. **Meça o aplicativo inteiro, não só a função.**
+- *Saída padrão sob uma unit não é terminal.* É um socket, o Python a guarda em
+  bloco, e a linha `bandeja: <modo>` só sairia no encerramento — que é por
+  SIGTERM, e a perde. O journal passou um boot inteiro sem ela. Linha de
+  diagnóstico de processo que não termina leva `flush=True`.
+- *O teste escondia o defeito com o contorno.* O teste novo do aplicativo
+  rodava com `PYTHONUNBUFFERED=1` "para ler a linha", e por isso não viu que a
+  produção não a escrevia. O ambiente do teste tem de ser o da unit.
+
+---
+
+## 33. O gesto "mais leve" não era o mesmo gesto
+
+**Sintoma.** Nenhum, e esse é o problema. Os ícones continuam no painel; a
+lista do watcher está vazia:
+
+```
+antes     itens no watcher: 4
+depois    itens no watcher: as 0      dono do nome: o mesmo
+```
+
+**Causa.** Para provar que o item volta quando o `StatusNotifierWatcher`
+reinicia, o plano mandava derrubar o watcher de verdade. Ele mora no `kded6`,
+junto de mais 24 módulos, e pareceu mais contido descarregar só o módulo dele
+e recarregar (`unloadModule` / `loadModule`). A premissa — "descarregar solta o
+nome" — não foi medida.
+
+Não solta. O nome `org.kde.StatusNotifierWatcher` continua com o `kded6`, o
+módulo novo nasce com a lista vazia, e **ninguém é avisado**: o sinal que os
+clientes escutam é a troca de dono, e dono não trocou. Os quatro itens da
+sessão ficaram vivos no barramento e fora da lista. O painel seguiu mostrando
+o que já conhecia; num reinício do plasmashell não voltaria nenhum.
+
+O roteiro previa a premissa falhar — imprimiu `REFUTADO` e recarregou o
+módulo. O que ele não previa é que **recarregar era o estrago**.
+
+**O conserto foi o gesto literal:** `systemctl --user restart
+plasma-kded6.service`. O dono troca, todo cliente bem-comportado se registra de
+novo, a lista volta. Medido: 0,3 s de `kded6` fora, e os quatro de volta.
+
+**Regra.** Um gesto substituto na sessão real tem a própria premissa, e o pior
+caso dele não é "não exercitou nada". Antes de trocar o gesto do plano por um
+mais leve: ou a premissa se mede só com leitura, ou fica o gesto do plano. E o
+ramo "a premissa falhou" do roteiro tem de deixar a máquina como achou —
+confira isso lendo, depois, não supondo.
+
+**De carona:** isto não é defeito de quem registra item. Um watcher que perde a
+lista sem trocar de dono não tem como ser percebido por cliente nenhum.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash
