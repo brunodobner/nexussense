@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, etapa 3 fechada: v1.2.3, partida a frio conferida; etapa 4 aberta)
+**Última atualização:** 2026-10-09 (melhorias, sub-etapa 4a fechada: CI no ar, sem versão nova; 4b a 4f abertas)
 
 ---
 
@@ -16,9 +16,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 | versão | **v1.2.3** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 20 testes: 18 passam, 2 pulam, 0 falham — **com e sem root** |
-| suíte Python | 362 passaram (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte shell | 21 testes: 19 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
+| suíte Python | 364 passam, 1 xfail (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
+| CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
 ---
 
@@ -52,7 +53,12 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 1 -- Python     v1.2.0: agente de 7,85% para 0,45% de um nucleo
 [x] Melhorias, etapa 2 -- driver     v1.2.2: bitmask identico, partida a frio conferida
 [x] Melhorias, etapa 3 -- instalador v1.2.3: desinstala o que instala, partida a frio conferida
-[ ] Melhorias, etapa 4 -- sobras     CI e hipoteses a medir; itens independentes
+[x] Melhorias, etapa 4a -- CI        suites e shellcheck por push, modulo semanal
+[ ] Melhorias, etapa 4b -- GPU       temperatura pelo EC, a janela e a dGPU: medir
+[ ] Melhorias, etapa 4c -- bandeja   registro SNI: tres defeitos, dois vistos pelo CI
+[ ] Melhorias, etapa 4d -- instalador cinco sobras da etapa 3; reinstalacao no portao
+[ ] Melhorias, etapa 4e -- botao N   o evento WMI chega? medir na bateria antes de podar
+[ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
 ```
 
 ### Concluído
@@ -847,6 +853,148 @@ que esta etapa viu e deixou está em "Visto e não consertado", acima.
 
 **Ponto de partida:** `master` em v1.2.3. O baseline esperado é 362 na suíte
 Python e, na shell, 18 passam e 2 pulam — sem root, com root e sob `LC_ALL=C`.
+
+---
+
+## Melhorias de 2026-10, etapa 4a — fechada, e onde a 4b começa
+
+A etapa 4 virou seis sub-etapas, uma por sessão: o usuário decidiu que entram
+todos os quinze itens — os cinco da seção 6 de
+[plano-melhorias.md](plano-melhorias.md) e o que as etapas 1 a 3 deixaram em
+"Visto e não consertado". A primeira, o CI, fechou na mesma sessão, no ramo
+`melhorias/4a-ci`.
+
+**Não há versão nova.** Nada do que se instala mudou: `src/`, `packaging/` e
+`driver/` estão idênticos a `master` de antes, e o pacote instalado segue
+igual ao fonte. Subir a versão deixaria o instalado diferente de `master` por
+uma linha — a lição 7 da etapa 3. O `setup.sh` mudou, e ele não se instala.
+
+O baseline capturado antes da primeira edição conferiu com o esperado: 362 na
+suíte Python; shell 18 passam e 2 pulam, idêntico sob `LC_ALL=C`.
+
+O que entrou, cada item com teste que falhou primeiro:
+
+| | o quê | prova |
+|---|---|---|
+| suíte | não chama mais o `nvidia-smi` de verdade | isca na frente do `PATH`: 35 chamadas por rodada, depois 0 |
+| suíte | não fala mais com o barramento de sessão de verdade | barramento isca com monitor: 1 conexão por rodada, depois 0 |
+| `test-aviso-dkms.sh` | o aviso é exercitado numa árvore plantada, não em `/lib/modules` | reprovava onde não há kernel bootável; e reprova o script sem a guarda do `vmlinuz` |
+| quatro testes | pulam fora desta máquina em vez de reprovar | quatro combinações simuladas, 0 falhas; três mutações provam que o pulo não esconde reprovação |
+| `ci.yml` | pytest, suíte shell como usuário e como root, shellcheck — a cada push | verde na quarta rodada |
+| `modulo.yml` | o módulo contra os headers do Arch, toda segunda e quando `driver/` muda | verde na segunda rodada |
+| shellcheck | 3 erros e 7 avisos consertados | 0 e 0 no CI; ficam 62 notas de info e estilo |
+| `test-ci.sh` | guarda o que deixaria o CI verde e inútil | nove mutações dos workflows, nove reprovações |
+
+**Os números, nesta máquina e no CI:**
+
+```
+                       aqui                 container do CI
+pytest                 364 passam, 1 xfail  364 passam, 1 xfail
+shell, sem root        19 passam, 2 pulam   13 passam, 8 pulam
+shell, como root       nao rodada           14 passam, 7 pulam
+shellcheck 0.11.0      nao instalado        0 erros, 0 avisos, 62 notas
+modulo, make W=1       --                   6.18.55-1-lts e 7.2.9-arch1-1,
+                                            GCC 16.2.1, 0 avisos
+modulo, dkms 3.4.4     --                   add e build nos dois kernels
+duracao                --                   cerca de 1 min por workflow
+```
+
+Os que pulam no CI são os que leem esta máquina: `test-arvore` (a seção que
+compila; as outras sete rodam antes e reprovariam), `test-dkms`,
+`test-install-drivers`, `test-perfil-bateria`, `test-permissoes`,
+`test-quirk-anv15-52`, `test-usb-charging` e, sem root, `test-toolchain`. A
+lista vai para o resumo do job, e **um teste fora dela que pule reprova o
+job**: pulou porque perdeu uma dependência, e a cobertura sumiria calada.
+
+### Oito coisas que só apareceram executando
+
+1. **O CI achou dois defeitos de produção na bandeja**, e o teste que os
+   escondia. `test_build_tray_diz_qual_bandeja_subiu` diz "sem host SNI no
+   barramento de teste" e nunca houve barramento de teste: ele falava com o da
+   sessão de quem rodava a suíte, achava o watcher do Plasma e registrava um
+   item de verdade. Passava por isso. Fora desse caso, reproduzido com um
+   roteiro de vinte linhas:
+
+   ```
+   sem barramento de sessao     register() levanta DBusException: publish()
+                                abre a conexao fora do try
+   barramento sem watcher SNI   register() devolve False e o PROCESSO sai com
+                                1 no laco de eventos, ao fechar a conexao
+                                privada -- a libdbus encerra quem a perde
+   ```
+
+   Nos dois a reserva (`QSystemTrayIcon`, ou nenhuma) nunca é alcançada: num
+   desktop sem watcher a bandeja morre calada. O conserto mexe no registro SNI
+   e ficou com a sub-etapa 4c; o teste ganhou um `xfail` estrito, que reprova no
+   dia em que o defeito sumir e a marca ficar. Armadilha 30.
+2. **O `setup.sh` tinha três erros de shellcheck desde sempre.**
+   `test-setup-deps.sh` roda `shellcheck -S error` e dizia "PULADO shellcheck
+   não instalado" a cada rodada. Um pulo dentro de um teste que passa não
+   aparece em lugar nenhum.
+3. **O `pytest-qt` do Arch importa `typing_extensions` e não o declara.** Num
+   container limpo o pytest morria antes de coletar. Nesta máquina o módulo já
+   tinha vindo por outro pacote.
+4. **Comando ausente lido como resultado.** A imagem mínima do Arch não traz o
+   `diffutils`; sem `cmp`, `test-arvore.sh` dizia "LICENSE da raiz difere de
+   driver/LICENSE". O teste agora exige o `cmp` antes de usá-lo.
+5. **Os workflows reprovavam a suíte que rodavam.** Gravavam o log do build e a
+   saída do `run-all` na raiz do checkout, e `test-arvore.sh` cobra a raiz. O
+   `make` e o `dkms build` tinham passado. Tudo vai para `RUNNER_TEMP`.
+6. **O `command -v` do bash devolve arquivo não executável** quando não acha
+   outro. Na simulação, montar `/dev/null` por cima do `pacman` não o escondeu,
+   e `test-setup-deps.sh` reprovou por um defeito do roteiro. Esconder um
+   binário é tirá-lo do `PATH`.
+7. **O roteiro de medição do barramento morreu duas vezes.** Na primeira saiu
+   com código 144 sem imprimir o resto. A limpeza usava `pkill -f`, e o padrão
+   estava também na linha de comando do shell que chamava o roteiro — a
+   armadilha 10. Não foi apurado além disso; refeito com limpeza por PID, não
+   repetiu. Na segunda o pytest saiu com 1 no teste 347, sem mensagem: era o
+   segundo defeito do item 1 se mostrando, antes de eu saber que existia.
+8. **A simulação previu o CI.** Antes do primeiro push, a suíte shell rodou num
+   `bwrap` sem sysfs, sem DKMS, sem pacman e sem o grupo. Deu 13 e 8 como
+   usuário, 14 e 7 como root falso — os mesmos números e os mesmos nomes que o
+   container devolveu depois. O que ela não previu foi o que dependia de
+   pacote instalado: os itens 3 e 4.
+
+**Como refazer a simulação** (o roteiro vivia no scratchpad, que é tmpfs):
+
+```bash
+# PATH so com links de /usr/bin, menos dkms, pacman, nvidia-smi, kwriteconfig6
+bwrap --ro-bind / / --dev /dev --proc /proc --bind /tmp /tmp --bind "$PWD" "$PWD" \
+      --tmpfs /sys --tmpfs /var/lib/dkms --tmpfs /usr/src --tmpfs /boot \
+      --tmpfs /usr/lib/modules --ro-bind group-sem-nexus_sense /etc/group \
+      --setenv PATH "$BIN" --setenv LC_ALL C \
+      ./tests/run-all.sh          # com --unshare-user --uid 0 --gid 0: root falso
+```
+
+### Visto e não consertado
+
+- **Os dois defeitos da bandeja do item 1.** Sub-etapa 4c.
+- **62 notas de shellcheck**, que o CI mostra sem reprovar: 35 são o
+  `A && ok || falha` dos testes (SC2015), 10 são funções-dublê que o shellcheck
+  não vê serem chamadas (SC2329), 7 são `printf` com cor no formato em
+  `verificar-dkms.sh` (SC2059).
+- **O CI não cobre o Clang.** Os kernels do Arch são GCC; os desta máquina,
+  CachyOS com Clang. Quebra de API aparece nos dois; a que é só do Clang, só no
+  portão local.
+- **As mudanças mecânicas no `setup.sh` não foram ao hardware**: os laços de
+  `install_drivers` e de `check_kernel_headers` e a limpeza do nome antigo. A
+  lista de kernels e a saída de `check_kernel_headers` foram comparadas antes e
+  depois, idênticas; o resto roda na reinstalação da sub-etapa 4d.
+- **A suíte shell como root não foi rodada nesta máquina.** A etapa não usou
+  root. Rodou como root no container, e como root falso na simulação.
+- **`actions/checkout` está preso à etiqueta `v5`**, não a um commit.
+
+### Onde a 4b começa
+
+Numa **sessão nova**. Sub-etapa 4b de
+[plano-melhorias.md](plano-melhorias.md): a GPU sem o `nvidia-smi`. Três
+medições antes de qualquer código, sem root, com o modo máximo desligado pelo
+usuário.
+
+**Ponto de partida:** `master` em v1.2.3, com o CI verde. O baseline esperado é
+364 passam e 1 xfail na suíte Python e, na shell, 19 passam e 2 pulam — sem
+root e sob `LC_ALL=C`.
 
 ---
 

@@ -51,6 +51,19 @@ else
   fail=1
 fi
 
+# Daqui para baixo o teste le o que a instalacao deixou NESTA maquina.
+# Onde ela nunca rodou -- outra maquina, um CI -- nao ha o que conferir, e
+# cobrar daria uma lista de falhas que nao e defeito de ninguem. Pula, e
+# pular sai como PULOU no run-all.
+#
+# O criterio e RASTRO de instalacao, nao o estado dela: o fonte encenado
+# ou o registro do DKMS. Com um dos dois no disco e o resto quebrado, o
+# teste segue adiante e reprova -- que e o caso que ele existe para pegar.
+if [ ! -d "/usr/src/nexus_sense-${VER}" ] && [ ! -d "/var/lib/dkms/nexus_sense/${VER}" ]; then
+  echo "  PULOU conferencia da instalacao: nexus_sense/$VER nao esta instalado nesta maquina"
+  [ "$fail" -eq 0 ] && exit 2 || exit 1
+fi
+
 if dkms status "nexus_sense/$VER" 2>/dev/null | grep installed > /dev/null; then
   echo "  OK   dkms registra nexus_sense/$VER como installed"
 else
@@ -66,7 +79,9 @@ fi
 # carregado. O teste ficava vermelho por um modulo que ninguem quer.
 # Ver armadilha 22.
 achou_bootavel=0
-for kver in $(ls /lib/modules); do
+for kdir in /lib/modules/*/; do
+  [ -d "$kdir" ] || continue
+  kver=$(basename "$kdir")
   [ -d "/lib/modules/${kver}/build" ] || continue
   if [ ! -e "/lib/modules/${kver}/vmlinuz" ]; then
     printf '  NOTA %s tem headers sem kernel bootavel; nao se exige modulo\n' "$kver"

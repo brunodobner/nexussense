@@ -32,6 +32,44 @@ def config_isolada(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
+@pytest.fixture(autouse=True)
+def sem_barramento_de_sessao(monkeypatch, tmp_path):
+    """Testes nunca falam com o barramento de sessao de quem os roda.
+
+    Medido em 2026-10-09 com um barramento isca no lugar: uma conexao por
+    rodada, pedindo o nome org.kde.StatusNotifierItem-<pid>-1. Na sessao
+    de verdade isso e um item registrado na bandeja do Plasma a cada
+    suite. O endereco abaixo nao existe, e nao existe do mesmo jeito num
+    CI: quem precisa de barramento sobe o seu e passa o endereco adiante,
+    como a fixture `remote` de test_tray_dbus.py."""
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", f"unix:path={tmp_path}/sem-barramento")
+
+
+# Resposta fixa da isca. 11 graus e um valor que placa nenhuma devolve em
+# uso, e os espioes dos testes respondem outra coisa: quando um teste ve
+# este par, sabe que passou pelo PATH e nao por um runner injetado.
+ISCA_NVIDIA_SMI = "11, 1 %"
+
+
+@pytest.fixture(scope="session")
+def pasta_da_isca(tmp_path_factory):
+    pasta = tmp_path_factory.mktemp("isca")
+    isca = pasta / "nvidia-smi"
+    isca.write_text(f"#!/bin/sh\necho '{ISCA_NVIDIA_SMI}'\n")
+    isca.chmod(0o755)
+    return pasta
+
+
+@pytest.fixture(autouse=True)
+def nvidia_smi_e_isca(monkeypatch, pasta_da_isca):
+    """Testes nunca chamam o nvidia-smi de verdade: ele acorda a dGPU
+    (armadilha 20). A arvore padrao traz a placa 'active', entao todo
+    teste que le a GPU sem injetar um runner chegaria ate ele -- eram 35
+    por rodada. A isca na frente do PATH responde no lugar, e responde o
+    mesmo numa maquina sem a placa."""
+    monkeypatch.setenv("PATH", f"{pasta_da_isca}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 def build_tree(
     root,
     *,

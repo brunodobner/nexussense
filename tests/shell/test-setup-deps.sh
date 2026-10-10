@@ -7,7 +7,6 @@ set -u
 # fora de driver/, para sobreviverem a sobrescrita da pasta na proxima
 # release do upstream -- que e exatamente quando eles sao mais necessarios.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DRV="$ROOT/driver"
 
 # Sem isto um alvo ausente faria as asserções de ausencia passarem por
 # vacuo: grep num arquivo inexistente falha, e "falhou" era lido como

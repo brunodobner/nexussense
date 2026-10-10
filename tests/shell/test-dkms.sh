@@ -23,6 +23,9 @@ DEST="/usr/src/nexus_sense-${VER_TESTE}"
 fail=0
 
 if [ "$EUID" -ne 0 ]; then echo "Rode como root: sudo $0"; exit 2; fi
+# Root num lugar sem dkms -- o container do CI de cada push -- reprovava
+# no 'dkms add' por um defeito que nao e do pacote.
+command -v dkms > /dev/null 2>&1 || { echo "PULOU: dkms nao instalado"; exit 2; }
 
 limpar() {
   dkms remove -m nexus_sense -v "$VER_TESTE" --all >/dev/null 2>&1 || true

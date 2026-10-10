@@ -1035,6 +1035,48 @@ getent group nexus_sense | cut -d: -f3
 
 ---
 
+## 30. A suíte fala com a máquina de quem a roda — e passa por causa disso
+
+**Sintoma.** Tudo verde aqui, e o primeiro CI reprova um teste que nunca
+falhou. Ou o contrário, pior: verde nos dois, por motivos diferentes.
+
+**Causa.** Um teste que monta uma árvore sysfs falsa ainda herda o resto do
+ambiente: o `PATH`, o barramento de sessão, os kernels em `/lib/modules`. Dois
+casos medidos em 2026-10-09, os dois com uma **isca** no lugar da coisa real:
+
+```
+nvidia-smi         isca na frente do PATH       35 chamadas por rodada
+barramento         dbus-daemon proprio, com     1 conexao por rodada, pedindo
+de sessao          dbus-monitor gravando        o nome de um item de bandeja
+```
+
+O primeiro acordava a dGPU de quem rodava os testes (armadilha 20). O segundo
+registrava um ícone de verdade no Plasma — e era **a razão de o teste passar**:
+ele dizia "sem host SNI no barramento de teste", achava o watcher da sessão e
+ia pelo caminho feliz. Sem barramento o código levanta; com barramento e sem
+watcher o processo inteiro sai com 1. Dois defeitos de produção, escondidos
+por um teste que passava pelo motivo errado.
+
+**Regra.** Em `conftest.py`, o que é do ambiente e um teste pode alcançar sai
+de cena para todos, por fixture `autouse`: isca na frente do `PATH`, endereço
+de barramento que não existe, `XDG_CONFIG_HOME` próprio. Quem precisa de
+barramento sobe o seu. E para saber se algo vaza, **meça com a isca** — não
+leia o código procurando.
+
+**Três parentes do mesmo defeito**, da mesma sessão:
+
+- *Pulo que não aparece.* `test-setup-deps.sh` dizia "PULADO shellcheck não
+  instalado" dentro de um teste que passava. O `setup.sh` tinha três erros de
+  shellcheck e ninguém soube até o CI rodar. Pulo tem de sair no código de
+  saída (2), não numa linha no meio.
+- *Comando ausente lido como resultado.* Sem `cmp`, `if cmp -s a b` é falso, e
+  o teste dizia "os arquivos diferem". Exija a ferramenta antes de usá-la.
+- *Esconder não é desabilitar.* O `command -v` do bash devolve arquivo **não
+  executável** quando não acha outro no `PATH`. Para simular a falta de um
+  binário, tire-o do `PATH`; montar algo por cima não basta.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

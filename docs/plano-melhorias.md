@@ -222,22 +222,168 @@ sessão seguinte: módulo, permissões, agente, bandeja subindo sozinha, botão 
 
 ---
 
-## 6. Etapa 4 — o que sobra, cada item independente
+## 6. Etapa 4 — o que sobra, em seis sub-etapas
 
-Nada aqui bloqueia as três primeiras, e cada um pode ser recusado sozinho.
+Nada aqui bloqueia as três primeiras. **Em 2026-10-09 o usuário decidiu que
+entram todos:** os cinco itens que esta seção listava e o que as etapas 1 a 3
+deixaram em "Visto e não consertado" no [estado.md](estado.md). São quinze
+itens em seis sub-etapas, uma por sessão, com as regras da seção 1: ramo
+próprio a partir de `master` limpo, baseline antes da primeira edição, teste
+falhando primeiro, um commit por tarefa, **a suíte inteira antes de cada
+commit**.
 
-- **CI** — ver decisão D7: pytest e shellcheck a cada push, e o módulo
-  compilado uma vez por semana contra os headers atuais do Arch. Essa última
-  parte avisa da quebra de API antes do pacman avisar (armadilha 26).
-- **Temperatura da GPU pelo EC.** Medido: `temp2` do acer deu 69 °C com o
-  `nvidia-smi` em 65. Falta medir o que ele devolve com a placa adormecida. Se
-  servir, a temperatura dispensa o `nvidia-smi`.
-- **A janela impede a dGPU de dormir?** Hipótese, não medida: `nvidia-smi` em
-  laço enquanto ela está ativa nunca a deixa ociosa. Medir `runtime_status`
-  por 60 s com a janela aberta e fechada, fora do modo máximo.
-- **SNI re-registra** quando o `StatusNotifierWatcher` reinicia.
-- **Rede de segurança térmica** para ventoinha manual baixa com CPU quente.
-  Precisa de brainstorm próprio: não se sabe o que o EC já faz sozinho.
+As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
+
+| | ramo | o que entra | root, gesto, push |
+|---|---|---|---|
+| 4a | `melhorias/4a-ci` | CI (decisão D7); a suíte para de chamar o `nvidia-smi` de verdade; shellcheck | push |
+| 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | sem root; modo máximo desligado pelo usuário |
+| 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | root na reinstalação do portão; derrubar o watcher da sessão real é gesto combinado |
+| 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | root na reinstalação do portão; **nunca `uninstall`** |
+| 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | root para o `pr_debug`; apertos e cabo; se podar, DKMS, recarga e reinício |
+| 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | a decidir no plano |
+
+Item que é hipótese começa **medindo**, com a regra de decisão escrita antes da
+medição — como na 2b, que só trocou a condição da bateria depois de a amostra
+confirmar a regra.
+
+### 4a — CI
+
+**Fechada em 2026-10-09, sem versão nova** — nada do que se instala mudou. O
+que foi medido e o que a execução refutou estão em [estado.md](estado.md).
+
+Dois workflows num container Arch: `ci.yml` roda pytest, a suíte shell (como
+usuário e como root) e o shellcheck a cada push; `modulo.yml` compila o módulo
+contra os headers do Arch toda segunda-feira e sempre que `driver/` muda.
+
+Os testes de shell que leem o estado desta máquina pulam lá, e pular sai como
+"pulou" no resumo do job. Um teste fora dessa lista que pule reprova o job.
+
+O shellcheck não está instalado nesta máquina: o que ele acusou no primeiro
+push — 3 erros e 7 avisos — foi consertado no mesmo ramo, antes do merge.
+
+### 4b — a GPU sem o `nvidia-smi`
+
+Três perguntas, uma sessão de medição, nenhuma linha de código antes dela.
+
+1. **`temp2` do hwmon do acer serve de temperatura da GPU?** Medido uma vez: 69
+   °C contra 65 do `nvidia-smi`. Falta: (a) ler `temp2_input` acorda a placa?
+   — `runtime_status` antes e depois, no mesmo comando; (b) o que ele devolve
+   com a placa `suspended` — zero, o último valor, ou a temperatura de verdade;
+   (c) a diferença contra o `nvidia-smi` em repouso e sob carga, com dez
+   amostras de cada. O sensor se procura pelo nome (armadilha 19).
+2. **A janela impede a dGPU de dormir?** `read_gpu` só chama o `nvidia-smi`
+   com a placa `active` — mas cada chamada pode renovar o prazo de suspensão, e
+   aí ela nunca dorme. Medir `power/runtime_active_time` e
+   `runtime_suspended_time` por 60 s com a janela aberta e por 60 s com ela
+   fechada, fora do modo máximo e sem mais nada usando a placa.
+3. **O que `temp3` (`External 2`) mede?** Correlacionar com os outros sensores
+   em repouso e sob carga. Se não der para afirmar, o registro diz isso.
+
+Regra, escrita antes: a temperatura passa para o EC **só se** a leitura não
+acordar a placa **e** a diferença contra o `nvidia-smi` couber em 5 °C nas duas
+condições. O uso da GPU o EC não dá: se a hipótese 2 se confirmar e o uso
+continuar vindo do `nvidia-smi`, o conserto é a janela parar de sondar quando
+só ela mantém a placa acordada — e isso se desenha depois de medir, não antes.
+
+Condição da medição: modo máximo desligado, porque nele o agente mantém a NVML
+aberta e a placa não dorme. É estado do usuário — pedir, não mexer no
+`config.toml`. E conferir a condição a cada amostra: na etapa 1 uma medição de
+300 s valeu por 40 porque o modo mudou no meio.
+
+### 4c — a bandeja sobrevive ao watcher
+
+São três defeitos no mesmo lugar, o registro SNI (`register` em `tray/sni.py`,
+`publish` em `tray/dbus_export.py`). O primeiro é o que esta seção já listava;
+os outros dois o CI achou na 4a, e foram reproduzidos fora da suíte.
+
+| | situação | o que acontece hoje |
+|---|---|---|
+| 1 | o watcher reinicia com a bandeja no ar | o ícone some e não volta: o item é registrado uma vez só |
+| 2 | não há barramento de sessão | `register()` levanta `DBusException`: `publish()` abre a conexão fora do `try` |
+| 3 | há barramento, mas nenhum watcher SNI | `register()` devolve `False` e **o processo sai com 1** no laço de eventos: `publish()` fecha a conexão privada, e a libdbus encerra quem perde o barramento |
+
+Nos casos 2 e 3 a reserva — `QSystemTrayIcon`, ou nenhuma bandeja — nunca é
+alcançada. O 3 é o que um desktop sem watcher vê: a bandeja morre calada.
+
+Para reproduzir o 2 e o 3, com `QT_QPA_PLATFORM=offscreen` e `PYTHONPATH=src`:
+criar um `QApplication`, chamar `register(StatusNotifierItem())`, rodar o laço
+de eventos por 700 ms e imprimir uma linha depois dele. Com
+`DBUS_SESSION_BUS_ADDRESS` apontando para um caminho que não existe, levanta.
+Com ele apontando para um `dbus-daemon --session` recém-subido e vazio, a linha
+de depois do laço nunca sai e o código de saída é 1.
+
+`test_build_tray_diz_qual_bandeja_subiu` carrega um `xfail` estrito por causa
+do caso 2. O conserto o faz passar, o `xfail` reprova, e a marca sai no mesmo
+commit. O caso 3 precisa de teste novo, em subprocesso — é o processo inteiro
+que morre, e dentro do pytest ele levaria a suíte junto.
+
+O conserto do caso 1 é observar o dono do nome no barramento e registrar de
+novo quando ele reaparece.
+
+Teste que falha primeiro, em barramento privado como os de `test_tray_dbus.py`:
+um watcher falso registra o item, morre, sobe de novo, e tem de receber um
+segundo `RegisterStatusNotifierItem`. Na sessão real, a prova é derrubar o
+watcher de verdade — todos os ícones da bandeja piscam, então é gesto
+combinado com o usuário, e o olho dele confirma que o ícone voltou.
+
+Esta sub-etapa muda `src/`: a versão sobe antes do portão, nos três lugares, e
+o portão reinstala o pacote (`install_nexus_sense`, com root) e reinicia a
+bandeja.
+
+### 4d — instalador
+
+Cinco itens em `setup.sh`, todos com teste em shell antes:
+
+- **`runtime_dependencies_ok`** pergunta por `powerprofilesctl`, que o código
+  não chama desde a etapa 1. Perguntar pelo que o código usa: `busctl` e o
+  serviço no barramento.
+- **`install_build_deps` só roda quando falta `make` ou `dkms`.** Com as
+  ferramentas presentes e os headers de um kernel faltando, ninguém os instala.
+  A 3.5 consertou *quais* headers pedir; falta o *quando*.
+- **`is_llvm_kernel` olha o kernel em execução** para decidir se pede `clang` —
+  a armadilha 2, no instalador. Decidir por kernel-alvo, como o Makefile.
+- **A desinstalação encerra agente e bandeja.** Só em `uninstall`, como o
+  grupo: a limpeza que antecede uma reinstalação não pode tirá-los de quem
+  reinstala.
+- **A fiação do `groupdel`** (`cleanup_nexus_group`, chamada por `uninstall`)
+  só tem prova estática. Prová-la de verdade sem trocar o gid desta máquina:
+  rodar a função num namespace com uma cópia de `/etc/group` — `bwrap` está
+  instalado e a 4a o usou para simular outra máquina.
+
+**Não rodar `uninstall` para conferir nada** (armadilha 29). O portão é a
+reinstalação: gid medido antes e depois, pacote idêntico ao fonte, e a versão
+sobe antes dele, nos três lugares — `__version__` viaja no pacote instalado.
+
+### 4e — o botão N
+
+Medido na etapa 2: 8 apertos com o `pr_debug` ligado, nenhum evento no driver.
+Falta a outra metade — **na bateria** — antes de concluir qualquer coisa.
+
+Num comando só, com um observador gravando marcos em `/dev/kmsg`: a sonda
+provada primeiro (ler `usb_charging` tem de produzir o `pr_debug` esperado,
+senão o silêncio é teste por vácuo), depois 8 apertos na tomada e 8 na bateria.
+
+Regra, escrita antes: zero eventos nas duas condições, e
+`cycle_gaming_thermal_profile` e o ramo do tratador saem — com o portão da
+etapa 2 (bitmask `0x00002c26` idêntico, `W=1` limpo), reinício, e a partida a
+frio conferida na sessão seguinte. Um evento que seja, em qualquer das duas, e
+o código fica: a seção 19 de [decisoes.md](decisoes.md) ganha a condição em que
+ele chega, e a ordem de travas ganha a prova de hardware que falta — apertos
+com um escritor regravando o perfil.
+
+De carona, porque o cabo já vai estar na mão: **o caminho de abaixo de 40%**
+(armadilha 27) nunca foi exercitado de ponta a ponta. Se a bateria estiver
+abaixo de 40% na hora, religar o cabo e observar o agente segurar o perfil
+guardado até o firmware aceitar. Se não estiver, fica registrado que não deu.
+
+### 4f — rede de segurança térmica
+
+Ventoinha manual baixa com CPU quente. **Não começa por código:** não se sabe
+o que o EC já faz sozinho, e medir isso é pôr a máquina quente de propósito. A
+sessão é um brainstorm — o que medir, com que limite de aborto, o que o agente
+faria e quando devolveria o controle — e termina num plano próprio, como o do
+gatilho por programa aberto.
 
 Fora do plano de propósito: alinhar `DRIVER_VERSION` ao projeto (decisão 7 já
 descartou), pré-compilar bytecode (medido: 8 ms na partida), mover a

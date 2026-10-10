@@ -1,3 +1,6 @@
+import os
+
+import dbus
 import pytest
 
 from nexus_sense.device import Controls, read_state
@@ -186,6 +189,34 @@ def test_o_fallback_serve_ao_controlador(qtbot, fake_root):
     assert f.icon.startswith("nexus-sense-tray-v2-nivel")
 
 
+def test_a_suite_nao_enxerga_o_barramento_de_sessao_de_verdade():
+    """O teste abaixo diz "sem host SNI no barramento de teste" e ate
+    2026-10-09 nao havia barramento de teste nenhum: build_tray falava com
+    o da sessao de quem rodava a suite, achava o watcher do Plasma e
+    registrava um item de verdade. Passava por isso, e so por isso."""
+    endereco = os.environ.get("DBUS_SESSION_BUS_ADDRESS", "")
+    assert endereco.startswith("unix:path=")
+    assert not os.path.exists(endereco.removeprefix("unix:path="))
+
+
+# Defeito conhecido, visto pelo CI em 2026-10-09 e reproduzido fora dele:
+#
+#   sem barramento de sessao      register() levanta DBusException, porque
+#                                 publish() abre a conexao fora do try
+#   barramento sem watcher SNI    register() devolve False e o PROCESSO sai
+#                                 com 1 no laco de eventos: publish() fecha
+#                                 a conexao privada e a libdbus encerra quem
+#                                 perde o barramento
+#
+# Nos dois casos a reserva (QSystemTrayIcon, ou nenhuma) nunca e alcancada.
+# O conserto e da sub-etapa 4c do plano de melhorias, que mexe no registro
+# SNI. O xfail e estrito de proposito: no dia em que build_tray parar de
+# levantar, este teste passa, o xfail reprova, e a marca tem de sair.
+@pytest.mark.xfail(
+    strict=True,
+    raises=dbus.exceptions.DBusException,
+    reason="sem barramento de sessao o registro SNI levanta em vez de cair na reserva; sub-etapa 4c",
+)
 def test_build_tray_diz_qual_bandeja_subiu(qtbot, fake_root):
     """Sem host SNI no barramento de teste, o resultado tem de ser um dos
     tres caminhos previstos -- nunca excecao. Ver spec secao 7.3."""

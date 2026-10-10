@@ -110,6 +110,22 @@ grep -q 'command -v pacman' <(sed -n '/^install_dkms_check_hook()/,/^}/p' "$I") 
 # a linha do socorro -- e ainda assim sair 0.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+
+# O script percorre /lib/modules, e ate 2026-10-09 este teste o deixava
+# percorrer o da maquina. Onde nao ha kernel bootavel ali -- um container,
+# um CI -- o laco nao tinha o que acusar, o aviso nunca saia e o teste
+# reprovava um script certo. A copia abaixo so troca essa raiz por uma
+# arvore plantada; o resto e o script, linha por linha. Ver armadilha 22a.
+grep -q '/lib/modules/' "$S" || {
+  echo "ERRO alvo ausente: verificar-dkms.sh nao percorre mais /lib/modules/"; exit 3; }
+V="$tmp/verificar-dkms.sh"
+sed "s|/lib/modules/|$tmp/modules/|g" "$S" > "$V"
+
+# Dois kernels plantados: um que da boot e um que so tem headers. O
+# segundo nunca pode ser cobrado -- ver armadilha 22b.
+mkdir -p "$tmp/modules/9.9.9-bootavel/build" "$tmp/modules/9.9.9-so-headers/build"
+: > "$tmp/modules/9.9.9-bootavel/vmlinuz"
+
 cat > "$tmp/dkms" <<'FALSO'
 #!/bin/sh
 case "$*" in
@@ -119,7 +135,7 @@ esac
 FALSO
 chmod +x "$tmp/dkms"
 
-saida=$(PATH="$tmp:$PATH" sh "$S" 2>&1); st=$?
+saida=$(PATH="$tmp:$PATH" sh "$V" 2>&1); st=$?
 
 [ "$st" -eq 0 ] \
   && echo "  OK   sai 0 mesmo quando ha kernel faltando" \
@@ -128,6 +144,16 @@ saida=$(PATH="$tmp:$PATH" sh "$S" 2>&1); st=$?
 printf '%s' "$saida" | grep -q "ATENCAO" \
   && echo "  OK   grita quando o modulo nao foi construido" \
   || { echo "  FALHA nao avisou com kernel faltando (teste por vacuo?)"; falhas=$((falhas + 1)); }
+
+printf '%s' "$saida" | grep -q -- "- 9.9.9-bootavel" \
+  && echo "  OK   cita o kernel que ficou sem modulo" \
+  || { echo "  FALHA o aviso nao diz qual kernel ficou sem modulo"; falhas=$((falhas + 1)); }
+
+if printf '%s' "$saida" | grep -q "9.9.9-so-headers"; then
+  echo "  FALHA cobrou modulo para kernel que so tem headers"; falhas=$((falhas + 1))
+else
+  echo "  OK   kernel sem vmlinuz nao e cobrado"
+fi
 
 printf '%s' "$saida" | grep -q "dkms install -m nexus_sense -v 9.9.9" \
   && echo "  OK   o diagnostico usa a versao real, nao uma cravada" \
@@ -146,7 +172,7 @@ case "$*" in
 esac
 FALSO
 chmod +x "$tmp/dkms"
-if PATH="$tmp:$PATH" sh "$S" 2>&1 | grep -q "ATENCAO"; then
+if PATH="$tmp:$PATH" sh "$V" 2>&1 | grep -q "ATENCAO"; then
   echo "  FALHA gritou com tudo construido: alarme falso"; falhas=$((falhas + 1))
 else
   echo "  OK   fica quieto quando esta tudo construido"
