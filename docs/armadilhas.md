@@ -787,6 +787,13 @@ Por isso o botão ficou em duas funções: `acer_thermal_profile_cycle` faz a
 sequência sob a trava e a solta ao retornar; `acer_thermal_profile_change` só
 então chama `platform_profile_notify`.
 
+**Desde 2026-10-10 (v1.2.7) essas duas funções não existem mais**: o evento WMI
+do botão N nunca chegou ao driver nesta máquina (armadilha 35), e o caminho
+saiu. Hoje nada no driver avisa o núcleo, e um teste reprova se alguém voltar a
+chamar `platform_profile_notify`. A ordem continua valendo para quem voltar: o
+aviso sai **depois** de soltar `acer_op_lock`. Ela foi provada por leitura e
+por teste estático, nunca por hardware — o caminho não rodava.
+
 E a trava da ventoinha entra no `_store`, não em `acer_set_fan_speed`: o
 `profile_set` chama esta última com `acer_op_lock` já tomado, e mutex do kernel
 não é reentrante.
@@ -1315,6 +1322,74 @@ opened` e `session closed`, 0,2 s uma da outra, e não sobra sessão no
 `systemctl` tem de saber com qual gerenciador fala. E a conferência é uma
 pergunta ao gerenciador certo — `systemctl --user show -p NeedDaemonReload` —
 não o código de retorno do `daemon-reload` do sistema, que dá certo sempre.
+
+---
+
+## 35. Silêncio de `pr_debug` não separa "o evento não vem" de "o ramo é mudo"
+
+**Sintoma.** Liga-se o dynamic debug, aperta-se o botão N oito vezes, e o
+driver não diz nada. Conclusão tentadora: o evento WMI não chega.
+
+**Causa.** O tratador de eventos, `acer_wmi_notify`, tem ramos que falam e
+ramos que não falam. O do evento `0x7` tinha um `pr_debug`; os de troca de
+fonte (`0x8`), reforço de bateria (`0x9`) e calibração (`0x0B`) são um `break`
+sem linha nenhuma. Com só o `pr_debug` como instrumento, estas três situações
+dão o mesmo journal vazio:
+
+```
+o botao nao manda evento nenhum
+o botao manda um evento que cai num ramo mudo
+nenhum evento WMI chega ao tratador -- o registro dele esta quebrado
+```
+
+A sonda que a armadilha 14 pede — ler `usb_charging` tem de produzir a linha
+esperada — prova que o `pr_debug` chega ao journal. Não prova que o **caminho
+de eventos** está vivo: a leitura de um atributo entra pelo sysfs, não pelo
+ACPI.
+
+**Como se separou**, em 2026-10-10: um kprobe na entrada do tratador, numa
+instância própria de tracing, mostrando os oito bytes de cada evento.
+
+```bash
+T=/sys/kernel/tracing
+echo 'p:nexus4e/notify nexus_sense:acer_wmi_notify tipo=+0(%di):u32 len=+4(%di):u32 ev=+0(+8(%di)):x64' >> $T/kprobe_events
+mkdir $T/instances/nexus4e
+echo 1 > $T/instances/nexus4e/events/nexus4e/notify/enable
+cat $T/instances/nexus4e/trace          # depois dos gestos
+# desfazer, nesta ordem:
+echo 0 > $T/instances/nexus4e/events/nexus4e/notify/enable
+rmdir $T/instances/nexus4e
+echo '-:nexus4e/notify' >> $T/kprobe_events
+```
+
+O byte baixo de `ev` é a função do evento. O resultado:
+
+```
+8 apertos na tomada     0 entradas
+tirar o cabo            2 entradas: ev=0x9 e ev=0x8, 4 ms uma da outra
+8 apertos na bateria    0 entradas
+```
+
+O cabo é o **controle positivo**: o tratador recebe eventos, e o instrumento
+os vê. Só então os zeros dos apertos querem dizer "o botão não manda".
+
+**Regra.** Antes de concluir de um silêncio, liste os desfechos que dariam o
+mesmo silêncio e arranje um gesto que **tem** de fazer barulho pelo mesmo
+caminho. Sonda que entra por outra porta prova a outra porta.
+
+**Três coisas do instrumento que valem de novo:**
+
+- **Instância própria** (`instances/<nome>`): o buffer global de tracing fica
+  como estava, e `rmdir` leva tudo embora.
+- **O `trap` desfaz o que ficou pela metade.** O roteiro marca "tentando" antes
+  da primeira escrita e só depois "armado"; a devolução roda nos dois casos.
+- **O dynamic debug se devolve linha a linha**, não com um `-p` cego: guarde
+  quais pontos já tinham `p` antes de ligar. E confira depois, sem root: três
+  leituras de `usb_charging` e zero linhas novas no `journalctl -k`.
+
+**E o marco em `/dev/kmsg` leva prioridade explícita** quando vai ser procurado
+num fluxo filtrado: `echo "<4>MARCO" > /dev/kmsg`. Um filtro `-p warning` que
+não enxergue o marco conta zero linhas depois dele — por vácuo.
 
 ---
 

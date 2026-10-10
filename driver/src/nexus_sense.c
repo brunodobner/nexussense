@@ -130,6 +130,12 @@ enum acer_wmi_event_ids
 {
     WMID_HOTKEY_EVENT = 0x1,
     WMID_ACCEL_OR_KBD_DOCK_EVENT = 0x5,
+    /*
+     * Do protocolo: a tecla de turbo dos Predator. O ANV15-52 nao o
+     * manda -- o botao N chega so como tecla -- e por isso nao ha ramo
+     * para ele: se um firmware novo mandar, cai no aviso de funcao
+     * desconhecida. Ver decisoes 19.
+     */
     WMID_GAMING_TURBO_KEY_EVENT = 0x7,
     WMID_AC_EVENT = 0x8,
     WMID_BATTERY_BOOST_EVENT = 0x9,
@@ -356,14 +362,10 @@ static int force_caps = -1;
 static bool has_type_aa;
 static u16 commun_func_bitmap;
 static u8 commun_fn_key_number;
-static bool cycle_gaming_thermal_profile = true;
 static u64 supported_sensors;
 
 module_param(force_caps, int, 0444);
-module_param(cycle_gaming_thermal_profile, bool, 0644);
 MODULE_PARM_DESC(force_caps, "Force the capability bitmask to this value");
-MODULE_PARM_DESC(cycle_gaming_thermal_profile,
-                 "Set thermal mode key in cycle mode. Disabling it sets the mode key in turbo toggle mode");
 
 static struct rfkill *wireless_rfkill;
 static struct rfkill *bluetooth_rfkill;
@@ -446,18 +448,6 @@ static const struct dmi_system_id acer_quirks[] __initconst = {
     },
     {}};
 
-static struct device *platform_profile_device;
-static bool platform_profile_support;
-
-/*
- * The profile used before turbo mode. This variable is needed for
- * returning from turbo mode when the mode key is in toggle mode.
- */
-static int last_non_turbo_profile = INT_MIN;
-
-/* The most performant supported profile */
-static int acer_predator_v4_max_perf;
-
 enum acer_predator_v4_thermal_profile
 {
     ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET = 0x00,
@@ -528,21 +518,22 @@ static bool has_cap(u32 cap)
  * contrario. Nao ha ciclo possivel porque o caminho interno --
  * acer_wmi_evaluate_method -- nunca toma o acer_op_lock.
  *
- * Sete funcoes tomam o de cima, e so elas. Duas leem antes de escrever:
+ * Seis funcoes tomam o de cima, e so elas. Duas leem antes de escrever:
  * predator_usb_charging_store e acer_predator_v4_platform_profile_set.
- * Duas sao sequencias de varias chamadas: predator_fan_speed_store e
- * acer_thermal_profile_cycle, o botao N. Uma le o par que as outras
- * escrevem: predator_fan_speed_show. E as duas de estado,
- * acer_predator_state_load e _save, que rodam no probe e no remove.
+ * Uma e sequencia de varias chamadas: predator_fan_speed_store. Uma le o
+ * par que as outras escrevem: predator_fan_speed_show. E as duas de
+ * estado, acer_predator_state_load e _save, que rodam no probe e no
+ * remove.
  *
  * As de dentro NAO tomam, porque sao chamadas com a trava ja na mao:
  * acer_set_fan_speed, acer_predator_state_restore e _update.
  *
  * Ha uma terceira trava na conta, que nao e nossa: a do nucleo do
  * platform_profile, tomada ANTES de ele chamar profile_set. Dai a ordem
- * completa ser nucleo -> acer_op_lock -> acer_wmi_lock, e dai
- * acer_thermal_profile_change so chamar platform_profile_notify depois
- * de soltar acer_op_lock.
+ * completa ser nucleo -> acer_op_lock -> acer_wmi_lock. Hoje nada aqui
+ * chama o nucleo de volta. Quem um dia voltar a avisa-lo de uma troca de
+ * perfil tem de faze-lo DEPOIS de soltar acer_op_lock, ou a ordem
+ * inverte. Ver armadilha 24.
  *
  * Travar os pontos de entrada em geral NAO funciona, e a tentativa
  * travaria a maquina no carregamento: acer_platform_probe registra
@@ -1083,7 +1074,7 @@ static int
 acer_predator_v4_platform_profile_set(struct device *dev,
                                       enum platform_profile_option profile)
 {
-    int err, tp;
+    int tp;
     acpi_status status;
     u64 on_AC;
 
@@ -1141,14 +1132,7 @@ acer_predator_v4_platform_profile_set(struct device *dev,
         return -EOPNOTSUPP;
     }
 
-    err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
-    if (err)
-        return err;
-
-    if (tp != acer_predator_v4_max_perf)
-        last_non_turbo_profile = tp;
-
-    return 0;
+    return WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
 }
 
 static int
@@ -1176,53 +1160,32 @@ acer_predator_v4_platform_profile_probe(void *drvdata, unsigned long *choices)
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_ECO, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_LOW_POWER, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
         pr_info(" - Low Power profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_QUIET, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET;
         pr_info(" - Quiet profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_BALANCED, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-        last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
         pr_info(" - Balanced profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_BALANCED_PERFORMANCE, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE;
-
-        if (last_non_turbo_profile < 0)
-        {
-            last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE;
-        }
         pr_info(" - Balanced Performance profile supported\n");
     }
 
     if (test_bit(ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO, &supported_profiles))
     {
         set_bit(PLATFORM_PROFILE_PERFORMANCE, choices);
-        acer_predator_v4_max_perf = ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO;
-
-        if (last_non_turbo_profile < 0)
-        {
-            last_non_turbo_profile = ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO;
-        }
         pr_info(" - Performance profile supported\n");
     }
-
-    pr_info("Max performance profile: %d, Last non-turbo profile: %d\n",
-            acer_predator_v4_max_perf, last_non_turbo_profile);
 
     return 0;
 }
@@ -1241,6 +1204,7 @@ static const struct platform_profile_ops acer_predator_v4_platform_profile_ops =
 
 static int acer_platform_profile_setup(struct platform_device *device)
 {
+    struct device *platform_profile_device;
     int retry;
     int max_retries = 10;
     int retry_delay_ms = 100;
@@ -1256,7 +1220,6 @@ static int acer_platform_profile_setup(struct platform_device *device)
 
             if (!IS_ERR(platform_profile_device))
             {
-                platform_profile_support = true;
                 pr_info("Platform profile registered successfully on attempt %d\n", retry + 1);
 
                 return 0;
@@ -1273,128 +1236,8 @@ static int acer_platform_profile_setup(struct platform_device *device)
         }
 
         pr_warn("Failed to register platform profile after %d attempts\n", max_retries);
-        platform_profile_support = false;
         return 0;
     }
-
-    return 0;
-}
-
-/*
- * O botao N. This mode key can rotate each mode or toggle turbo mode.
- * On battery, only ECO and BALANCED mode are available.
- *
- * Le o perfil e a fonte de energia, escolhe o proximo, escreve e talvez
- * baixe as ventoinhas: uma operacao so, sob acer_op_lock, como o
- * profile_set. Sem isto, apertar o botao enquanto o agente troca o perfil
- * intercala as duas sequencias.
- */
-static int acer_thermal_profile_cycle(void)
-{
-    u8 current_tp;
-    int tp, err;
-    u64 on_AC;
-    acpi_status status;
-
-    guard(mutex)(&acer_op_lock);
-
-    err = WMID_gaming_get_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, &current_tp);
-    if (err)
-        return err;
-    /* Check power source */
-    status = WMI_gaming_execute_u64(
-        ACER_WMID_GET_GAMING_SYS_INFO_METHODID,
-        ACER_WMID_CMD_GET_PREDATOR_V4_BAT_STATUS, &on_AC);
-
-    if (ACPI_FAILURE(status))
-        return -EIO;
-
-    /* On AC - define next profile transitions */
-    if (!on_AC)
-    {
-        if (current_tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
-            tp = ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED;
-        else
-            tp = ACER_PREDATOR_V4_THERMAL_PROFILE_ECO;
-    }
-    else
-    {
-        switch (current_tp)
-        {
-        case ACER_PREDATOR_V4_THERMAL_PROFILE_TURBO:
-            tp = cycle_gaming_thermal_profile
-                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
-                     : last_non_turbo_profile;
-            break;
-        case ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE:
-            tp = (acer_predator_v4_max_perf == current_tp)
-                     ? last_non_turbo_profile
-                     : acer_predator_v4_max_perf;
-            break;
-        case ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED:
-            tp = cycle_gaming_thermal_profile
-                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_PERFORMANCE
-                     : acer_predator_v4_max_perf;
-            break;
-        case ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET:
-            tp = cycle_gaming_thermal_profile
-                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_BALANCED
-                     : acer_predator_v4_max_perf;
-            break;
-        case ACER_PREDATOR_V4_THERMAL_PROFILE_ECO:
-            tp = cycle_gaming_thermal_profile
-                     ? ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET
-                     : acer_predator_v4_max_perf;
-            break;
-        default:
-            return -EOPNOTSUPP;
-        }
-    }
-
-    err = WMID_gaming_set_misc_setting(ACER_WMID_MISC_SETTING_PLATFORM_PROFILE, tp);
-    if (err)
-        return err;
-
-    /* the quiter you become the more you'll be able to hear! */
-    if (tp == ACER_PREDATOR_V4_THERMAL_PROFILE_QUIET || tp == ACER_PREDATOR_V4_THERMAL_PROFILE_ECO)
-    {
-        acpi_status stat = acer_set_fan_speed(0, 0);
-        if (ACPI_FAILURE(stat))
-        {
-            return -EIO;
-        }
-    }
-    /* Store non-turbo profile for turbo mode toggle*/
-    if (tp != acer_predator_v4_max_perf)
-        last_non_turbo_profile = tp;
-
-    return 0;
-}
-
-static int acer_thermal_profile_change(void)
-{
-    int err;
-
-    if (!quirks->nitro_sense)
-        return 0;
-
-    err = acer_thermal_profile_cycle();
-    if (err)
-        return err;
-
-    /*
-     * Fora do acer_op_lock, e a ordem importa. O nucleo do
-     * platform_profile toma a trava dele e so entao chama profile_set,
-     * que toma a nossa; platform_profile_notify toma a dele tambem.
-     * Avisar com a nossa ainda na mao inverteria a ordem -- botao N e
-     * uma escrita em .../profile ao mesmo tempo, e os dois param para
-     * sempre.
-     *
-     * E so se o registro deu certo: quando falha nas dez tentativas,
-     * platform_profile_device guarda um ERR_PTR, nao um dispositivo.
-     */
-    if (platform_profile_support)
-        platform_profile_notify(platform_profile_device);
 
     return 0;
 }
@@ -1569,17 +1412,6 @@ static void acer_wmi_notify(union acpi_object *obj, void *context)
         break;
     case WMID_ACCEL_OR_KBD_DOCK_EVENT:
         acer_gsensor_event();
-        break;
-    case WMID_GAMING_TURBO_KEY_EVENT:
-        /*
-         * O nome do evento e do upstream, onde ele servia a tecla de
-         * turbo dos Predator. Neste modelo quem dispara e o botao N, e
-         * key_num 0x5 percorre os perfis termicos -- nao existe turbo
-         * de firmware aqui (bitmap 0x53, sem o bit). Ver decisoes 19.
-         */
-        pr_debug("botao N: key_num %d\n", return_value.key_num);
-        if (return_value.key_num == 0x5 && has_cap(ACER_CAP_PLATFORM_PROFILE))
-            acer_thermal_profile_change();
         break;
     case WMID_AC_EVENT:
     case WMID_BATTERY_BOOST_EVENT:

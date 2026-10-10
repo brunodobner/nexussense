@@ -452,10 +452,33 @@ Antes de tudo, porque o nome confunde e o código do upstream piora:
 | turbo de **firmware** | tecla dedicada dos Predator + o quinto perfil térmico `TURBO` | **não** — o bitmap é `0x53`, sem o bit, e não há tecla |
 | **Desempenho máximo** | modo composto do Nexus Sense, acionado pela janela ou pela bandeja | sim — é o assunto desta seção |
 
-O driver herdou do upstream um evento chamado `WMID_GAMING_TURBO_KEY_EVENT`,
-que logava `pressed turbo button`. Nesta máquina quem dispara esse evento é o
-**botão N**, e ele percorre os perfis térmicos. A mensagem foi corrigida em
-2026-09-12; o nome do evento ficou, porque é do protocolo.
+O driver herdou do upstream um evento chamado `WMID_GAMING_TURBO_KEY_EVENT`
+(função `0x7`), que logava `pressed turbo button`. Esta seção dizia que nesta
+máquina quem o dispara é o **botão N**, percorrendo os perfis térmicos. **Não
+dispara.** Medido duas vezes:
+
+```
+2026-10-09   8 apertos na tomada, pr_debug ligado      0 linhas no tratador
+2026-10-10   8 na tomada e 8 na bateria, pr_debug      0 linhas
+             e kprobe em acer_wmi_notify               0 entradas nos 16
+             tirar o cabo, na mesma rodada             2 entradas (0x9 e 0x8)
+```
+
+O caminho de eventos WMI funciona — o cabo prova — e o botão N não o usa. No
+ANV15-52 ele só existe como **tecla**: scancode `0xf5` no teclado `atkbd`, que
+o hwdb traduz em `prog1` e o atalho do KDE (`Launch (1)`) transforma em "abrir
+o Nexus Sense". Nada disso passa pelo driver.
+
+Por isso, na v1.2.7 (2026-10-10), o ramo do evento `0x7`, as duas funções que
+ele chamava e o parâmetro `cycle_gaming_thermal_profile` **saíram**. O número
+ficou no `enum`, porque é do protocolo; sem ramo, um firmware que passe a
+mandá-lo cai no aviso `Unknown function number - 7`, que aparece no journal sem
+ninguém ligar debug.
+
+**Não se sabe se o evento algum dia chegou neste modelo**, ou se a afirmação
+antiga foi inferência a partir do código do upstream. O BIOS é o mesmo desde
+antes (V1.52, de 2025-12-26) e o journal de setembro não existe mais. A medição
+e a poda estão em [estado.md](estado.md), seção da etapa 4e.
 
 ### A restrição: não existe quinto perfil para selecionar
 
