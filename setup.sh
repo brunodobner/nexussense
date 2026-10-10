@@ -1045,6 +1045,12 @@ EOL
   install -m 644 "${RAIZ}/packaging/systemd/nexus-sense-agent.service" \
     /usr/lib/systemd/user/nexus-sense-agent.service
   systemctl daemon-reload
+  # O daemon-reload acima fala com o systemd do SISTEMA. Quem carrega esta
+  # unit -- e a que o gerador cria a partir do autostart -- e o de cada
+  # usuario: sem aviso ele segue com a definicao antiga na memoria
+  # (NeedDaemonReload=yes) ate relogar, e um restart do agente logo depois
+  # de atualizar sobe a unit velha.
+  each_user_manager daemon-reload
   # --global habilita para todo usuario sem precisar de sessao ativa.
   systemctl --global enable nexus-sense-agent.service
 

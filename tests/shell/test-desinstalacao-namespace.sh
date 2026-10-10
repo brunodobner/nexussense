@@ -17,6 +17,10 @@
 #     companhia sao dublês que anotam a chamada.
 # O que as duas escrevem de verdade e o /etc de mentira e os processos-isca.
 #
+# De carona, install_nexus_sense roda no mesmo cercado: e a unica forma de
+# executar a fiacao dela -- quem ela avisa, e que nao mexe no grupo nem nos
+# processos -- sem reinstalar a maquina de quem testa.
+#
 # Como root este teste PULA: sem privilegio, um erro neste roteiro nao tem
 # como desinstalar nada; com privilegio, a montagem somente-leitura seria a
 # unica barreira.
@@ -65,7 +69,8 @@ ANTES=$(retrato)
 # ─── o PATH de dentro ───────────────────────────────────────────────
 BIN="$T/bin"
 mkdir -p "$BIN"
-for c in bash cat sort grep awk sed tr cut basename dirname rm find getent groupdel id env sleep mkdir; do
+for c in bash cat sort grep awk sed tr cut basename dirname rm find getent groupdel id env sleep mkdir \
+         install cp chmod; do
     real=$(command -v "$c") || { echo "ERRO: alvo ausente: $c"; exit 3; }
     ln -s "$real" "$BIN/$c"
 done
@@ -76,9 +81,13 @@ duble() {  # $1=nome  $2=corpo; toda chamada fica em $CHAMADAS
 # is-active e is-enabled dizem "nao": nada esta de pe aqui dentro.
 duble systemctl 'case "$1" in is-active|is-enabled) exit 1 ;; esac'
 for c in runuser loginctl udevadm depmod modprobe rmmod dkms make systemd-hwdb \
-         update-desktop-database gtk-update-icon-cache; do
+         update-desktop-database gtk-update-icon-cache groupadd usermod; do
     duble "$c" ''
 done
+# As dependencias de execucao, dadas por satisfeitas: o ensaio e da fiacao
+# de install_nexus_sense, e nenhum gerenciador de pacotes entra no PATH.
+duble python3 ''
+duble busctl 'echo "org.freedesktop.UPower.PowerProfiles - - - (activatable) - - -"'
 
 # ─── o /etc de dentro ───────────────────────────────────────────────
 BASE="$T/etc.base"
@@ -125,7 +134,7 @@ UID_ALVO=$(id -u)
 NOME_ALVO=$(id -un)
 
 cat > "$T/dentro.sh" << 'EOL'
-# Roda DENTRO do namespace. $1 = limpeza | desinstala
+# Roda DENTRO do namespace. $1 = limpeza | desinstala | instala
 modo="$1"
 # shellcheck source=/dev/null
 source "$S"
@@ -156,6 +165,7 @@ done
 case "$modo" in
     limpeza)    comprehensive_cleanup ;;
     desinstala) uninstall ;;
+    instala)    install_nexus_sense ;;
 esac > "$T/saida.$modo" 2>&1 < /dev/null
 rc=$?
 
@@ -178,6 +188,10 @@ EOL
 
 ensaio() {  # $1=modo -- cada um com o seu /etc e o seu registro
     cp -r "$BASE" "$T/etc.$1"
+    if [ "$1" = instala ]; then
+        local f
+        for f in $SAEM; do rm -f "$T/etc.$1/$f"; done
+    fi
     rm -f "$T"/pronto.*
     bwrap --unshare-all --uid 0 --gid 0 --die-with-parent \
           --ro-bind / / --dev /dev --proc /proc --tmpfs /run \
@@ -268,7 +282,57 @@ else
     falhas=$((falhas + 1))
 fi
 
-# ─── 3. a maquina de verdade, depois ────────────────────────────────
+# ─── 3. a instalacao do aplicativo ──────────────────────────────────
+# O /etc deste ensaio entra sem os arquivos plantados: quem os poe e ela.
+ensaio instala
+[ -s "$T/resultado.instala" ] || {
+    echo "ERRO: o ensaio da instalacao nao chegou ao fim:"; sed 's/^/    /' "$T/bwrap.instala"; exit 1; }
+
+echo "A instalacao do aplicativo (install_nexus_sense):"
+confere "o roteiro de dentro nao tropecou em nada" "" "$(cat "$T/bwrap.instala")"
+confere "rodou ate o fim" 0 "$(campo instala rc)"
+for f in udev/rules.d/60-nexus-sense.rules xdg/autostart/nexus-sense-autostart.desktop; do
+    case "$f" in
+        udev/*) fonte="$RAIZ_TESTE/packaging/udev/$(basename "$f")" ;;
+        *)      fonte="$RAIZ_TESTE/packaging/desktop/$(basename "$f")" ;;
+    esac
+    if cmp -s "$fonte" "$T/etc.instala/$f"; then
+        echo "  OK   pos $f, identico ao do repositorio"
+    else
+        echo "  FALHA nao pos $f, ou pos diferente"; falhas=$((falhas + 1))
+    fi
+done
+
+# O "systemctl daemon-reload" do instalador fala com o systemd do sistema.
+# Quem carrega a unit do agente, e a que o gerador cria a partir do
+# autostart, e o de cada usuario: sem aviso ele fica com a definicao antiga
+# na memoria. Medido em 2026-10-10, depois da reinstalacao das 04:32:
+# NeedDaemonReload=yes nas duas units, ate alguem recarregar ou relogar.
+RECARREGA="runuser -u $NOME_ALVO -- env XDG_RUNTIME_DIR=/run/user/$UID_ALVO systemctl --user daemon-reload"
+if grep -qxF "$RECARREGA" "$T/chamadas.instala"; then
+    echo "  OK   recarrega o gerenciador de cada usuario com sessao"
+else
+    echo "  FALHA nao recarrega o gerenciador do usuario; chamadas ao systemctl:"
+    grep -E 'systemctl' "$T/chamadas.instala" | sed 's/^/        /'
+    falhas=$((falhas + 1))
+fi
+
+confere "o grupo fica, com o mesmo gid" "$LINHA" "$(campo instala grupo)"
+confere "/etc/group sai igual ao que entrou" "" "$(diff "$BASE/group" "$T/etc.instala/group")"
+if grep -qE '^(groupadd|groupdel) ' "$T/chamadas.instala"; then
+    echo "  FALHA criou ou apagou grupo numa reinstalacao"; falhas=$((falhas + 1))
+else
+    echo "  OK   nao cria nem apaga grupo quando ele ja existe"
+fi
+confere "agente segue rodando"  vivo "$(campo instala agente)"
+confere "bandeja segue rodando" vivo "$(campo instala bandeja)"
+if grep -qE 'systemctl --user (stop|restart)' "$T/chamadas.instala"; then
+    echo "  FALHA parou ou reiniciou algo na sessao do usuario"; falhas=$((falhas + 1))
+else
+    echo "  OK   nao para nem reinicia nada na sessao do usuario"
+fi
+
+# ─── 4. a maquina de verdade, depois ────────────────────────────────
 confere "nada desta maquina foi tocado: grupo, processos e arquivos instalados" "$ANTES" "$(retrato)"
 
 [ "$falhas" -eq 0 ] || { echo "FALHA: $falhas problema(s)"; exit 1; }

@@ -52,6 +52,17 @@ confere "recarrega o udev"                  'udevadm control'
 confere "remove variantes antigas do tray"  "status/nexus-sense-tray\*"
 confere "instala controle do perfil da CPU" 'power-profiles-daemon'
 
+# A unit do agente e carregada pelo systemd de cada USUARIO; o
+# "systemctl daemon-reload" do root nao chega nele. A execucao disto esta
+# em test-desinstalacao-namespace.sh.
+if sed -n '/^install_nexus_sense() {/,/^}/p' "$S" | grep -v '^\s*#' \
+     | grep -qE '^\s*each_user_manager daemon-reload\s*$'; then
+    echo "  OK   recarrega o systemd de cada usuario"
+else
+    echo "  FALHA nao recarrega o systemd de cada usuario"
+    falhas=$((falhas + 1))
+fi
+
 # Nenhum arquivo privilegiado deve reaparecer sem decisao: se alguem
 # ressuscitar o helper, este teste acusa.
 #
