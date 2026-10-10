@@ -72,7 +72,7 @@ jobs:
       # se pular, perdeu uma dependencia e a cobertura sumiu calada.
       - name: So pula o que le a maquina de casa
         run: |
-          permitidos=" test-arvore.sh test-dkms.sh test-install-drivers.sh test-perfil-bateria.sh test-permissoes.sh test-quirk-anv15-52.sh test-toolchain.sh test-usb-charging.sh "
+          permitidos=" test-arvore.sh test-desinstalacao-namespace.sh test-dkms.sh test-install-drivers.sh test-perfil-bateria.sh test-permissoes.sh test-quirk-anv15-52.sh test-toolchain.sh test-usb-charging.sh "
           cd "$RUNNER_TEMP"
           sed 's/\x1b\[[0-9;]*m//g' shell-usuario.txt shell-root.txt \
             | awk '$1 == "PULOU" { print $2 }' | sort -u > "$RUNNER_TEMP/pulados.txt"
