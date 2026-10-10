@@ -193,7 +193,12 @@ def publish(item, name):
     app = QCoreApplication.instance()
     if app is None or "Glib" not in app.eventDispatcher().metaObject().className():
         return False
-    bus = dbus.SessionBus(private=True, mainloop=DBusGMainLoop())
+    # Sem barramento de sessao a propria conexao levanta. E o primeiro dos
+    # motivos para cair na reserva, e por isso mora dentro de um try.
+    try:
+        bus = dbus.SessionBus(private=True, mainloop=DBusGMainLoop())
+    except dbus.exceptions.DBusException:
+        return False
     try:
         owner = dbus.service.BusName(name, bus, do_not_queue=True)
         exported = ItemExport(bus, item)
