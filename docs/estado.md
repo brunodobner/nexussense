@@ -59,7 +59,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2 feito: piso em ~2000 rpm, a ventoinha nao para; falta E3
+[ ] Rede termica, sessao 1 -- medicao  E2 feito: piso em ~2000 rpm; roteiro do E3 pronto, falta rodar
 [ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
 ```
 
@@ -2272,7 +2272,7 @@ aprovado. O que existe:
 |---|---|
 | `tests/hardware/ensaio-termico.sh` | o roteiro de E2: os dois exercícios e o mapa. Escreve na máquina de verdade; não faz parte da suíte |
 | `tests/shell/test-ensaio-termico.sh` | a mesma lógica contra uma árvore plantada, com um EC de mentira e os índices embaralhados: 51 conferências |
-| suítes | 387 na Python; shell 22 passam e 2 pulam, idêntica sob `LC_ALL=C` |
+| suítes, nesse ponto | 387 na Python; shell 22 passam e 2 pulam, idêntica sob `LC_ALL=C` |
 
 **O roteiro foi escrito antes do teste, e o teste passou de primeira** — o
 contrário do que a seção 1 de [plano-melhorias.md](plano-melhorias.md) manda.
@@ -2378,12 +2378,46 @@ uma faixa morta, de 1% a 20%, que este projeto oferecia sem saber.
    depois de escrever. Valeu: nessa amostra ela já girava 7260 rpm, e caiu
    depois. Os 20 s de espera por degrau, no mapa, são folga.
 
+### O roteiro do E3: pronto, provado, por rodar
+
+O mesmo `tests/hardware/ensaio-termico.sh` ganhou o modo `e3`: três estágios
+(automático por 120 s, manual a 30% por 180 s, manual a 1% por 600 s), cada
+um com 30 s frio na frente para medir a rotação de referência e com a descida
+gravada depois. A carga são 8 processos em laço, cada um em grupo próprio e
+debaixo de `timeout`. No fim ele escreve o veredito pela regra da seção 10
+do plano.
+
+`tests/shell/test-ensaio-termico-e3.sh` o exercita na árvore de mentira, com
+um EC que esquenta enquanto houver carga: 36 conferências. O apoio comum aos
+dois testes foi para `tests/shell/lib-arvore-termica.sh`. Suíte shell: 23
+passam, 2 pulam, idêntica sob `LC_ALL=C`. Python: 387.
+
+**35 mutações, 35 reprovações** — 23 das proteções comuns e 12 do E3. Não foi
+de primeira: ver o item 2 abaixo.
+
+Três coisas que só apareceram executando:
+
+1. **O estágio contava amostras, não segundos.** Cada amostra custa o passo
+   mais a leitura, e a carga morre pelo relógio: na máquina, o estágio de 600
+   amostras teria uns 35 s finais sem carga nenhuma. Apareceu lendo o traço da
+   árvore de mentira — o pacote já frio na última amostra de um estágio "sob
+   carga". O estágio passou a durar tempo de relógio, e o teste cobra o pacote
+   quente no fim.
+2. **Uma mutação escapou: `mata_carga` que não mata nada.** O teste esperava
+   até 3 s para ver a carga morta, e com folga de 1 s ela morria sozinha pelo
+   `timeout` dentro dessa janela. A proteção mais importante do E3 — a fonte
+   de calor morre com o roteiro — estava coberta pelo relógio, não por ela.
+   A folga dos casos subiu para 30 s; só o caso "sem roteiro e sem vigia" usa
+   a curta, porque é o relógio que ele mede.
+3. **Um `grep -c` contou a linha do veredito.** "O EC obedeceu ao manual"
+   aparece nos dois estágios e também na frase do veredito R2. O teste
+   reprovava um roteiro certo.
+
 ### Onde continua
 
-Por E3: o roteiro ganha a carga de CPU e os estágios (automático, 30%, 1%),
-com teste em árvore falsa antes — e o ensaio se combina no chat antes do
-comando, porque esquenta a máquina. Com o usuário, a decisão que E2 devolveu:
-o que fazer com a faixa morta do cursor.
+Por E3, combinado no chat antes do comando, porque esquenta a máquina: um
+bloco no terminal, ~25 min, modo máximo desligado, sem jogo. Com o usuário, a
+decisão que E2 devolveu: o que fazer com a faixa morta do cursor.
 
 ---
 

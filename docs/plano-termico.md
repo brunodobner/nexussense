@@ -336,8 +336,8 @@ gira 3369 rpm acima de 50%.
 | | |
 |---|---|
 | pergunta | P1 e P4 |
-| condição de partida | a de E2, e mais: toda zona `SEN*` pelo menos 15 °C abaixo do limite dela na seção 7, pacote abaixo de 60 °C. Em automático a máquina chega lá em três minutos (seção 2) |
-| carga | 8 processos em laço ocupado, cada um debaixo de `timeout`: a fonte de calor morre sozinha no prazo, com ou sem roteiro |
+| condição de partida | a de E2, e mais: toda zona `SEN*` pelo menos 15 °C abaixo do limite dela na seção 7, e pacote abaixo de 60 °C — pela mediana de cinco leituras, porque parado ele dá picos de uma amostra só. Em automático a máquina chega lá em três minutos (seção 2) |
+| carga | 8 processos em laço ocupado, cada um em grupo próprio e debaixo de `timeout`: a fonte de calor morre sozinha no prazo, com ou sem roteiro. **O estágio dura tempo de relógio**, não um número de amostras — contando amostras, a carga morreria antes do fim do estágio |
 | estágio 0 | **automático**, 120 s de carga. É o controle positivo: a rotação tem de subir com a temperatura, pelo mesmo `fanN_input`. Sem isso, "a rotação não subiu em manual" não quer dizer nada (armadilha 35). Dois minutos bastam: na 4b a CPU foi a 91 °C em 90 s, e na seção 2 a rotação respondeu em 20 s |
 | estágio 1 | manual a 30%, até 180 s de carga. É o degrau antes do pior caso, e só isso: a CPU chega ao corte em ~90 s |
 | estágio 2 | manual a **1%** — o piso que E2 mediu, ~2000 / ~1665 rpm; a ventoinha não para em porcentagem nenhuma — até **600 s** de carga. É o estágio que decide a primeira pergunta, e as zonas de placa são lentas: com o jogo, `SEN3` ainda subia aos nove minutos |

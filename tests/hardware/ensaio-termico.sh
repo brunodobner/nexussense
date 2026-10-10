@@ -7,11 +7,19 @@
 # esta mesma logica contra uma arvore de mentira (ENSAIO_RAIZ).
 #
 # Uso:   tests/hardware/ensaio-termico.sh e2 [saida.tsv]
+#        tests/hardware/ensaio-termico.sh e3 [saida.tsv]
 #
 #   e2   o mapa de porcentagem para rotacao, em repouso. Antes dele, dois
 #        exercicios: o vigia (o roteiro leva kill -9 e outro processo devolve
 #        a ventoinha) e o aborto (um limite rebaixado encerra na primeira
 #        amostra). Nao esquenta a maquina.
+#
+#   e3   manual baixo com carga de CPU: ESQUENTA A MAQUINA DE PROPOSITO, ate
+#        os limites da secao 7 do plano. Tres estagios -- automatico (o
+#        controle positivo), manual a 30% e manual a 1% -- com a descida
+#        gravada depois de cada um. Um estagio so roda se o anterior nao
+#        abortou. A carga sao processos em laco, cada um debaixo de timeout:
+#        a fonte de calor morre sozinha no prazo, com ou sem roteiro.
 #
 # O automatico nao tem uma rotacao de repouso: medido em 2026-10-10, ele vai
 # de 2200 a 3800 rpm com a maquina parada, conforme o modo maximo e o que ela
@@ -24,11 +32,13 @@
 #   1. o trap deste roteiro, em EXIT, INT, TERM e HUP;
 #   2. o vigia, em sessao propria (setsid), no ar antes da primeira escrita:
 #      cobre kill -9, roteiro travado e prazo vencido;
-#   3. voce: Ctrl-C, ou "Automatico" na janela. Se fan_speed aparecer com um
+#   3. no E3, o timeout de cada processo de carga: sem roteiro e sem vigia
+#      a ventoinha fica em manual, mas o calor para sozinho;
+#   4. voce: Ctrl-C, ou "Automatico" na janela. Se fan_speed aparecer com um
 #      valor que o roteiro nao escreveu, ele para e NAO escreve por cima.
 #
 # Saidas:
-#    0  terminou
+#    0  terminou (no E3: nenhum estagio abortou num limite)
 #    3  alvo ausente: sensor ou atributo que o ensaio exige
 #   10  aborto por limite de temperatura (secao 7 do plano)
 #   11  encerrado por condicao -- pessoa, bateria, tempo. A medicao nao conta
@@ -74,6 +84,25 @@ PARTIDA_CARGA=${ENSAIO_PARTIDA_CARGA:-60}     # % da bateria, para comecar
 PARTIDA_PACOTE=${ENSAIO_PARTIDA_PACOTE:-70000}
 PARTIDA_LOAD=${ENSAIO_PARTIDA_LOAD:-4}
 
+# O E3. Os tempos sao em amostras -- segundos, com o passo padrao.
+E3_PRE=${ENSAIO_E3_PRE:-30}              # frio na porcentagem, antes da carga
+E3_CARGA0=${ENSAIO_E3_CARGA0:-120}       # estagio 0, automatico
+E3_CARGA1=${ENSAIO_E3_CARGA1:-180}       # estagio 1
+E3_CARGA2=${ENSAIO_E3_CARGA2:-600}       # estagio 2, o que decide
+E3_P1=${ENSAIO_E3_P1:-30}
+E3_P2=${ENSAIO_E3_P2:-1}                 # o piso que o E2 mediu
+E3_DESCIDA=${ENSAIO_E3_DESCIDA:-300}     # teto da descida depois de cada estagio
+E3_EXTRA=${ENSAIO_E3_EXTRA:-60}          # quanto segue depois de ver a retomada
+E3_ECO=${ENSAIO_E3_ECO:-30}              # uma linha no terminal a cada tantas
+RETOMA_RPM=${ENSAIO_RETOMA_RPM:-300}     # "o EC tomou de volta": isto acima do frio
+RETOMA_N=${ENSAIO_RETOMA_N:-5}           # ... por tantas amostras seguidas
+CONTROLE_AUTO=${ENSAIO_CONTROLE_AUTO:-500}   # o automatico tem de subir isto
+CARGA_N=${ENSAIO_CARGA_N:-8}
+CARGA_CMD=${ENSAIO_CARGA_CMD:-while :; do :; done}
+FOLGA_CARGA=${ENSAIO_FOLGA_CARGA:-15}    # segundos alem do estagio ate a carga morrer so
+PARTIDA_PACOTE_E3=${ENSAIO_PARTIDA_PACOTE_E3:-60000}
+PARTIDA_FOLGA_SEN=${ENSAIO_PARTIDA_FOLGA_SEN:-15000}   # cada SEN* isto abaixo do limite
+
 FAN="$R/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"
 PERFIL="$R/sys/firmware/acpi/platform_profile"
 BAT="$R/sys/class/power_supply/BAT1"
@@ -89,6 +118,7 @@ PERFIL0=; MAX0=; FIM=0
 REF1=; REF2=          # rotacao do automatico na partida: informa, nao julga
 DRILL_PID=; DRILL_VALOR=
 DRILL_RPM1=; DRILL_RPM2=   # o que a porcentagem dos exercicios gira
+RESUMO=; ABORTOU=0; RETOMOU_NO_ULTIMO=0
 
 le() { cat "$1" 2>/dev/null || echo NA; }
 eh_num() { case "$1" in ''|*[!0-9-]*) return 1 ;; esac; return 0; }
@@ -274,13 +304,31 @@ escreve() {
     ULTIMO=$1
 }
 
-mata_carga() {
+mata_carga() {     # cada carga e lider do proprio grupo (setsid): vai o grupo
     local p
     [ -n "$RUN" ] && [ -f "$RUN/carga" ] || return 0
     while read -r p; do
-        eh_num "$p" && kill "$p" 2>/dev/null
+        eh_num "$p" && kill -TERM -- "-$p" 2>/dev/null
     done < "$RUN/carga"
+    sleep 0.2
+    while read -r p; do
+        eh_num "$p" && kill -KILL -- "-$p" 2>/dev/null
+    done < "$RUN/carga"
+    rm -f "$RUN/carga"
     return 0
+}
+
+carga_liga() {     # $1 = amostras que o estagio dura
+    local i seg
+    # Cada processo debaixo de timeout: se roteiro e vigia sumirem juntos, o
+    # calor para sozinho quando o estagio teria acabado, mais a folga.
+    seg=$(awk -v n="$1" -v p="$PASSO" -v f="$FOLGA_CARGA" \
+        'BEGIN { s = n * p; t = int(s); if (t < s) t++; print t + f }')
+    : > "$RUN/carga"
+    for ((i = 0; i < CARGA_N; i++)); do
+        setsid timeout "$seg" bash -c "$CARGA_CMD" < /dev/null > /dev/null 2>&1 &
+        echo "$!" >> "$RUN/carga"
+    done
 }
 
 volta_ao_automatico() {     # tres tentativas de 0,0; depois 100,100
@@ -667,9 +715,201 @@ modo_e2() {
     exit 0
 }
 
+# --------------------------------------------------------------------- E3
+
+maior() {     # $1 = nome da variavel, $2 = valor: guarda o maior dos dois
+    local -n _alvo=$1
+    eh_num "$2" && [ "$2" -gt "$_alvo" ] && _alvo=$2
+    return 0
+}
+
+frio_o_bastante() {    # pacote e zonas de placa longe dos limites?
+    acima "$1" "$PARTIDA_PACOTE_E3" && return 1
+    acima "$V_SEN2" $(( LIM_SEN2 - PARTIDA_FOLGA_SEN + 1 )) && return 1
+    acima "$V_SEN3" $(( LIM_SEN3 - PARTIDA_FOLGA_SEN + 1 )) && return 1
+    acima "$V_SEN4" $(( LIM_SEN4 - PARTIDA_FOLGA_SEN + 1 )) && return 1
+    acima "$V_SEN5" $(( LIM_SEN5 - PARTIDA_FOLGA_SEN + 1 )) && return 1
+    return 0
+}
+
+descida() {   # $1 = numero do estagio. Carga fora, automatico: grava ate esfriar
+    local n=$1 i rc frias=0 t0=$EPOCHSECONDS
+    for ((i = 0; i < E3_DESCIDA; i++)); do
+        sleep "$PASSO"
+        amostra "e$n:descida"; registra
+        verifica; rc=$?
+        N_PAC=0
+        # Limite de temperatura aqui nao e novidade: e o estagio que acabou de
+        # abortar, esfriando. Pessoa, bateria e prazo continuam valendo.
+        [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
+        if frio_o_bastante "$V_PAC"; then frias=$((frias + 1)); else frias=0; fi
+        [ "$frias" -ge 3 ] && break
+    done
+    DESCIDA_SEG=$(( EPOCHSECONDS - t0 ))
+    DESCIDA_OK=1
+    [ "$frias" -ge 3 ] || DESCIDA_OK=0
+    echo "  descida: $DESCIDA_SEG s ate o pacote ficar abaixo de $PARTIDA_PACOTE_E3; rotacao $V_RPM1 / $V_RPM2 rpm"
+}
+
+estagio() {   # $1 = numero, $2 = porcentagem (0 = automatico), $3 = amostras de carga
+    local n=$1 p=$2 dur=$3 i=0 rc=0 nome ref1 ref2 cnt=0 retomou=0 resta=0 fim=completo
+    local thr0 ch0 t0 t0ms dur_ms seg thr pct="?" mhz=0 nm=0 quando="" ec=""
+    local mp=0 me=0 mg=0 m2=0 m3=0 m4=0 m5=0 mr1=0 mr2=0
+    if [ "$p" = 0 ]; then nome=automatico; else nome="manual $p%"; fi
+    echo
+    dur_ms=$(awk -v n="$dur" -v p="$PASSO" 'BEGIN { printf "%d", n * p * 1000 }')
+    echo "ESTAGIO $n -- $nome, $(( dur_ms / 1000 )) s de carga"
+    if [ "$p" != 0 ]; then
+        if ! escreve "$p,$p"; then MOTIVO="a escrita de $p,$p foi recusada"; termina "$COD_CONDICAO"; fi
+    fi
+    # A rotacao de referencia se mede na hora, fria, nesta porcentagem.
+    coleta "e$n:frio" 0 "$E3_PRE" || termina $?
+    ref1=$(mediana "${C1[@]}"); ref2=$(mediana "${C2[@]}")
+    echo "  frio: $ref1 / $ref2 rpm, pacote $V_PAC"
+    thr0=$V_THRMS; ch0=$V_CHARGE; t0=$EPOCHSECONDS
+
+    # O estagio dura tempo de relogio, nao um numero de amostras: cada
+    # amostra custa o passo mais a leitura, e a carga morre sozinha pelo
+    # relogio (carga_liga). Contando amostras, ela morria antes do estagio.
+    t0ms=$(agora_ms)
+    carga_liga "$dur"
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        i=$(( i + 1 ))
+        amostra "e$n:carga"; registra
+        verifica; rc=$?
+        maior mp "$V_PAC"; maior me "$V_ECCPU"; maior mg "$V_ECGPU"
+        maior m2 "$V_SEN2"; maior m3 "$V_SEN3"; maior m4 "$V_SEN4"; maior m5 "$V_SEN5"
+        maior mr1 "$V_RPM1"; maior mr2 "$V_RPM2"
+        if eh_num "$V_MHZ"; then mhz=$(( mhz + V_MHZ )); nm=$(( nm + 1 )); fi
+        if [ "$rc" -ne 0 ]; then fim="aborto: $MOTIVO"; break; fi
+        if [ $(( i % E3_ECO )) -eq 0 ]; then
+            echo "  +$i: pacote $V_PAC, rotacao $V_RPM1 / $V_RPM2, SEN2-5 $V_SEN2 $V_SEN3 $V_SEN4 $V_SEN5"
+        fi
+        [ "$p" = 0 ] && continue
+        if [ "$retomou" = 1 ]; then
+            resta=$(( resta - 1 ))
+            [ "$resta" -le 0 ] && break
+        else
+            # fan_speed ainda diz o manual -- verifica() acabou de conferir --
+            # e a ventoinha gira acima do que essa porcentagem girava fria.
+            if [ $(( V_RPM1 - ref1 )) -gt "$RETOMA_RPM" ] || [ $(( V_RPM2 - ref2 )) -gt "$RETOMA_RPM" ]; then
+                cnt=$(( cnt + 1 ))
+            else
+                cnt=0
+            fi
+            if [ "$cnt" -ge "$RETOMA_N" ]; then
+                retomou=1; resta=$E3_EXTRA
+                quando="aos $(( EPOCHSECONDS - t0 )) s, com o pacote em $V_PAC e a rotacao em $V_RPM1 / $V_RPM2 rpm"
+                echo "  o EC tomou a ventoinha de volta $quando (fan_speed = $V_FAN)"
+            fi
+        fi
+    done
+    seg=$(( EPOCHSECONDS - t0 ))
+    mata_carga
+    [ "$retomou" = 1 ] && [ "$rc" -eq 0 ] && fim=retomada
+
+    # Pessoa, bateria, prazo ou sensor sumido: o estagio nao conta.
+    [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
+
+    if [ "$p" = 0 ] && [ "$rc" -eq 0 ]; then
+        # O controle positivo: se o automatico nao sobe com a carga, "a
+        # rotacao nao subiu em manual" nao quer dizer nada (armadilha 35).
+        if [ $(( mr1 - ref1 )) -lt "$CONTROLE_AUTO" ] || [ $(( mr2 - ref2 )) -lt "$CONTROLE_AUTO" ]; then
+            MOTIVO="em automatico a rotacao foi de $ref1 / $ref2 a no maximo $mr1 / $mr2 rpm com a carga: menos de $CONTROLE_AUTO de subida"
+            termina "$COD_CONTROLE"
+        fi
+        ec="a rotacao subiu de $ref1 / $ref2 para ate $mr1 / $mr2 rpm: controle positivo passou"
+    elif [ "$p" != 0 ]; then
+        if [ "$retomou" = 1 ]; then ec="o EC tomou a ventoinha de volta $quando"
+        else ec="o EC obedeceu ao manual: rotacao de $ref1 / $ref2 a no maximo $mr1 / $mr2 rpm"; fi
+        if ! escreve "0,0"; then MOTIVO="a escrita de 0,0 foi recusada"; termina "$COD_CONDICAO"; fi
+    fi
+
+    thr=NA
+    if eh_num "$thr0" && eh_num "$V_THRMS"; then
+        thr=$(( V_THRMS - thr0 ))
+        [ "$seg" -gt 0 ] && pct=$(awk -v t="$thr" -v s="$seg" 'BEGIN { printf "%.1f", t / 10 / s }')
+    fi
+    [ "$nm" -gt 0 ] && mhz=$(( mhz / nm ))
+    {
+        echo "estagio $n ($nome): carga de $seg s; fim: $fim"
+        echo "    $ec"
+        echo "    maximos: pacote $mp, CPU pelo EC $me, GPU pelo EC $mg, SEN2-5 $m2 $m3 $m4 $m5"
+        echo "    throttle $thr ms ($pct% do tempo); frequencia media $mhz MHz; charge_now de $ch0 a $V_CHARGE"
+    } | tee -a "$RESUMO"
+
+    descida "$n"
+    echo "    descida: $DESCIDA_SEG s$([ "$DESCIDA_OK" = 1 ] || echo ' (nao esfriou no prazo)')" >> "$RESUMO"
+
+    if [ "$rc" -eq "$COD_LIMITE" ]; then ABORTOU=1; return "$COD_LIMITE"; fi
+    RETOMOU_NO_ULTIMO=$retomou
+    if [ "$DESCIDA_OK" != 1 ]; then
+        MOTIVO="depois do estagio $n a maquina nao esfriou em $E3_DESCIDA amostras"
+        termina "$COD_CONDICAO"
+    fi
+    return 0
+}
+
+veredito() {   # a regra da secao 10 do plano, escrita antes de medir
+    local v
+    if [ "$ABORTOU" = 1 ]; then
+        v="R3 -- um estagio abortou num limite de temperatura"
+    elif [ "$RETOMOU_NO_ULTIMO" = 1 ]; then
+        v="R1 -- no estagio mais baixo o EC tomou a ventoinha de volta, dentro dos limites"
+    else
+        v="R2 -- o EC obedeceu ao manual e nenhum limite estourou"
+    fi
+    echo
+    echo "veredito: $v" | tee -a "$RESUMO"
+}
+
+modo_e3() {
+    local i pacs=() med rc
+    REPOUSO=0
+    [ -n "${ENSAIO_PRAZO:-}" ] || PRAZO=2100
+    SAIDA=${1:-${XDG_STATE_HOME:-$HOME/.local/state}/nexus-sense/ensaio-e3-$(date +%Y%m%d-%H%M%S).tsv}
+    mkdir -p "$(dirname "$SAIDA")" || exit 1
+    # shellcheck disable=SC2059  # o cabecalho e o formato, de proposito
+    printf "$CABECALHO" > "$SAIDA"
+    RESUMO="${SAIDA%.tsv}.resumo.txt"
+
+    echo "E3 -- manual baixo com carga de CPU. ESQUENTA A MAQUINA."
+    echo "saida: $SAIDA"
+    # Cinco leituras do pacote, e vale a mediana: com a maquina parada ele da
+    # picos de uma amostra so, que nao devem recusar nem aprovar a partida.
+    for ((i = 0; i < 5; i++)); do
+        amostra partida; registra
+        eh_num "$V_PAC" && pacs+=("$V_PAC")
+        sleep "$PASSO"
+    done
+    exige_alvos || exit "$COD_ALVO"
+    med=$(mediana "${pacs[@]}")
+    V_PAC=$med
+    mostra_condicao
+    pode_comecar || exit "$COD_RECUSA"
+    if ! frio_o_bastante "$med"; then
+        echo "  RECUSA: a maquina nao esta fria o bastante: pacote $med (pede abaixo de $PARTIDA_PACOTE_E3) e cada SEN* a $PARTIDA_FOLGA_SEN do limite"
+        exit "$COD_RECUSA"
+    fi
+    PERFIL0=$V_PERFIL; MAX0=$V_MAX
+    echo "perfil $PERFIL0, modo maximo ${MAX0:-?}; carga: $CARGA_N processos" > "$RESUMO"
+
+    prepara
+
+    estagio 0 0 "$E3_CARGA0"; rc=$?
+    if [ "$rc" -eq 0 ]; then estagio 1 "$E3_P1" "$E3_CARGA1"; rc=$?; fi
+    if [ "$rc" -eq 0 ]; then estagio 2 "$E3_P2" "$E3_CARGA2"; rc=$?; fi
+    veredito
+    echo "E3 terminou. Resumo em $RESUMO"
+    [ "$ABORTOU" = 1 ] && exit "$COD_LIMITE"
+    exit 0
+}
+
 case "${1:-}" in
     --vigia)  modo_vigia "$2" "$3" "$4" ;;
     _segura)  modo_segura ;;
     e2)       modo_e2 "${2:-}" ;;
-    *)        sed -n '2,36p' "$0"; exit 2 ;;
+    e3)       modo_e3 "${2:-}" ;;
+    *)        sed -n '2,48p' "$0"; exit 2 ;;
 esac
