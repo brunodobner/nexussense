@@ -1036,8 +1036,20 @@ modo_e3b() {
     # O jogo fechou, outra mao, bateria, prazo: a medicao nao conta.
     [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
 
-    if [ "$retomou" = 1 ]; then ec="o EC tomou a ventoinha de volta $quando"
-    else ec="o EC obedeceu ao manual: rotacao de $ref1 / $ref2 a no maximo $mr1 / $mr2 rpm"; fi
+    if [ "$retomou" = 1 ]; then
+        ec="o EC tomou a ventoinha de volta $quando"
+    elif [ "$ref1" = "?" ]; then
+        # Acabou antes de a referencia assentar: vale a ultima leitura, contra
+        # o automatico medido logo antes.
+        if eh_num "$V_RPM1" && eh_num "$V_RPM2" \
+           && [ $(( auto1 - V_RPM1 )) -ge "$RETOMA_RPM" ] && [ $(( auto2 - V_RPM2 )) -ge "$RETOMA_RPM" ]; then
+            ec="o EC obedeceu ao manual: a rotacao caiu de $auto1 / $auto2 rpm, em automatico, para $V_RPM1 / $V_RPM2"
+        else
+            ec="nao deu tempo de ver se o EC obedeceu: rotacao em $V_RPM1 / $V_RPM2 rpm, contra $auto1 / $auto2 em automatico"
+        fi
+    else
+        ec="o EC obedeceu ao manual: rotacao de $ref1 / $ref2 a no maximo $mr1 / $mr2 rpm"
+    fi
     if ! escreve "0,0"; then MOTIVO="a escrita de 0,0 foi recusada"; termina "$COD_CONDICAO"; fi
 
     thr=NA

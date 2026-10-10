@@ -303,6 +303,15 @@ roda "$D" "${B[@]}"
 confere "com jogo e o limite estourando, o E3b sai com 10 e devolve a ventoinha" "$?" 10 "0,0"
 grep -q 'aborto: SEN4' "$D/e3b.resumo.txt" \
     && ok "o resumo diz qual limite estourou, e quando" || falha "o resumo nao diz o limite"
+# O aborto pode vir antes de a referencia do manual estar fixada -- na maquina
+# veio aos 7 s. Mesmo assim o resumo diz onde a rotacao estava: saiu "? / ?".
+if grep -q '? / ?' "$D/e3b.resumo.txt"; then
+    falha "o resumo traz '? / ?' no lugar da rotacao"
+elif grep -q '^    o EC obedeceu ao manual: a rotacao caiu de 4700 / 4181 rpm' "$D/e3b.resumo.txt"; then
+    ok "abortado cedo, o resumo ainda diz de onde e para onde a rotacao caiu"
+else
+    falha "abortado cedo, o resumo nao diz a queda da rotacao: $(grep 'o EC' "$D/e3b.resumo.txt")"
+fi
 grep -q '^veredito: R3' "$D/e3b.resumo.txt" \
     && ok "veredito R3" || falha "veredito errado: $(grep '^veredito' "$D/e3b.resumo.txt")"
 tem_fases_b "E3b abortado" && ok "a descida depois do aborto fica gravada"

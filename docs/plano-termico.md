@@ -414,6 +414,35 @@ acabou de provar, o roteiro vigiando os mesmos limites e devolvendo o
 automático no primeiro que estourar. Se E3 abortou em algum estágio, E3b não
 roda: a rede já está justificada e o limiar sai de E3.
 
+#### O resultado de E3b — medido em 2026-10-10
+
+Rodado pelo usuário, de 19:44:48 a 19:48:58, com o jogo dele aberto. Perfil
+`balanced-performance`, modo máximo desligado, na tomada, 77%.
+
+```
+com jogo, em automatico, 120 s    4492 / 4083 rpm; pacote 92 C, GPU pelo EC 80,
+                                  SEN2-5 79 72 87 77
+com jogo, manual a 1%             a ventoinha cai a ~2075 / ~1727 rpm em dois segundos
+                                  GPU pelo EC, segundo a segundo: 79 80 81 82 84 85
+                                  ABORTO aos 7 s: GPU pelo EC em 85 C, o limite
+de volta ao automatico            3093 rpm em 3 s, 4436 em 20 s; GPU pelo EC a 74 C
+```
+
+- **Veredito do roteiro: R3.** Com um jogo, o piso leva a GPU ao limite em
+  sete segundos — um grau por segundo.
+- **O EC obedeceu ao manual** também aqui: a rotação caiu e ficou.
+- **O limite que estourou é de quem se protege sozinho.** A GPU tem alvo
+  próprio em 87 °C no chip, e o EC lê até 6 °C acima dele. Não é dano: é a
+  GPU batendo no teto em segundos e passando a cortar desempenho. É o cursor
+  esquecido com um jogo aberto, medido.
+- **O que este ensaio não diz:** onde as zonas de placa iriam parar. Em sete
+  segundos elas não se mexeram (`SEN4` em 86–87 °C do começo ao fim).
+- **O que ele diz para o desenho da rede:** 30 s de espera antes de agir
+  (seção 11, *provisório*) é lento demais para a GPU.
+
+As cinco camadas da seção 8 só precisaram da primeira: o roteiro abortou na
+amostra em que o limite apareceu e devolveu o automático.
+
 ---
 
 ## 7. Limites de aborto
@@ -495,6 +524,9 @@ observador já no ar e um tempo limite.
 
 Um quarto desfecho, para não ser lido como um dos três: se o roteiro abortar
 por pessoa, bateria ou tempo, o estágio **não conta** e se repete.
+
+**O que deu, em 2026-10-10:** E3, com carga só de CPU, deu **R2**. E3b, com um
+jogo, deu **R3** — a GPU no limite em sete segundos. Pela regra, a rede entra.
 
 ---
 

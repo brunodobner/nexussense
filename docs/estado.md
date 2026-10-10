@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2 e E3 rodaram — piso em ~2000 rpm, o EC não toma a ventoinha de volta, veredito R2; E3b e a rede esperam o usuário)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2, E3 e E3b rodaram — com um jogo e a ventoinha no piso a GPU bate no limite em 7 s; veredito R3, a rede entra)
 
 ---
 
@@ -59,8 +59,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2 e E3 feitos: piso em ~2000 rpm, o EC nao retoma, R2; falta decidir E3b
-[ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
+[ ] Rede termica, sessao 1 -- medicao  E2, E3 e E3b feitos: com jogo, R3 -- a rede entra; falta fechar e mesclar
+[ ] Rede termica, sessao 2 -- a rede   a regra mandou: E3b deu R3
 ```
 
 ### Concluído
@@ -2263,7 +2263,7 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
 
 ---
 
-## Rede térmica, sessão 1 — E2 e E3 feitos
+## Rede térmica, sessão 1 — E2, E3 e E3b feitos
 
 Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
 aprovado. O que existe:
@@ -2445,11 +2445,61 @@ frequencia, ult. minuto  3634 MHz       3286 (-10%)    2965 (-18%)
 com a ventoinha a 4400 rpm. A 2050 rpm, com os mesmos 60 W de GPU, não se
 sabe — é E3b, que o usuário decide agora que viu E3.
 
+### E3b rodou: com um jogo, a GPU bate no limite em sete segundos — R3
+
+O usuário disse sim ao E3b, e disse também que costuma jogar com o modo
+máximo ligado. O roteiro ganhou o modo `e3b` (o jogo tem de estar aberto, do
+começo ao fim; nenhuma carga própria), com teste antes: o do E3 passou a 57
+conferências. Rodado em 2026-10-10, de 19:44:48 a 19:48:58, com o modo máximo
+desligado.
+
+```
+com jogo, em automatico     4492 / 4083 rpm; GPU pelo EC 80 C, SEN4 87
+com jogo, manual a 1%       ~2075 / ~1727 rpm; GPU pelo EC 79 80 81 82 84 85
+                            ABORTO aos 7 s, no limite da GPU pelo EC (85 C)
+de volta ao automatico      4436 rpm em 20 s; GPU pelo EC a 74
+```
+
+- **Pela regra escrita antes de medir, a rede entra.**
+- O limite que estourou é o da GPU, que se protege sozinha: não é dano, é
+  desempenho que some em segundos. As zonas de placa não tiveram tempo de se
+  mexer, e onde iriam parar este ensaio não diz.
+- O roteiro abortou na amostra em que o limite apareceu e devolveu o
+  automático. Nenhuma camada além do próprio `trap` precisou agir.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e3b-20261010-194448.tsv`.
+
+**O que a execução refutou:** "o estágio do piso por até 300 s" — durou sete.
+E os 30 s de espera antes de a rede agir, do desenho provisório: a GPU sobe
+um grau por segundo.
+
+**Três coisas que só apareceram executando:**
+
+1. **O corredor de mutações sumiu duas vezes**, com dois reinícios: vivia no
+   scratchpad. Antes do E3b rodou uma versão refeita, com as 13 críticas: 12
+   reprovaram, e a que passou é equivalente — sem a recusa de "sem jogo", a
+   conferência seguinte recusa igual, com o mesmo código.
+2. **O resumo dizia "rotação de ? / ?"**: o aborto veio antes de a referência
+   do manual assentar. Consertado, com teste que falhou primeiro.
+3. **As minhas mutações esquentaram a máquina com o usuário jogando**: de
+   19:38 a 19:43 a ventoinha foi a 5600 rpm, com o modo máximo desligado. O
+   automático passa dos 4400 também nesse modo, se a carga for maior que a
+   do jogo.
+
+### Visto e não consertado, até aqui
+
+- **O jogo com o modo máximo ligado não foi medido**, e é como o usuário
+  costuma jogar. A curva do automático é outra; falta a linha de base dela —
+  sai de graça do observador passivo numa sessão de jogo com o modo ligado.
+- **O corredor de mutações completo** (eram 35, mais as 7 do E3b) não está no
+  repositório. Refazê-lo e guardá-lo em `tests/hardware/` fecha a sessão 1.
+- **O shellcheck** dos quatro arquivos novos só roda no CI, no primeiro push.
+
 ### Onde continua
 
-Três decisões do usuário: E3b (cinco minutos de jogo com o manual no piso,
-que pede um modo novo no roteiro, com teste antes); a rede no caso R2; e a
-faixa morta do cursor.
+Fechar a sessão 1: o corredor de mutações no repositório, as três camadas de
+verificação, o merge de `termica/1-medicao` e o push — o push só com a palavra
+do usuário. Depois a sessão 2, a rede, em sessão nova. Com o usuário: a faixa
+morta do cursor.
 
 ---
 
