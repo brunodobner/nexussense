@@ -215,11 +215,10 @@ for fn in predator_usb_charging_store predator_battery_limit_store \
   fi
 done
 
-# --- ventoinha e botao N tambem sao operacoes inteiras
+# --- a ventoinha tambem e uma operacao inteira
 #
 # Ajustar ventoinha sao ate tres chamadas WMI mais o par de variaveis que
-# fan_speed devolve; o botao N le o perfil e a fonte, escreve e talvez
-# baixe as ventoinhas. Sem acer_op_lock, dois escritores se intercalam no
+# fan_speed devolve. Sem acer_op_lock, dois escritores se intercalam no
 # meio. Tarefa 2.3.
 corpo_de() {
   # "&& !/;$/" pula o prototipo: sem isso a faixa abriria na declaracao
@@ -227,13 +226,13 @@ corpo_de() {
   awk "/^static [a-z_ ]*${1}\(/ && !/;\$/,/^}/" "$S"
 }
 
-for fn in predator_fan_speed_store acer_thermal_profile_cycle; do
-  if corpo_de "$fn" | grep -q 'guard(mutex)(&acer_op_lock)'; then
-    echo "  OK   ${fn} roda sob o acer_op_lock"
-  else
-    echo "  FALHA ${fn} nao toma o acer_op_lock"; fail=1
-  fi
-done
+corpo=$(corpo_de 'predator_fan_speed_store')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: predator_fan_speed_store"; exit 3; }
+if printf '%s' "$corpo" | grep -q 'guard(mutex)(&acer_op_lock)'; then
+  echo "  OK   predator_fan_speed_store roda sob o acer_op_lock"
+else
+  echo "  FALHA predator_fan_speed_store nao toma o acer_op_lock"; fail=1
+fi
 
 # A trava entra no _store, nao em acer_set_fan_speed: o profile_set chama
 # esta com a trava ja tomada, e mutex do kernel nao e reentrante.
@@ -245,37 +244,52 @@ else
   echo "  OK   acer_set_fan_speed nao toma a trava que o chamador ja tem"
 fi
 
-# A ordem com a trava do nucleo do platform_profile. O nucleo toma a dele
-# e chama profile_set, que toma a nossa. platform_profile_notify toma a
-# dele tambem -- entao quem avisa nao pode estar com a nossa na mao.
-corpo=$(corpo_de 'acer_thermal_profile_change')
-[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_thermal_profile_change"; exit 3; }
-if ! printf '%s' "$corpo" | grep -q 'platform_profile_notify'; then
-  echo "  FALHA acer_thermal_profile_change nao avisa o nucleo da troca"; fail=1
-elif printf '%s' "$corpo" | grep -q '(&acer_op_lock)'; then
-  echo "  FALHA platform_profile_notify e acer_op_lock na mesma funcao: ordem invertida"; fail=1
-else
-  echo "  OK   o aviso ao nucleo sai fora do acer_op_lock"
-fi
-
-if corpo_de 'acer_thermal_profile_cycle' | grep -q 'platform_profile_notify('; then
-  echo "  FALHA acer_thermal_profile_cycle avisa o nucleo com a trava tomada"; fail=1
-else
-  echo "  OK   a parte travada do botao N nao chama o nucleo"
-fi
-
-# --- o botao N nao avisa um perfil que nao chegou a registrar
+# --- o caminho WMI do botao N saiu
 #
-# Se devm_platform_profile_register falhar nas dez tentativas,
-# platform_profile_device fica com um ERR_PTR, e o aviso o dereferenciava
-# no primeiro aperto do botao. platform_profile_support existia para
-# dizer exatamente isso e ninguem o lia; foi o Clang 23, com W=1, que
-# apontou a variavel escrita e nunca usada.
-if corpo_de 'acer_thermal_profile_change' | grep -B1 'platform_profile_notify(' \
-   | grep -q 'if (platform_profile_support)'; then
-  echo "  OK   o aviso ao nucleo depende de o perfil ter registrado"
+# Medido em 2026-10-10, com o pr_debug ligado e um kprobe no tratador: 16
+# apertos, 8 na tomada e 8 na bateria, nenhuma entrada em acer_wmi_notify.
+# Tirar o cabo, na mesma rodada, produziu duas. Neste modelo o botao so
+# existe como tecla (0xf5 -> prog1 -> atalho do KDE): o ramo do evento
+# 0x7, as duas funcoes que ele chamava e o parametro que so elas liam
+# nunca rodaram. Sub-etapa 4e; ver decisoes 19.
+esperar_ausente 'cycle_gaming_thermal_profile' \
+  'o parametro que escolhia o modo do botao N saiu'
+esperar_ausente 'acer_thermal_profile_change' \
+  'a funcao que o evento do botao N chamava saiu'
+esperar_ausente 'acer_thermal_profile_cycle' \
+  'a sequencia que percorria os perfis saiu'
+# So o botao N a lia. Escrita e nunca lida, o Clang 23 a acusa com W=1.
+esperar_ausente 'platform_profile_support' \
+  'a bandeira que so o botao N consultava saiu'
+
+corpo=$(corpo_de 'acer_wmi_notify')
+[ -n "$corpo" ] || { echo "  ERRO alvo ausente: acer_wmi_notify"; exit 3; }
+if printf '%s' "$corpo" | grep -q 'case WMID_GAMING_TURBO_KEY_EVENT'; then
+  echo "  FALHA o tratador ainda tem ramo para o evento 0x7, que nao chega"; fail=1
 else
-  echo "  FALHA platform_profile_notify roda mesmo sem perfil registrado"; fail=1
+  echo "  OK   o tratador nao tem ramo para o evento 0x7"
+fi
+# O que fica: as teclas de funcao, e o aviso de funcao desconhecida -- e
+# ele que acusa, sem ninguem ligar debug, se um firmware novo passar a
+# mandar o 0x7.
+if printf '%s' "$corpo" | grep -q 'case WMID_HOTKEY_EVENT' &&
+   printf '%s' "$corpo" | grep -q 'Unknown function number'; then
+  echo "  OK   o tratador segue com as teclas de funcao e o aviso de funcao desconhecida"
+else
+  echo "  FALHA o tratador perdeu as teclas de funcao ou o aviso de funcao desconhecida"; fail=1
+fi
+
+# --- o driver nao chama o nucleo do platform_profile de volta
+#
+# O nucleo toma a trava dele e chama profile_set, que toma acer_op_lock.
+# Quem avisasse o nucleo com acer_op_lock na mao inverteria a ordem, e os
+# dois parariam para sempre. O unico que avisava era o botao N. Se um dia
+# alguem voltar a avisar, a ordem de travas tem de ser provada de novo --
+# armadilha 24 -- antes de este teste mudar.
+if grep -q 'platform_profile_notify(' "$S"; then
+  echo "  FALHA o driver chama o nucleo do platform_profile: confira a ordem de travas"; fail=1
+else
+  echo "  OK   o driver nao chama o nucleo do platform_profile de volta"
 fi
 
 # --- o arquivo de estado e conferido antes de valer
