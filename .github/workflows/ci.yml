@@ -1,0 +1,109 @@
+# A cada push: as duas suites e o shellcheck.
+#
+# Roda num container Arch porque e onde o projeto vive: mesmas versoes de
+# Python, PySide6 e shellcheck de quem desenvolve, e o pacman que alguns
+# testes consultam. A maquina do CI nao e um Nitro, e varios testes de
+# shell leem o estado da maquina de casa (sysfs, DKMS, hwdb): la eles tem
+# de PULAR, nao falhar -- e so eles. O passo "So pula o que le a maquina"
+# cobra as duas coisas.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  suites:
+    name: pytest e suite shell
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 15
+    steps:
+      - name: Dependencias
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git make gcc python python-pytest python-pytest-qt pyside6 \
+            python-dbus python-tomli-w dbus ttf-dejavu \
+            shellcheck desktop-file-utils
+          useradd -m ci
+
+      - uses: actions/checkout@v5
+
+      # As suites rodam como usuario comum: root atravessa permissao de
+      # arquivo, e os testes que provam uma recusa passariam a reprovar.
+      - name: Repositorio nas maos do usuario de teste
+        run: chown -R ci:ci .
+
+      - name: pytest
+        run: su ci -c 'python -m pytest -q'
+
+      - name: Suite shell, sem root
+        run: su ci -c './tests/run-all.sh' | tee shell-usuario.txt
+
+      - name: Suite shell, como root
+        run: ./tests/run-all.sh | tee shell-root.txt
+
+      # Pular e resultado, e tem de aparecer: vai para o resumo do job. E
+      # um teste que nao le a maquina de casa nao tem por que pular aqui --
+      # se pular, perdeu uma dependencia e a cobertura sumiu calada.
+      - name: So pula o que le a maquina de casa
+        run: |
+          permitidos=" test-arvore.sh test-dkms.sh test-install-drivers.sh test-perfil-bateria.sh test-permissoes.sh test-quirk-anv15-52.sh test-toolchain.sh test-usb-charging.sh "
+          sed 's/\x1b\[[0-9;]*m//g' shell-usuario.txt shell-root.txt \
+            | awk '$1 == "PULOU" { print $2 }' | sort -u > pulados.txt
+          {
+            echo '### Testes de shell que pularam'
+            echo
+            sed 's/^/- /' pulados.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          while read -r t; do
+            case "$permitidos" in
+              *" $t "*) ;;
+              *) echo "::error::$t pulou e nao esta entre os que leem a maquina de casa"; rc=1 ;;
+            esac
+          done < pulados.txt
+          exit $rc
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 10
+    steps:
+      - name: Dependencias
+        run: pacman -Syu --noconfirm --needed git shellcheck
+
+      - uses: actions/checkout@v5
+
+      # Erro e aviso reprovam. Info e estilo saem no log e no resumo, sem
+      # reprovar: sao sugestao, e o setup.sh tem 49 KB de historia.
+      - name: Erros e avisos
+        run: |
+          shellcheck --version
+          mapfile -t alvos < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          [ "${#alvos[@]}" -ge 20 ] || { echo "::error::so ${#alvos[@]} scripts achados"; exit 1; }
+          shellcheck -f gcc -S warning "${alvos[@]}"
+
+      - name: Info e estilo, sem reprovar
+        if: always()
+        run: |
+          mapfile -t alvos < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          shellcheck -f gcc -S style "${alvos[@]}" > achados.txt || true
+          cat achados.txt
+          {
+            echo '### shellcheck'
+            echo
+            echo "$(grep -c ': error:' achados.txt) erros, $(grep -c ': warning:' achados.txt) avisos, $(grep -c ': note:' achados.txt) notas de info e estilo"
+          } >> "$GITHUB_STEP_SUMMARY"
