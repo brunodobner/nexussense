@@ -87,4 +87,37 @@ codigo "$CI" | grep -q 'GITHUB_STEP_SUMMARY' \
   && ok "o que pulou vai para o resumo do job" \
   || falha "os pulos nao aparecem no resumo do job"
 
+# --- o modulo contra os headers do Arch
+M="$RAIZ/.github/workflows/modulo.yml"
+[ -f "$M" ] || { echo "ERRO alvo ausente: $M"; exit 3; }
+
+codigo "$M" | grep -qE "^[[:space:]]+- cron: '[0-9*/, -]+'" \
+  && ok "modulo.yml tem agenda" \
+  || falha "modulo.yml sem agenda: so rodaria quando alguem lembrasse"
+
+codigo "$M" | grep -qE "^[[:space:]]+- 'driver/\*\*'" \
+  && ok "modulo.yml roda tambem quando o driver muda" \
+  || falha "modulo.yml nao dispara em mudanca do driver"
+
+# No container o kernel em execucao e o do hospedeiro, sem headers. Um
+# make sem KVER iria atras dele e reprovaria toda semana -- armadilha 2,
+# pelo lado do CI.
+if codigo "$M" | grep -qE 'uname -r'; then
+  falha "modulo.yml decide o alvo pelo kernel em execucao"
+elif codigo "$M" | grep -E 'make -C driver' | grep -qv 'KVER='; then
+  falha "ha um make em modulo.yml sem KVER"
+else
+  ok "todo make de modulo.yml leva o kernel-alvo em KVER"
+fi
+
+# Sem dkms ou sem root o test-dkms.sh pula, a suite fica verde e o job
+# nao teria conferido o caminho que o pacman percorre.
+codigo "$M" | grep -q "PASSOU \*test-dkms.sh" \
+  && ok "modulo.yml cobra que test-dkms.sh rodou de verdade" \
+  || falha "modulo.yml aceita test-dkms.sh pulado"
+
+codigo "$M" | grep -cE 'continue-on-error' | grep -qx 0 \
+  && ok "nenhuma falha engolida em modulo.yml" \
+  || falha "modulo.yml engole falha"
+
 exit $fail

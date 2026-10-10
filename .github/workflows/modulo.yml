@@ -1,0 +1,76 @@
+# O modulo compilado contra os headers de hoje do Arch.
+#
+# Um modulo fora da arvore quebra quando uma API do kernel muda, e hoje
+# quem avisa e o gancho do pacman, depois que o kernel novo ja esta no
+# disco (armadilha 26). Isto avisa antes: uma vez por semana, e sempre
+# que o driver muda.
+#
+# O que ele NAO cobre: os kernels desta maquina sao CachyOS, compilados
+# com Clang; os do Arch sao GCC. Quebra de API aparece nos dois; quebra
+# que e so do Clang, so no portao local.
+name: Modulo contra o kernel do Arch
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'   # segunda-feira, 06:17 UTC
+  push:
+    paths:
+      - 'driver/**'
+      - '.github/workflows/modulo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  modulo:
+    name: make e dkms build
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    timeout-minutes: 30
+    steps:
+      - name: Dependencias
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel git dkms linux-headers linux-lts-headers
+
+      - uses: actions/checkout@v5
+
+      # O kernel em execucao aqui e o do hospedeiro, sem headers: o alvo
+      # vai sempre por KVER, nunca por uname -r (armadilha 2).
+      - name: make, para cada kernel com headers
+        run: |
+          mapfile -t kernels < <(for b in /usr/lib/modules/*/build; do
+              [ -d "$b" ] && basename "$(dirname "$b")"; done | sort)
+          [ "${#kernels[@]}" -gt 0 ] || { echo "::error::nenhum kernel com headers"; exit 1; }
+          echo '### Modulo' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          rc=0
+          for k in "${kernels[@]}"; do
+            echo "::group::make KVER=$k"
+            make -C driver clean KVER="$k" > /dev/null 2>&1
+            make -C driver KVER="$k" W=1 2>&1 | tee "build-$k.log"
+            echo "::endgroup::"
+            if [ -f driver/src/nexus_sense.ko ]; then
+              avisos=$(grep -c 'warning:' "build-$k.log" || true)
+              echo "- \`$k\`: compilou, $avisos avisos sob W=1 -- $(modinfo -F vermagic driver/src/nexus_sense.ko)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::o modulo nao compilou para $k"
+              echo "- \`$k\`: **nao compilou**" >> "$GITHUB_STEP_SUMMARY"
+              rc=1
+            fi
+          done
+          make -C driver clean KVER="${kernels[0]}" > /dev/null 2>&1
+          exit $rc
+
+      # O caminho que o pacman percorre de verdade. Como root e com dkms
+      # instalado, test-dkms.sh faz add e build para cada kernel.
+      - name: Suite shell como root, com o DKMS de verdade
+        run: |
+          ./tests/run-all.sh | tee shell-root.txt
+          sed 's/\x1b\[[0-9;]*m//g' shell-root.txt | grep -q 'PASSOU *test-dkms.sh' \
+            || { echo "::error::test-dkms.sh nao rodou: o job perdeu o objeto"; exit 1; }
