@@ -466,8 +466,9 @@ kernels_missing_headers() {
 # criterio, e com os dois no lugar ninguem instalava os headers de um
 # kernel novo: check_kernel_headers avisava e a instalacao seguia sem ele.
 build_deps_missing() {
+  local raiz="${1:-/lib/modules}"
   ! command -v make &> /dev/null || ! command -v dkms &> /dev/null ||
-    [ -n "$(kernels_missing_headers "$@")" ]
+    [ -n "$(kernels_missing_headers "$raiz")" ]
 }
 
 # Install build dependencies based on distribution.
