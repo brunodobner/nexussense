@@ -5,10 +5,14 @@ GLib do Qt atende a conexão no mesmo thread da GUI, sem polling ou thread
 auxiliar. Sem esse dispatcher, build_tray usa QSystemTrayIcon.
 """
 
+import sys
+
 import dbus
 import dbus.service
 from dbus.mainloop.glib import DBusGMainLoop
 from PySide6.QtCore import QCoreApplication
+
+from .sni import WATCHER, WATCHER_PATH
 
 SNI = "org.kde.StatusNotifierItem"
 MENU = "com.canonical.dbusmenu"
@@ -203,8 +207,8 @@ def publish(item, name):
     try:
         owner = dbus.service.BusName(name, bus, do_not_queue=True)
         exported = ItemExport(bus, item)
-        watcher = bus.get_object("org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher")
-        watcher.RegisterStatusNotifierItem(name, dbus_interface="org.kde.StatusNotifierWatcher")
+        watcher = bus.get_object(WATCHER, WATCHER_PATH)
+        watcher.RegisterStatusNotifierItem(name, dbus_interface=WATCHER)
     except dbus.exceptions.DBusException:
         # Sem watcher (ou com o nome ja tomado): desfazer tudo, para nao
         # deixar SNI pela metade no barramento. A ordem decide duas coisas.
@@ -221,7 +225,34 @@ def publish(item, name):
         bus.set_exit_on_disconnect(False)
         bus.close()
         return False
+    _follow_watcher(bus, name)
     item._export = exported
     item._bus = bus
     item._owner = owner
     return True
+
+
+def _follow_watcher(bus, name):
+    """Registra o item de novo cada vez que o watcher ganha dono.
+
+    O watcher guarda a lista de itens na memoria. Quando reinicia nasce
+    com ela vazia, e o item que nao se apresenta de novo some da bandeja
+    ate o aplicativo reiniciar.
+
+    A pergunta e "ha dono?", nao "o dono mudou?": um watcher pode soltar o
+    nome e pedi-lo de novo sem morrer, e ai o dono novo e o de antes.
+
+    Sem esperar a resposta: quem chama aqui e o laco de eventos da
+    interface, e um watcher que acabou de subir pode demorar.
+    """
+
+    def refused(error):
+        print(f"bandeja: o watcher voltou e recusou o registro: {error}", file=sys.stderr)
+
+    def owner_changed(_name, _old, new):
+        if new:
+            bus.call_async(WATCHER, WATCHER_PATH, WATCHER, "RegisterStatusNotifierItem", "s", (name,),
+                           reply_handler=lambda *_: None, error_handler=refused)
+
+    bus.add_signal_receiver(owner_changed, "NameOwnerChanged", dbus.BUS_DAEMON_IFACE,
+                            dbus.BUS_DAEMON_NAME, dbus.BUS_DAEMON_PATH, arg0=WATCHER)
