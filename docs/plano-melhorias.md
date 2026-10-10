@@ -238,7 +238,7 @@ As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
 |---|---|---|---|
 | 4a | `melhorias/4a-ci` | CI (decisão D7); a suíte para de chamar o `nvidia-smi` de verdade; shellcheck | push |
 | 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | sem root; modo máximo desligado pelo usuário |
-| 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia | sem root; derrubar o watcher da sessão real é gesto combinado |
+| 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | root na reinstalação do portão; derrubar o watcher da sessão real é gesto combinado |
 | 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | root na reinstalação do portão; **nunca `uninstall`** |
 | 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | root para o `pr_debug`; apertos e cabo; se podar, DKMS, recarga e reinício |
 | 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | a decidir no plano |
@@ -249,6 +249,9 @@ confirmar a regra.
 
 ### 4a — CI
 
+**Fechada em 2026-10-09, sem versão nova** — nada do que se instala mudou. O
+que foi medido e o que a execução refutou estão em [estado.md](estado.md).
+
 Dois workflows num container Arch: `ci.yml` roda pytest, a suíte shell (como
 usuário e como root) e o shellcheck a cada push; `modulo.yml` compila o módulo
 contra os headers do Arch toda segunda-feira e sempre que `driver/` muda.
@@ -256,8 +259,8 @@ contra os headers do Arch toda segunda-feira e sempre que `driver/` muda.
 Os testes de shell que leem o estado desta máquina pulam lá, e pular sai como
 "pulou" no resumo do job. Um teste fora dessa lista que pule reprova o job.
 
-O shellcheck não está instalado nesta máquina: o que ele acusar no primeiro
-push é notícia nova, e se conserta no mesmo ramo antes do merge.
+O shellcheck não está instalado nesta máquina: o que ele acusou no primeiro
+push — 3 erros e 7 avisos — foi consertado no mesmo ramo, antes do merge.
 
 ### 4b — a GPU sem o `nvidia-smi`
 
@@ -290,15 +293,43 @@ aberta e a placa não dorme. É estado do usuário — pedir, não mexer no
 
 ### 4c — a bandeja sobrevive ao watcher
 
-`tray/sni.py` registra o item uma vez. Se o `StatusNotifierWatcher` reinicia —
-o `kded6` cai, o Plasma é reiniciado — o ícone some e não volta. O conserto é
-observar o dono do nome no barramento e registrar de novo quando ele reaparece.
+São três defeitos no mesmo lugar, o registro SNI (`register` em `tray/sni.py`,
+`publish` em `tray/dbus_export.py`). O primeiro é o que esta seção já listava;
+os outros dois o CI achou na 4a, e foram reproduzidos fora da suíte.
+
+| | situação | o que acontece hoje |
+|---|---|---|
+| 1 | o watcher reinicia com a bandeja no ar | o ícone some e não volta: o item é registrado uma vez só |
+| 2 | não há barramento de sessão | `register()` levanta `DBusException`: `publish()` abre a conexão fora do `try` |
+| 3 | há barramento, mas nenhum watcher SNI | `register()` devolve `False` e **o processo sai com 1** no laço de eventos: `publish()` fecha a conexão privada, e a libdbus encerra quem perde o barramento |
+
+Nos casos 2 e 3 a reserva — `QSystemTrayIcon`, ou nenhuma bandeja — nunca é
+alcançada. O 3 é o que um desktop sem watcher vê: a bandeja morre calada.
+
+Para reproduzir o 2 e o 3, com `QT_QPA_PLATFORM=offscreen` e `PYTHONPATH=src`:
+criar um `QApplication`, chamar `register(StatusNotifierItem())`, rodar o laço
+de eventos por 700 ms e imprimir uma linha depois dele. Com
+`DBUS_SESSION_BUS_ADDRESS` apontando para um caminho que não existe, levanta.
+Com ele apontando para um `dbus-daemon --session` recém-subido e vazio, a linha
+de depois do laço nunca sai e o código de saída é 1.
+
+`test_build_tray_diz_qual_bandeja_subiu` carrega um `xfail` estrito por causa
+do caso 2. O conserto o faz passar, o `xfail` reprova, e a marca sai no mesmo
+commit. O caso 3 precisa de teste novo, em subprocesso — é o processo inteiro
+que morre, e dentro do pytest ele levaria a suíte junto.
+
+O conserto do caso 1 é observar o dono do nome no barramento e registrar de
+novo quando ele reaparece.
 
 Teste que falha primeiro, em barramento privado como os de `test_tray_dbus.py`:
 um watcher falso registra o item, morre, sobe de novo, e tem de receber um
 segundo `RegisterStatusNotifierItem`. Na sessão real, a prova é derrubar o
 watcher de verdade — todos os ícones da bandeja piscam, então é gesto
 combinado com o usuário, e o olho dele confirma que o ícone voltou.
+
+Esta sub-etapa muda `src/`: a versão sobe antes do portão, nos três lugares, e
+o portão reinstala o pacote (`install_nexus_sense`, com root) e reinicia a
+bandeja.
 
 ### 4d — instalador
 
