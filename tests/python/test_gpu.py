@@ -1,4 +1,6 @@
+import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -84,3 +86,23 @@ def test_saida_inesperada_do_nvidia_smi_nao_derruba(fake_root):
 
 def test_sem_gpu_a_leitura_e_none(tmp_path):
     assert read_gpu(Sysfs(tmp_path)) is None
+
+
+def test_o_nvidia_smi_que_a_suite_enxerga_e_a_isca(tmp_path_factory):
+    """Rodar os testes nao pode acordar a dGPU de quem os roda. Medido em
+    2026-10-09: a suite chamava o nvidia-smi de verdade 35 vezes por
+    rodada, por todo teste que monta a arvore padrao -- nela a GPU esta
+    'active' -- sem passar um runner. Ver armadilha 20."""
+    achado = shutil.which("nvidia-smi")
+    assert achado is not None
+    assert Path(achado).is_relative_to(tmp_path_factory.getbasetemp())
+
+
+def test_sem_runner_a_leitura_vem_da_isca(fake_root):
+    """O caminho de producao inteiro -- subprocess de verdade, PATH de
+    verdade -- com a mesma resposta em qualquer maquina: nesta, que tem
+    a placa, e num CI, que nao tem."""
+    leitura = read_gpu(Sysfs(fake_root))
+    assert leitura.asleep is False
+    assert leitura.temperature == pytest.approx(11.0)
+    assert leitura.utilization == 1

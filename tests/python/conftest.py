@@ -32,6 +32,31 @@ def config_isolada(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
+# Resposta fixa da isca. 11 graus e um valor que placa nenhuma devolve em
+# uso, e os espioes dos testes respondem outra coisa: quando um teste ve
+# este par, sabe que passou pelo PATH e nao por um runner injetado.
+ISCA_NVIDIA_SMI = "11, 1 %"
+
+
+@pytest.fixture(scope="session")
+def pasta_da_isca(tmp_path_factory):
+    pasta = tmp_path_factory.mktemp("isca")
+    isca = pasta / "nvidia-smi"
+    isca.write_text(f"#!/bin/sh\necho '{ISCA_NVIDIA_SMI}'\n")
+    isca.chmod(0o755)
+    return pasta
+
+
+@pytest.fixture(autouse=True)
+def nvidia_smi_e_isca(monkeypatch, pasta_da_isca):
+    """Testes nunca chamam o nvidia-smi de verdade: ele acorda a dGPU
+    (armadilha 20). A arvore padrao traz a placa 'active', entao todo
+    teste que le a GPU sem injetar um runner chegaria ate ele -- eram 35
+    por rodada. A isca na frente do PATH responde no lugar, e responde o
+    mesmo numa maquina sem a placa."""
+    monkeypatch.setenv("PATH", f"{pasta_da_isca}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
 def build_tree(
     root,
     *,
