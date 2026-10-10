@@ -91,6 +91,20 @@ codigo "$CI" | grep -q 'GITHUB_STEP_SUMMARY' \
 M="$RAIZ/.github/workflows/modulo.yml"
 [ -f "$M" ] || { echo "ERRO alvo ausente: $M"; exit 3; }
 
+# --- nenhum passo deixa arquivo dentro do repositorio
+# test-arvore.sh cobra que a raiz tenha so o que e do projeto. Na primeira
+# rodada os workflows gravavam o log do build e a saida da suite na raiz
+# do checkout, e a suite reprovava o proprio CI: "raiz inesperada".
+sujeira=$(codigo "$CI"; codigo "$M")
+sujeira=$(printf '%s\n' "$sujeira" | grep -nE '(\btee|[^2&]>>?)[[:space:]]+"?[A-Za-z.]' \
+          | grep -vE '>>?[[:space:]]*/dev/null')
+if [ -z "$sujeira" ]; then
+  ok "os workflows so gravam em RUNNER_TEMP e no resumo do job"
+else
+  falha "passo gravando arquivo no diretorio do checkout:"
+  printf '%s\n' "$sujeira" | sed 's/^/        /'
+fi
+
 codigo "$M" | grep -qE "^[[:space:]]+- cron: '[0-9*/, -]+'" \
   && ok "modulo.yml tem agenda" \
   || falha "modulo.yml sem agenda: so rodaria quando alguem lembrasse"

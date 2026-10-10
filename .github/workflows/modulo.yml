@@ -53,10 +53,10 @@ jobs:
           for k in "${kernels[@]}"; do
             echo "::group::make KVER=$k"
             make -C driver clean KVER="$k" > /dev/null 2>&1
-            make -C driver KVER="$k" W=1 2>&1 | tee "build-$k.log"
+            make -C driver KVER="$k" W=1 2>&1 | tee "$RUNNER_TEMP/build-$k.log"
             echo "::endgroup::"
             if [ -f driver/src/nexus_sense.ko ]; then
-              avisos=$(grep -c 'warning:' "build-$k.log" || true)
+              avisos=$(grep -c 'warning:' "$RUNNER_TEMP/build-$k.log" || true)
               echo "- \`$k\`: compilou, $avisos avisos sob W=1 -- $(modinfo -F vermagic driver/src/nexus_sense.ko)" >> "$GITHUB_STEP_SUMMARY"
             else
               echo "::error::o modulo nao compilou para $k"
@@ -71,6 +71,6 @@ jobs:
       # instalado, test-dkms.sh faz add e build para cada kernel.
       - name: Suite shell como root, com o DKMS de verdade
         run: |
-          ./tests/run-all.sh | tee shell-root.txt
-          sed 's/\x1b\[[0-9;]*m//g' shell-root.txt | grep -q 'PASSOU *test-dkms.sh' \
+          ./tests/run-all.sh | tee "$RUNNER_TEMP/shell-root.txt"
+          sed 's/\x1b\[[0-9;]*m//g' "$RUNNER_TEMP/shell-root.txt" | grep -q 'PASSOU *test-dkms.sh' \
             || { echo "::error::test-dkms.sh nao rodou: o job perdeu o objeto"; exit 1; }
