@@ -230,6 +230,119 @@ recusa pacote "pacote a 60 C ou mais"    sys/class/hwmon/hwmon11/temp4_input 610
 # O limite de SEN4 e 91 C; a partida pede 15 C de folga.
 recusa sen4   "SEN4 a menos de 15 C do limite" sys/class/thermal/thermal_zone2/temp 77050 "0,0"
 
+# ─── 7. E3b: o mesmo, com um jogo no lugar da carga ─────────────────
+# Aqui a condicao se inverte: o jogo TEM de estar aberto, do comeco ao fim.
+# O roteiro nao liga carga nenhuma: grava um trecho em automatico, escreve o
+# manual no piso, e devolve. O jogo de mentira e uma linha no arquivo que o
+# ps de mentira imprime.
+echo "--- E3b: com um jogo"
+casob() {    # $1 = nome, $2 = temperamento -> arvore em $D, comando em B
+    nova "$1" "${2:-normal}"
+    B=(env ENSAIO_E3B_PRE=20 ENSAIO_E3B_CARGA=60 ENSAIO_E3B_DESCIDA=20 "$S" e3b "$D/e3b.tsv")
+}
+abre_jogo() {    # e espera o EC de mentira esquentar: pacote e SEN4 no patamar
+    local i
+    poe "$D/processos" GameThread
+    for ((i = 0; i < 50; i++)); do
+        [ "$(cat "$D/sys/class/thermal/thermal_zone2/temp" 2> /dev/null)" = 87050 ] && return 0
+        sleep 0.1
+    done
+    falha "o jogo de mentira nao esquentou a arvore"
+}
+tem_fases_b() {  # as tres fases no traco; sem isto as ausencias seriam vacuas
+    local f
+    for f in b:auto b:manual b:descida; do
+        cut -f3 "$D/e3b.tsv" 2> /dev/null | grep -qxF "$f" || { falha "$1: o traco nao tem a fase $f"; return 1; }
+    done
+}
+
+casob e3b-sem-jogo
+roda "$D" "${B[@]}"
+confere "E3b sem jogo aberto recusa comecar" "$?" 12 "0,0"
+
+casob e3b-maximo
+abre_jogo
+poe "$D/config.toml" "maximum_mode = true"
+roda "$D" "${B[@]}"
+confere "E3b com o modo maximo ligado recusa comecar" "$?" 12 "0,0"
+
+# Um sensor ja no limite em automatico: escrever o manual so mediria o aborto.
+casob e3b-ja-no-limite
+abre_jogo
+poe "$D/sys/class/hwmon/hwmon7/temp2_input" 85000
+roda "$D" "${B[@]}"
+confere "E3b com um sensor ja no limite em automatico recusa comecar" "$?" 12 "0,0"
+
+casob e3b-obedece
+abre_jogo
+roda "$D" "${B[@]}"
+confere "E3b completo termina com 0 e a ventoinha em automatico" "$?" 0 "0,0"
+if tem_fases_b "E3b completo"; then
+    awk -F'\t' '$3 == "b:auto" && $4 != "0,0" { r = 1 } END { exit r }' "$D/e3b.tsv" \
+        && ok "o trecho de referencia roda em automatico" \
+        || falha "o trecho de referencia escreveu na ventoinha"
+    awk -F'\t' '$3 == "b:manual" && $4 == "1,1" && $5 == "1,1" { n++ } END { exit !(n >= 10) }' "$D/e3b.tsv" \
+        && ok "o trecho manual roda no piso, 1%" \
+        || falha "o trecho manual nao rodou a 1%"
+    awk -F'\t' '$3 == "b:descida" && ($4 != "0,0" || $5 != "0,0") { r = 1 } END { exit r }' "$D/e3b.tsv" \
+        && ok "a descida roda em automatico" \
+        || falha "a descida rodou com a ventoinha fora do automatico"
+    awk -F'\t' 'NR > 1 && $3 != "partida" && $28 == 0 { r = 1 } END { exit r }' "$D/e3b.tsv" \
+        && ok "o jogo esteve aberto em todas as amostras" \
+        || falha "ha amostra sem jogo num ensaio que terminou"
+fi
+grep -q '^    o EC obedeceu ao manual' "$D/e3b.resumo.txt" \
+    && ok "o resumo diz que o EC obedeceu" || falha "o resumo nao diz 'obedeceu'"
+grep -q '^veredito: R2' "$D/e3b.resumo.txt" \
+    && ok "veredito R2" || falha "veredito errado: $(grep '^veredito' "$D/e3b.resumo.txt")"
+[ "$(carga_viva)" = 0 ] && ok "o E3b nao liga carga nenhuma" || falha "o E3b ligou carga"
+
+casob e3b-estoura estoura
+abre_jogo
+roda "$D" "${B[@]}"
+confere "com jogo e o limite estourando, o E3b sai com 10 e devolve a ventoinha" "$?" 10 "0,0"
+grep -q 'aborto: SEN4' "$D/e3b.resumo.txt" \
+    && ok "o resumo diz qual limite estourou, e quando" || falha "o resumo nao diz o limite"
+grep -q '^veredito: R3' "$D/e3b.resumo.txt" \
+    && ok "veredito R3" || falha "veredito errado: $(grep '^veredito' "$D/e3b.resumo.txt")"
+tem_fases_b "E3b abortado" && ok "a descida depois do aborto fica gravada"
+
+casob e3b-retoma retoma
+abre_jogo
+roda "$D" "${B[@]}"
+confere "com jogo e o EC passando por cima do manual, o E3b termina com 0" "$?" 0 "0,0"
+grep -q '^    o EC tomou a ventoinha de volta' "$D/e3b.resumo.txt" \
+    && ok "o resumo acusa a retomada" || falha "o resumo nao acusa a retomada"
+grep -q '^veredito: R1' "$D/e3b.resumo.txt" \
+    && ok "veredito R1" || falha "veredito errado: $(grep '^veredito' "$D/e3b.resumo.txt")"
+
+# O jogo fecha no meio: a medicao nao conta, e a ventoinha volta.
+casob e3b-jogo-fecha
+abre_jogo
+lanca "$D" "${B[@]}"
+if espera_fan "$D" "1,1" 100; then
+    poe "$D/processos" ""
+    wait "$PID"
+    confere "o jogo fecha no meio do manual: encerra com 11 e devolve a ventoinha" "$?" 11 "0,0"
+else
+    falha "jogo que fecha: o E3b nao chegou a escrever 1,1"
+    kill "$PID" 2> /dev/null
+fi
+
+casob e3b-kill9
+abre_jogo
+lanca "$D" "${B[@]}"
+if espera_fan "$D" "1,1" 100; then
+    kill -KILL "$PID"
+    wait "$PID" 2> /dev/null
+    espera_fan "$D" "0,0" 30 \
+        && ok "kill -9 no meio do manual, com jogo: o vigia devolve 0,0" \
+        || falha "kill -9 com jogo: fan_speed ficou em '$(fan "$D")'"
+else
+    falha "kill -9 com jogo: o E3b nao chegou a escrever 1,1"
+    kill "$PID" 2> /dev/null
+fi
+
 echo
 [ "$fail" -eq 0 ] && echo "PASSOU" || echo "FALHOU"
 exit "$fail"

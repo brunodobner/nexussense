@@ -8,6 +8,7 @@
 #
 # Uso:   tests/hardware/ensaio-termico.sh e2 [saida.tsv]
 #        tests/hardware/ensaio-termico.sh e3 [saida.tsv]
+#        tests/hardware/ensaio-termico.sh e3b [saida.tsv]
 #
 #   e2   o mapa de porcentagem para rotacao, em repouso. Antes dele, dois
 #        exercicios: o vigia (o roteiro leva kill -9 e outro processo devolve
@@ -20,6 +21,11 @@
 #        gravada depois de cada um. Um estagio so roda se o anterior nao
 #        abortou. A carga sao processos em laco, cada um debaixo de timeout:
 #        a fonte de calor morre sozinha no prazo, com ou sem roteiro.
+#
+#   e3b  o mesmo, com um jogo no lugar da carga: o jogo TEM de estar aberto,
+#        do comeco ao fim, e quem o abre e voce. Dois minutos em automatico,
+#        para a referencia; cinco com o manual no piso; dois de volta ao
+#        automatico. O roteiro nao liga carga nenhuma.
 #
 # O automatico nao tem uma rotacao de repouso: medido em 2026-10-10, ele vai
 # de 2200 a 3800 rpm com a maquina parada, conforme o modo maximo e o que ela
@@ -103,6 +109,11 @@ FOLGA_CARGA=${ENSAIO_FOLGA_CARGA:-15}    # segundos alem do estagio ate a carga 
 PARTIDA_PACOTE_E3=${ENSAIO_PARTIDA_PACOTE_E3:-60000}
 PARTIDA_FOLGA_SEN=${ENSAIO_PARTIDA_FOLGA_SEN:-15000}   # cada SEN* isto abaixo do limite
 
+# O E3b, tambem em amostras.
+E3B_PRE=${ENSAIO_E3B_PRE:-120}           # com jogo, em automatico: a referencia
+E3B_CARGA=${ENSAIO_E3B_CARGA:-300}       # com jogo, manual no piso
+E3B_DESCIDA=${ENSAIO_E3B_DESCIDA:-120}   # de volta ao automatico, o jogo ainda aberto
+
 FAN="$R/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"
 PERFIL="$R/sys/firmware/acpi/platform_profile"
 BAT="$R/sys/class/power_supply/BAT1"
@@ -113,6 +124,7 @@ RUN=; VIGIA_PID=; SAIDA=
 ULTIMO="0,0"          # o que este roteiro espera ler em fan_speed
 DEVOLVIDO=0; FALHOU_DEVOLVER=0
 REPOUSO=0             # 1 no E2: vale o limite de pacote mais baixo
+COM_JOGO=0            # 1 no E3b: o jogo tem de estar aberto, em vez de fechado
 N_PAC=0; MOTIVO=
 PERFIL0=; MAX0=; FIM=0
 REF1=; REF2=          # rotacao do automatico na partida: informa, nao julga
@@ -275,7 +287,11 @@ verifica() {  # julga a ultima amostra. 0, COD_LIMITE ou COD_CONDICAO; ver MOTIV
     if [ "$V_MAX" != "$MAX0" ]; then
         MOTIVO="o modo maximo mudou de '$MAX0' para '$V_MAX'"; return "$COD_CONDICAO"
     fi
-    if [ "$V_JOGO" != 0 ]; then
+    if [ "$COM_JOGO" = 1 ]; then
+        if [ "$V_JOGO" = 0 ]; then
+            MOTIVO="o jogo fechou (nenhum processo casando com $JOGOS)"; return "$COD_CONDICAO"
+        fi
+    elif [ "$V_JOGO" != 0 ]; then
         MOTIVO="jogo aberto ($V_JOGO processo(s) casando com $JOGOS)"; return "$COD_CONDICAO"
     fi
     if [ "$FIM" -gt 0 ] && [ "$EPOCHSECONDS" -ge "$FIM" ]; then
@@ -906,10 +922,165 @@ modo_e3() {
     exit 0
 }
 
+# -------------------------------------------------------------------- E3b
+
+tempo_ms() { awk -v n="$1" -v p="$PASSO" 'BEGIN { printf "%d", n * p * 1000 }'; }
+
+modo_e3b() {
+    local p=${ENSAIO_E3B_P:-$E3_P2} rc=0 rc2 i=0 nao=0 t0 t0ms dur_ms seg thr pct="?"
+    local a1=() a2=() auto1 auto2 r1s=() r2s=() ref1="?" ref2="?" cnt=0 retomou=0 resta=0
+    local fim=completo quando="" ec thr0 ch0 mhz=0 nm=0
+    local mp=0 me=0 mg=0 m2=0 m3=0 m4=0 m5=0 mr1=0 mr2=0
+    COM_JOGO=1; REPOUSO=0
+    SAIDA=${1:-${XDG_STATE_HOME:-$HOME/.local/state}/nexus-sense/ensaio-e3b-$(date +%Y%m%d-%H%M%S).tsv}
+    mkdir -p "$(dirname "$SAIDA")" || exit 1
+    # shellcheck disable=SC2059  # o cabecalho e o formato, de proposito
+    printf "$CABECALHO" > "$SAIDA"
+    RESUMO="${SAIDA%.tsv}.resumo.txt"
+
+    echo "E3b -- manual no piso com um jogo aberto. O JOGO E A CARGA."
+    echo "saida: $SAIDA"
+    amostra partida; registra
+    exige_alvos || exit "$COD_ALVO"
+    mostra_condicao
+    recusa() { echo "  RECUSA: $1"; nao=1; }
+    [ "$V_FAN" = "0,0" ] || recusa "fan_speed e '$V_FAN'; o ensaio so comeca em 0,0 (automatico)"
+    [ "$V_ACAD" = 1 ] || recusa "fora da tomada"
+    eh_num "$V_PCT" && [ "$V_PCT" -ge "$PARTIDA_CARGA" ] \
+        || recusa "bateria em $V_PCT%, abaixo de $PARTIDA_CARGA%"
+    [ "$V_JOGO" != 0 ] || recusa "nenhum jogo aberto (nenhum processo casando com $JOGOS)"
+    [ "$V_MAX" = true ] && recusa "modo maximo ligado; o ensaio e com ele desligado"
+    [ "$nao" = 0 ] || exit "$COD_RECUSA"
+    PERFIL0=$V_PERFIL; MAX0=$V_MAX
+    # Um limite ja estourado em automatico: escrever o manual so mediria o aborto.
+    verifica; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  RECUSA: ainda em automatico, $MOTIVO"; exit "$COD_RECUSA"
+    fi
+    echo "perfil $PERFIL0, modo maximo ${MAX0:-?}; com jogo ($V_JOGO processo(s))" > "$RESUMO"
+
+    prepara
+
+    # ---- a referencia: o automatico, com o jogo
+    dur_ms=$(tempo_ms "$E3B_PRE")
+    echo
+    echo "COM JOGO, EM AUTOMATICO -- $(( dur_ms / 1000 )) s"
+    t0ms=$(agora_ms)
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        amostra "b:auto"; registra
+        verifica; rc=$?
+        if [ "$rc" -eq "$COD_LIMITE" ]; then
+            MOTIVO="ainda em automatico, $MOTIVO: o limite estoura sem o manual, e o ensaio nao conta"
+            termina "$COD_CONDICAO"
+        fi
+        [ "$rc" -ne 0 ] && termina "$rc"
+        a1+=("$V_RPM1"); a2+=("$V_RPM2")
+    done
+    auto1=$(mediana "${a1[@]}"); auto2=$(mediana "${a2[@]}")
+    echo "com jogo, em automatico: $auto1 / $auto2 rpm; pacote $V_PAC, GPU pelo EC $V_ECGPU, SEN2-5 $V_SEN2 $V_SEN3 $V_SEN4 $V_SEN5" \
+        | tee -a "$RESUMO"
+
+    # ---- o manual no piso
+    dur_ms=$(tempo_ms "$E3B_CARGA")
+    echo
+    echo "COM JOGO, MANUAL A $p% -- ate $(( dur_ms / 1000 )) s"
+    if ! escreve "$p,$p"; then MOTIVO="a escrita de $p,$p foi recusada"; termina "$COD_CONDICAO"; fi
+    thr0=$V_THRMS; ch0=$V_CHARGE; t0=$EPOCHSECONDS; t0ms=$(agora_ms); rc=0
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        i=$(( i + 1 ))
+        amostra "b:manual"; registra
+        verifica; rc=$?
+        maior mp "$V_PAC"; maior me "$V_ECCPU"; maior mg "$V_ECGPU"
+        maior m2 "$V_SEN2"; maior m3 "$V_SEN3"; maior m4 "$V_SEN4"; maior m5 "$V_SEN5"
+        maior mr1 "$V_RPM1"; maior mr2 "$V_RPM2"
+        if eh_num "$V_MHZ"; then mhz=$(( mhz + V_MHZ )); nm=$(( nm + 1 )); fi
+        if [ "$rc" -ne 0 ]; then fim="aborto: $MOTIVO, aos $(( EPOCHSECONDS - t0 )) s"; break; fi
+        if [ $(( i % E3_ECO )) -eq 0 ]; then
+            echo "  +$i: pacote $V_PAC, GPU pelo EC $V_ECGPU, rotacao $V_RPM1 / $V_RPM2, SEN2-5 $V_SEN2 $V_SEN3 $V_SEN4 $V_SEN5"
+        fi
+        if [ "$retomou" = 1 ]; then
+            resta=$(( resta - 1 ))
+            [ "$resta" -le 0 ] && break
+        elif [ "$i" -le 8 ]; then
+            # A ventoinha assenta em um ou dois segundos (E2). A referencia
+            # e a mediana das amostras 3 a 8 depois da escrita.
+            if [ "$i" -ge 3 ]; then r1s+=("$V_RPM1"); r2s+=("$V_RPM2"); fi
+            if [ "$i" -eq 8 ]; then
+                ref1=$(mediana "${r1s[@]}"); ref2=$(mediana "${r2s[@]}")
+                echo "  no manual: $ref1 / $ref2 rpm (em automatico: $auto1 / $auto2)"
+                # Se nem caiu em relacao ao automatico, o EC nao obedeceu.
+                if [ $(( auto1 - ref1 )) -lt "$RETOMA_RPM" ] && [ $(( auto2 - ref2 )) -lt "$RETOMA_RPM" ]; then
+                    retomou=1; resta=$E3_EXTRA
+                    quando="desde a escrita: a rotacao ficou em $ref1 / $ref2 rpm, contra $auto1 / $auto2 em automatico"
+                    echo "  o EC tomou a ventoinha de volta $quando (fan_speed = $V_FAN)"
+                fi
+            fi
+        else
+            if [ $(( V_RPM1 - ref1 )) -gt "$RETOMA_RPM" ] || [ $(( V_RPM2 - ref2 )) -gt "$RETOMA_RPM" ]; then
+                cnt=$(( cnt + 1 ))
+            else
+                cnt=0
+            fi
+            if [ "$cnt" -ge "$RETOMA_N" ]; then
+                retomou=1; resta=$E3_EXTRA
+                quando="aos $(( EPOCHSECONDS - t0 )) s, com o pacote em $V_PAC e a rotacao em $V_RPM1 / $V_RPM2 rpm"
+                echo "  o EC tomou a ventoinha de volta $quando (fan_speed = $V_FAN)"
+            fi
+        fi
+    done
+    seg=$(( EPOCHSECONDS - t0 ))
+    [ "$retomou" = 1 ] && [ "$rc" -eq 0 ] && fim=retomada
+
+    # O jogo fechou, outra mao, bateria, prazo: a medicao nao conta.
+    [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
+
+    if [ "$retomou" = 1 ]; then ec="o EC tomou a ventoinha de volta $quando"
+    else ec="o EC obedeceu ao manual: rotacao de $ref1 / $ref2 a no maximo $mr1 / $mr2 rpm"; fi
+    if ! escreve "0,0"; then MOTIVO="a escrita de 0,0 foi recusada"; termina "$COD_CONDICAO"; fi
+
+    thr=NA
+    if eh_num "$thr0" && eh_num "$V_THRMS"; then
+        thr=$(( V_THRMS - thr0 ))
+        [ "$seg" -gt 0 ] && pct=$(awk -v t="$thr" -v s="$seg" 'BEGIN { printf "%.1f", t / 10 / s }')
+    fi
+    [ "$nm" -gt 0 ] && mhz=$(( mhz / nm ))
+    {
+        echo "com jogo, manual $p%: $seg s; fim: $fim"
+        echo "    $ec"
+        echo "    maximos: pacote $mp, CPU pelo EC $me, GPU pelo EC $mg, SEN2-5 $m2 $m3 $m4 $m5"
+        echo "    throttle $thr ms ($pct% do tempo); frequencia media $mhz MHz; charge_now de $ch0 a $V_CHARGE"
+    } | tee -a "$RESUMO"
+
+    # ---- de volta ao automatico, o jogo ainda aberto
+    dur_ms=$(tempo_ms "$E3B_DESCIDA")
+    t0ms=$(agora_ms)
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        amostra "b:descida"; registra
+        verifica; rc2=$?
+        N_PAC=0
+        # O limite que acabou de estourar ainda esta la, esfriando: nao e
+        # novidade. O jogo fechar aqui so encurta a descida.
+        [ "$rc2" -eq "$COD_CONDICAO" ] && break
+    done
+    echo "    de volta ao automatico: rotacao $V_RPM1 / $V_RPM2 rpm, pacote $V_PAC, SEN2-5 $V_SEN2 $V_SEN3 $V_SEN4 $V_SEN5" \
+        | tee -a "$RESUMO"
+
+    [ "$rc" -eq "$COD_LIMITE" ] && ABORTOU=1
+    RETOMOU_NO_ULTIMO=$retomou
+    veredito
+    echo "E3b terminou. Resumo em $RESUMO"
+    [ "$ABORTOU" = 1 ] && exit "$COD_LIMITE"
+    exit 0
+}
+
 case "${1:-}" in
     --vigia)  modo_vigia "$2" "$3" "$4" ;;
     _segura)  modo_segura ;;
     e2)       modo_e2 "${2:-}" ;;
     e3)       modo_e3 "${2:-}" ;;
-    *)        sed -n '2,48p' "$0"; exit 2 ;;
+    e3b)      modo_e3b "${2:-}" ;;
+    *)        sed -n '2,54p' "$0"; exit 2 ;;
 esac

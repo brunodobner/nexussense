@@ -120,14 +120,17 @@ FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 #   teto         de 50% para cima gira tudo igual
 #   gruda        obedece ao manual e nao larga: fan_speed volta a 0,0 e a
 #                rotacao fica onde o manual a deixou
-#   retoma       quente, passa por cima do manual: a rotacao sobe com
-#                fan_speed ainda dizendo o manual
+#   retoma       quente, passa por cima do manual: a rotacao vai para a
+#                curva do automatico com fan_speed ainda dizendo o manual
 #   estoura      manual fraco com carga: a zona SEN4 sobe ate passar do limite
 #   auto_parado  o automatico nao sobe com a temperatura
 # A carga de mentira e bin/carga-falsa: enquanto existir o arquivo
 # carga_ligada, o pacote sobe ate 92 C; sem ele, desce ate 45.
+# Um "jogo" (uma linha no arquivo processos) esquenta igual, e esquenta
+# tambem a zona SEN4, que e a do lado da GPU: ate 87 C com a ventoinha alta,
+# ate 89 com ela baixa -- e sem parar de subir, no temperamento estoura.
 ec_falso() {
-    local f h hc z v c g x fs= manual=0 r1 r2 a1 a2 pac=45000 s4=46050
+    local f h hc z v c g x fs= manual=0 r1 r2 a1 a2 pac=45000 s4=46050 jogo carga alvo
     local u1= u2= up=45000 us=46050
     f=$(FAN_DE "$1"); h="$1/sys/class/hwmon/hwmon7"
     hc="$1/sys/class/hwmon/hwmon11"; z="$1/sys/class/thermal/thermal_zone2"
@@ -138,7 +141,10 @@ ec_falso() {
         if [ -z "$fs" ]; then sleep 0.02; continue; fi
         c=${fs%,*}; g=${fs#*,}
 
-        if [ -e "$1/carga_ligada" ]; then
+        jogo=0; carga=0
+        [ -s "$1/processos" ] && jogo=1
+        [ -e "$1/carga_ligada" ] && carga=1
+        if [ "$jogo" = 1 ] || [ "$carga" = 1 ]; then
             [ "$pac" -lt 92000 ] && pac=$((pac + 4000))
         else
             [ "$pac" -gt 45000 ] && pac=$((pac - 4000))
@@ -160,13 +166,25 @@ ec_falso() {
             r1=$((600 + x * 50))
             x=$g; [ "$2" = teto ] && [ "$x" -ge 50 ] && x=95
             r2=$((500 + x * 45))
-            [ "$2" = retoma ] && [ "$pac" -ge 88000 ] && { r1=4400; r2=4000; }
+            # Quente, o EC larga o manual e volta para a curva dele.
+            [ "$2" = retoma ] && [ "$pac" -ge 88000 ] && { r1=$a1; r2=$a2; }
         fi
 
-        if [ "$2" = estoura ] && [ -e "$1/carga_ligada" ] && [ "$fs" != "0,0" ] && [ "$r1" -lt 2600 ]; then
-            s4=$((s4 + 3000))
-        elif [ "$s4" -gt 46050 ]; then
-            s4=$((s4 - 3000)); [ "$s4" -lt 46050 ] && s4=46050
+        # SEN4 anda 3 C por volta ate o alvo. "Fraca" e a ventoinha em manual
+        # abaixo de 2600 rpm.
+        alvo=46050
+        x=0; [ "$fs" != "0,0" ] && [ "$r1" -lt 2600 ] && x=1
+        if [ "$jogo" = 1 ]; then
+            alvo=87050
+            [ "$x" = 1 ] && alvo=89050
+        fi
+        if [ "$2" = estoura ] && [ "$x" = 1 ] && { [ "$jogo" = 1 ] || [ "$carga" = 1 ]; }; then
+            alvo=120050
+        fi
+        if [ "$s4" -lt "$alvo" ]; then
+            s4=$((s4 + 3000)); [ "$s4" -gt "$alvo" ] && s4=$alvo
+        elif [ "$s4" -gt "$alvo" ]; then
+            s4=$((s4 - 3000)); [ "$s4" -lt "$alvo" ] && s4=$alvo
         fi
 
         # So escreve o que mudou: parado, o EC de mentira nao gasta um fork,
