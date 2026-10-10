@@ -4,7 +4,9 @@ O que pode ser cortado do driver, o que **não** pode, e como provar a
 diferença antes de apagar qualquer linha.
 
 **Escrito em:** 2026-09-11. **Estado:** camadas A, B e D executadas e
-verificadas na máquina. O driver saiu de 4734 para 2912 linhas.
+verificadas na máquina. O driver saiu de 4734 para 2912 linhas. Em 2026-10-10
+saiu também o caminho WMI do botão N, por um quinto tipo de prova — ver a seção
+própria, depois da camada D.
 
 A decisão que governa este documento é a
 [seção 6 de decisoes.md](decisoes.md): podar a tabela de modelos é seguro,
@@ -59,9 +61,12 @@ python3 -m pytest -q
 ./tests/run-all.sh
 ```
 
-**O botão N** não aparece em nenhum comando acima e precisa de um toque humano:
-ele passa por `sparse_keymap` e pelo tratador de eventos WMI, que nenhuma das
-camadas deveria tocar — mas "não deveria" é exatamente o que se confere.
+**O botão N** não aparece em nenhum comando acima e precisa de um toque humano.
+Este parágrafo dizia que ele passa por `sparse_keymap` e pelo tratador de
+eventos WMI. **Não passa**, medido em 2026-10-10: ele chega como tecla pelo
+`atkbd`, o hwdb a traduz em `prog1` e o atalho do KDE abre o aplicativo. O
+toque continua no portão, mas o que ele confere é a instalação — hwdb, atalho,
+`.desktop` — e não o driver.
 
 ---
 
@@ -238,7 +243,7 @@ cada corte, não depois.
 | `hwmon` / `FAN_SPEED_READ` | `/sys/devices/platform/acer-wmi/hwmon/` existe |
 | grupo sysfs `nitro_sense` | os cinco atributos graváveis + `version` |
 | `acer_predator_state_load/save/update/restore` | chamadas pelo ramo `NITRO_SENSE`; log de boot |
-| tratador de eventos WMI + `sparse_keymap` | o botão N abre o app |
+| tratador de eventos WMI + `sparse_keymap` | tirar o cabo produz duas entradas em `acer_wmi_notify` (funções `0x9` e `0x8`), vistas por kprobe em 2026-10-10. **Não é o botão N** quem o prova: ele não passa por aqui |
 | `SET_FUNCTION_MODE` | bit 5 do bitmask, ligado por `WMID_GUID3` |
 | os dois mutexes WMI | armadilha 24; a correção da v1.1.1/v1.1.2 |
 
@@ -254,7 +259,7 @@ mantidas ficou diferente do que era.
 |---|---|
 | `ec_raw_mode` | **removido.** Nasce `false` e ninguém o passa; o caminho que ele abria (`acer_wmi_enable_ec_raw`) nunca rodou. Sai também das duas condições de agendamento do trabalho de rfkill, onde era o primeiro termo de um `\|\|` cujo segundo termo já era falso. |
 | `force_caps` | **fica, mascarado.** Continua sendo a válvula de escape se o bitmask mudar num firmware novo. Mas depois das camadas A e B ele podia ligar bits sem código atrás, e o bitmask impresso no carregamento — que é o instrumento deste documento — anunciaria algo inexistente. Agora é mascarado por `ACER_CAP_IMPLEMENTED` e avisa o que ignorou. |
-| `cycle_gaming_thermal_profile` | **fica.** Não é inerte: governa se o botão N percorre os perfis ou alterna. Botão em uso. |
+| `cycle_gaming_thermal_profile` | **ficou em 2026-09-12, saiu em 2026-10-10.** A razão de ficar era "governa o botão N, e o botão está em uso". O botão está em uso — como tecla. O evento WMI que este parâmetro governava nunca chegou ao driver. Ver a seção seguinte. |
 | `THREEG` | **removido.** O descritor AA desta máquina não a anuncia (bitmap `0x801`, sem o bit 6) e não há rádio 3G no aparelho. Sai o rfkill `acer-threeg`, o parâmetro, o mapeamento cap→device e a capability de `ACER_CAP_IMPLEMENTED` — o `#define` fica, como os outros bits sem código, para ler bitmask de outra máquina. |
 | o trabalho periódico de `rfkill` | **removido.** `acer_rfkill_update()` e o `delayed_work` nunca eram agendados aqui, porque `ACERWMID_EVENT_GUID` existe. Com o `ec_raw_mode` fora, a condição virou só `!wmi_has_guid(...)` — falsa sempre. |
 | os `pr_info` | saíram do escopo da poda e viraram item próprio; feito na v1.1.6. |
@@ -289,7 +294,64 @@ outro nome.
 **segura**, e o driver fica calado. Não havia fenômeno. A armadilha foi
 retratada e hoje registra só o erro de método.
 
----|---|---|
+---
+
+### O caminho WMI do botão N — **feito em 2026-10-10**
+
+**A prova:** de um tipo que as camadas acima não usaram — **o evento medido em
+runtime, com controle positivo**. Não é fato de firmware lido em
+`/sys/bus/wmi` (o GUID de evento existe e funciona) nem prova por construção
+(o ramo era alcançável: bastava o evento `0x7` chegar). É a contagem de quantas
+vezes ele chegou.
+
+| | resultado |
+|---|---|
+| sonda, pr_debug desligado, 3 leituras de `usb_charging` | 0 linhas |
+| sonda, pr_debug ligado, 3 leituras | 3 linhas; o ponto `botao N: key_num` com `p` |
+| 8 apertos na tomada (49%, `balanced-performance`) | 0 linhas, 0 entradas no kprobe |
+| tirar o cabo | 2 entradas no kprobe: funções `0x9` e `0x8` |
+| 8 apertos na bateria (49–48%, `balanced`) | 0 linhas, 0 entradas |
+
+Cada aperto conferido pelo journal do usuário. A regra estava escrita antes da
+medição, em [plano-melhorias.md](plano-melhorias.md): zero nas duas condições,
+e o código sai.
+
+Mais fraca que a prova da camada A num ponto, e isso fica dito: ela vale para
+este firmware (V1.52). A camada A lê a ausência de um GUID; esta lê a ausência
+de um evento que o firmware poderia passar a mandar.
+
+**O que saiu** — previa-se "o parâmetro e o ramo do tratador"; saíram **168
+linhas**, e pela terceira vez a conta errou por baixo e para o mesmo lado:
+
+| o que saiu | por quê |
+|---|---|
+| o ramo `WMID_GAMING_TURBO_KEY_EVENT` de `acer_wmi_notify` | o evento não chega |
+| `acer_thermal_profile_change`, `acer_thermal_profile_cycle` | só o ramo as chamava |
+| o parâmetro `cycle_gaming_thermal_profile` | só `_cycle` o lia |
+| `platform_profile_support` | só o aviso ao núcleo a consultava; escrita e nunca lida, o Clang 23 a acusa com `W=1` |
+| `last_non_turbo_profile`, `acer_predator_v4_max_perf` | só `_cycle` as lia; sobravam escritas no `profile_set` e no probe do perfil |
+| a linha `Max performance profile: …` do carregamento | imprimia as duas |
+
+`platform_profile_device` deixou de ser global e virou local do registro. O
+número do evento ficou no `enum`.
+
+**O portão, medido depois:** bitmask `0x00002c26` idêntico, `W=1` limpo sob
+Clang 23 e GCC 16, DKMS para os dois kernels, recarga, os quatro perfis, os
+seis atributos, hwmon, rfkill, estado sobrevivendo à recarga, estresse de
+leitores sem erro, 387 Python e 21/0/2 shell. E o toque humano: o botão N abriu
+a janela com o módulo novo carregado.
+
+**O risco residual, dito por escrito:** um firmware novo que passe a mandar o
+evento `0x7`. Sem ramo, ele cai no `default` do tratador e escreve `Unknown
+function number - 7 - <tecla>` no journal a cada aperto — aviso, não debug. O
+dano de não tratá-lo é zero: o botão segue abrindo o aplicativo pela tecla.
+
+---
+
+### Rascunho da camada D, de antes da decisão
+
+| candidato | o argumento de tirar | o argumento de ficar |
+|---|---|---|
 | `THREEG` (rfkill, parâmetro, capability) | capability apagada, nenhum rfkill 3G na máquina | compartilha `acer_rfkill_init/exit` com wireless e bluetooth — errar aqui é o erro original de novo |
 | `force_caps` | parâmetro de depuração, ninguém passa | é a válvula de escape se o bitmask mudar num firmware novo |
 | `ec_raw_mode` | acesso EC cru, sem uso neste modelo | custo de manter é quase zero; o `acer_debug` que o acompanhava já caiu por dependência na camada A |
@@ -319,6 +381,7 @@ tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 [x] Camada B   1077 linhas   prova de construção     2026-09-12
 [x] Camada D    110 linhas   ec_raw_mode, THREEG e o poll de rfkill
                              fora; force_caps mascarado e honesto
+[x] Botao N     168 linhas   prova por evento medido     2026-10-10
 ```
 
 | | linhas |
@@ -327,12 +390,16 @@ tem prova mais forte: se algo quebrar, o diagnóstico é mais barato.
 | depois de A | 4093 |
 | depois de B | 3016 |
 | depois de D | **2912** |
+| antes da 4e, com os consertos das etapas 2 e 2b | 3032 |
+| depois da 4e (botão N) | **2864** |
 
-*(O fonte tem 3022 linhas hoje: o commit do log do kernel, posterior a esta
-camada, acrescentou um comentário de seis linhas explicando o botão N.)*
+*(Entre a camada D e a 4e o fonte cresceu: o commit do log do kernel
+acrescentou um comentário explicando o botão N, e as etapas 2 e 2b trouxeram
+travas, validação do arquivo de estado e rótulos do hwmon.)*
 
-**As duas estimativas erraram por baixo, e para o mesmo lado:** A previa ~290 e
-saíram 641; B previa ~765 e saíram 1077. Em ambos os casos a conta somou o
+**As estimativas erraram por baixo, e para o mesmo lado:** A previa ~290 e
+saíram 641; B previa ~765 e saíram 1077; a do botão N previa um parâmetro e um
+ramo e levou 168 linhas. Em todos os casos a conta somou o
 tamanho dos blocos e esqueceu o que eles arrastam — structs, campos, includes,
 funções que ficam sem chamador. **Numa poda, a estimativa é piso, não teto**, e
 só o compilador sabe o número de verdade.

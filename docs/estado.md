@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4d fechada: v1.2.6, as sobras do instalador; 4e e 4f abertas)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4e: v1.2.7, o caminho WMI do botão N saiu do driver; falta a partida a frio, que se confere ao abrir a 4f)
 
 ---
 
@@ -12,13 +12,13 @@ diz qual é a vez de qual, e o que ficou pendente.
 | | |
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
-| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
-| versão | **v1.2.6** — `master` em github.com/brunodobner/nexussense (privado) |
+| driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 1 parâmetro, 2864 linhas (eram 5167) |
+| versão | **v1.2.7** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 23 testes: 21 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
 | suíte Python | 387 passam (`python3 -m pytest -q`), incluindo DBus privado |
-| build | `W=1` limpo nos dois kernels instalados, no registro da etapa 2 — um é Clang 23 e o outro GCC 16, ver a 4d |
+| build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
 ---
@@ -57,7 +57,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4b -- GPU       v1.2.4: a janela deixa a dGPU dormir; temperatura fica no nvidia-smi
 [x] Melhorias, etapa 4c -- bandeja   v1.2.5: o item volta com o watcher; sem ele, ou sem barramento, cai na reserva
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
-[ ] Melhorias, etapa 4e -- botao N   o evento WMI chega? medir na bateria antes de podar
+[x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega; o caminho saiu, bitmask identico
 [ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
 ```
 
@@ -1736,6 +1736,325 @@ desenho.
 - quem mexe em shell conta com dois pushes do ramo: o shellcheck só roda no CI;
 - `uninstall` e `comprehensive_cleanup` continuam fora desta máquina. O que
   for delas se executa em `test-desinstalacao-namespace.sh`.
+
+---
+
+## Melhorias de 2026-10, etapa 4e — o botão N, e onde a 4f começa
+
+A sub-etapa 4e da seção 6 de [plano-melhorias.md](plano-melhorias.md): o
+evento WMI do botão N chega ao driver? Ramo `melhorias/4e-botao-n`, em
+2026-10-10, **v1.2.6 → v1.2.7.** Não chega, e o caminho saiu: 168 linhas do
+driver, bitmask idêntico. **Falta a partida a frio**, que se confere ao abrir a
+4f — só então a sub-etapa se dá por fechada.
+
+O baseline capturado antes da primeira edição conferiu com o esperado: 387
+passam na suíte Python, sem xfail; shell 21 passam e 2 pulam, idêntico sob
+`LC_ALL=C`; `W=1` limpo em `6.18.55-1-cachyos-lts` (GCC 16.2.1) e em
+`7.2.9-1-cachyos` (Clang 23.1.1); bitmask `0x00002c26`; `srcversion` carregado
+`F9236711C6E76401FD38B7A`, igual ao do build de `master`.
+
+### A medição
+
+Um `pkexec` só, de 07:45:26 a 07:46:25, com marcos em `/dev/kmsg` a cada
+aperto e a cada mudança de cabo, carga ou perfil. Dois instrumentos: o
+`pr_debug` do driver, que é o da regra, e um kprobe na entrada de
+`acer_wmi_notify`, acrescentado nesta sessão — o porquê está na armadilha 35.
+
+```
+dynamic debug achado      18 pontos do nexus_sense, 0 com p
+sonda, desligado          3 leituras de usb_charging -> 0 linhas
+sonda, ligado             3 leituras -> 3 linhas; o ponto "botao N: key_num"
+                          aparece no controle com =p
+kprobe                    armado em acer_wmi_notify, em instancia propria
+
+8 apertos na tomada       07:45:39 a 07:45:44   cabo=1  49%  balanced-performance
+                          "botao N: key_num" 0     entradas no tratador 0
+cabo fora                 07:45:51              2 entradas: ev=0x9 e ev=0x8
+8 apertos na bateria      07:45:59 a 07:46:15   cabo=0  49-48%  balanced
+                          "botao N: key_num" 0     entradas no tratador 0 novas
+
+Unknown function number   0        Unknown key number   0        device state  0
+dynamic debug devolvido   0 pontos com p, relido no mesmo comando; kprobe e
+                          instancia removidos
+```
+
+Cada aperto conferido pelo journal do usuário: dezesseis linhas `Started Nexus
+Sense - Controle do laptop` na janela da medição, cada uma classificada pelo
+cabo no instante em que apareceu. Das 190 linhas do kernel entre os marcos, 155
+são do driver e todas são as três leituras de sondagem — a janela do aplicativo
+estava aberta e lendo.
+
+**O cabo é o controle positivo.** As duas entradas chegam 4 ms uma da outra,
+no segundo em que `ACAD/online` vira 0: funções `0x9` (`WMID_BATTERY_BOOST_EVENT`)
+e `0x8` (`WMID_AC_EVENT`), os dois ramos mudos do tratador. O tratador recebe
+eventos e o instrumento os vê; os zeros dos apertos querem dizer que o botão
+não manda nenhum.
+
+**Conferido depois, sem root:** três leituras de `usb_charging` às 07:47:16 e
+zero linhas novas no `journalctl -k`. O `pr_debug` voltou a desligado.
+
+**O que veio de quem.** Duas trocas de perfil na rodada, as duas do agente, com
+linha no journal dele e o `config.toml` gravado no mesmo instante: `balanced`
+às 07:45:53,43, ao sair o cabo, e `balanced-performance` às 07:46:35,62, ao
+voltar. Nenhuma troca sem dono.
+
+**Os apertos foram mais rápidos que o combinado, e a janela foi fechada.** Na
+tomada, 0,67 a 0,88 s entre um e outro, contra os ~3 s pedidos; na bateria,
+1,7 a 3,7 s. O usuário perguntou se precisava refazer. Não precisou: os
+dezesseis estão no journal; pressa poderia fundir eventos, não sumir com todos
+— e o primeiro da série veio depois de horas sem aperto nenhum; e fechar a
+janela não muda perfil.
+
+### A regra, e o que ela mandou
+
+Escrita antes, no plano: zero eventos nas duas condições, e
+`cycle_gaming_thermal_profile` e o ramo do tratador saem. Zero nas duas.
+
+| commit | o quê | teste que falhou primeiro |
+|---|---|---|
+| `2fcc2a6` | sai o ramo do evento `0x7`, `acer_thermal_profile_change`, `acer_thermal_profile_cycle` e o parâmetro; por dependência `platform_profile_support`, e `platform_profile_device` vira local do registro | `test-correcoes.sh` reescrito: seis falhas — o parâmetro, as duas funções, a bandeira, o ramo, e a chamada ao núcleo do `platform_profile` |
+| `8d2f413` | saem `last_non_turbo_profile` e `acer_predator_v4_max_perf`, que só o botão N lia, e a linha de log que as imprimia | duas falhas, uma por variável |
+| `666622f` | versão nos três lugares, antes do portão | — |
+
+`W=1` limpo nos dois kernels depois de cada estágio, numa cópia fora do
+repositório. **3032 → 2864 linhas.** `srcversion` novo:
+`C68C01808749B047940186D`.
+
+O que fica no tratador: as teclas de função (`WMID_HOTKEY_EVENT`), o
+acelerômetro, os três ramos mudos e o aviso de função desconhecida. O número
+`0x7` ficou no `enum`. Um firmware que passe a mandá-lo escreve `Unknown
+function number - 7` no journal, sem ninguém ligar debug.
+
+O teste novo também reprova qualquer chamada a `platform_profile_notify`: o
+único que avisava o núcleo era o botão N, e a ordem de travas desse aviso
+(armadilha 24) nunca teve prova de hardware. Quem voltar a avisar prova de
+novo.
+
+### "Mas o botão N abre a janela"
+
+Foi o que o usuário disse ao ver a poda começar, e a dúvida era dos documentos:
+`poda-subsistemas.md` punha "o botão N abre o app" como a prova de vida do
+tratador de eventos. São dois caminhos, e só um existe nesta máquina:
+
+```
+fica   atkbd (/dev/input/event3) -> hwdb f5=prog1 -> atalho do KDE "Launch (1)"
+       -> nexus-sense.desktop                           abre a janela
+saiu   evento WMI 0x7 -> acer_wmi_notify -> trocaria o perfil dentro do kernel
+                                                        nunca rodou
+```
+
+Os três elos do primeiro foram lidos na hora. E a medição já dizia: a janela
+abriu dezesseis vezes com zero entradas no tratador.
+
+### O portão
+
+Em 2026-10-10, de 08:11:35 a 08:12:50, na tomada, bateria em 76%. Um `pkexec`
+para a parte de root; o resto como o usuário.
+
+```
+condicao        medida depois da senha: tomada, 76%, balanced-performance
+agente/bandeja  parados pelo systemd do usuario antes da recarga, nenhum
+                processo de pe; religados por trap: codigo 0
+DKMS            install_drivers: installed nos dois kernels; fonte encenado
+                identico ao repositorio
+srcversion      C68C01808749B047940186D no modulo instalado para cada kernel
+                e no CARREGADO (antes: F9236711C6E76401FD38B7A)
+bitmask         0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+                PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE] -- identico
+parametros      so force_caps
+carga           14 linhas; "Max performance profile" nao aparece mais;
+                "Thermal states loaded" e "restored successfully"; zero aviso
+                ou erro do driver
+estado          sobrevive a recarga: balanced-performance, ventoinha 0,0, e os
+                outros quatro atributos iguais
+perfis          low-power quiet balanced balanced-performance
+atributos       os cinco 664 root:nexus_sense; version 444 root:root; profile
+                664 root:nexus_sense; gid 948 antes e depois
+hwmon           presente: CPU, GPU / CPU, GPU, External 2
+rfkill          os dois presentes; bluetooth bloqueia (1) e desbloqueia (0),
+                achado pelo nome na hora; wireless intocado
+aplicativo      install_nexus_sense: pacote identico ao fonte, --version 1.2.7
+                nos dois lancadores; NeedDaemonReload no nas duas units;
+                journal "agente no ar" e "bandeja: sni"
+botao N         hwdb com f5=prog1; autostart no lugar
+escrita         os quatro perfis escritos sem root e lidos de volta; o de antes
+                devolvido; ventoinha 0,0
+estresse        16 leitores x 200 leituras: zero "Failed to get profile"
+suites          387 Python; shell 21 passam, 2 pulam, identica sob LC_ALL=C
+
+                65 OK, 0 FALHA  (42 na parte de root, 23 sem root)
+```
+
+A escrita dos quatro perfis entrou porque a poda mexeu na saída do
+`profile_set`: ele devolve direto o resultado da chamada WMI.
+
+**`install_drivers` foi ao hardware pela primeira vez com o critério da 4d** —
+`build_deps_missing` respondeu que nada faltava e o passo seguinte foi a
+conferência dos headers, nos dois kernels. `install_build_deps` continua sem
+hardware: o `pacman` não foi chamado.
+
+**O CI**, no primeiro push do ramo (`666622f`): pytest e suíte shell, shellcheck
+e o módulo contra o kernel do Arch, os três verdes. O shellcheck não pediu
+segundo push.
+
+**O gesto humano**, com o módulo podado carregado: um aperto no botão N às
+08:17:56, na tomada, a 80%. O journal do usuário registrou a abertura, o
+usuário confirmou que a janela abriu, e o kernel ficou calado — zero aviso do
+driver, zero `Unknown function number`. Esta última contagem é a medição de
+novo, agora sem debug: se o evento `0x7` chegasse, o módulo novo o acusaria.
+
+### O caminho de abaixo de 40%: não deu
+
+A condição existia quando a sessão abriu e deixou de existir antes de o cabo
+sair:
+
+```
+07:33      cabo ligado, 31%, carregando, balanced-performance em vigor
+07:36:20   35%   observador sem root no ar (cabo, carga, perfil, guardado)
+07:39:06   40%   -- o roteiro da medicao ainda estava sendo escrito
+07:45:52   49%   cabo fora; o agente vai a balanced e guarda balanced-performance
+07:46:35   48%   cabo de volta; o firmware aceita na primeira escrita
+```
+
+De 35% a 49% em 9 min 15 s. O pedido para tirar o cabo foi ao chat aos 35%, no
+meio de um turno longo, e não foi visto a tempo. O que se viu de ponta a ponta
+foi o caminho **normal**: guardar ao sair, devolver ao voltar, o `config.toml`
+gravado no mesmo instante da troca. O ramo "recusado, fica pendente" segue sem
+hardware.
+
+Uma linha a favor da armadilha 27, de passagem: às 07:33 a máquina estava a
+31% no cabo com `balanced-performance` em vigor. O firmware não derruba perfil
+já em vigor.
+
+### O que a execução refutou
+
+1. **"O botão N dispara `WMID_GAMING_TURBO_KEY_EVENT` e percorre os perfis"** —
+   a seção 19 de `decisoes.md` e o comentário no tratador. Zero em dezesseis,
+   nas duas condições, com o caminho de eventos provado vivo na mesma rodada.
+2. **"O tratador de eventos está vivo porque o botão N abre o app"** — a camada
+   C de `poda-subsistemas.md`. O tratador está vivo; quem o prova é o cabo. O
+   botão não passa por ele.
+3. **"`cycle_gaming_thermal_profile` fica: botão em uso"** — a camada D. O botão
+   está em uso como tecla. O parâmetro governava um evento que não vem.
+4. **"O terceiro ensaio fecha a questão"** — este arquivo, na seção da etapa 2.
+   Ele deixava três leituras para o mesmo silêncio; o `pr_debug` não separa "o
+   evento não vem" de "o ramo é mudo" nem de "o tratador é surdo". Armadilha 35.
+5. **"Saem o parâmetro e o ramo do tratador"** — o plano. Saíram 168 linhas.
+   Terceira estimativa de poda que erra por baixo.
+6. **"A suíte inteira antes de cada commit, igual ao baseline"** — numa
+   sub-etapa de driver não fica igual: entre o primeiro commit e o portão,
+   `test-install-drivers.sh` reprova com `fonte em /usr/src difere do
+   repositório`. É o teste fazendo o que promete. Foram 20 passam, 1 falha e 2
+   pulam nos três commits, e 21 e 2 depois do portão.
+7. **"Dezesseis linhas do driver no boot"** — a seção da etapa 2. A partir do
+   próximo boot são quinze.
+
+### Cinco coisas que só apareceram executando
+
+1. **Uma condição com prazo se agarra primeiro.** A janela de abaixo de 40%
+   durou seis minutos depois de notada. O observador sem root subiu em três;
+   o pedido de gesto é que chegou tarde. Numa próxima: observador e pedido
+   antes de ler o resto.
+2. **Cada commit de driver tem de sair limpo sozinho.** Tirar só o ramo e as
+   duas funções deixaria `platform_profile_support` escrita e nunca lida — o
+   aviso do Clang 23 que a etapa 2 consertou. Saiu no mesmo commit.
+3. **O marco de `/dev/kmsg` leva prioridade explícita** quando vai ser
+   procurado num fluxo filtrado por prioridade, e o roteiro cobra que ele
+   esteja lá. O portão cobrou: uma vez no journal do kernel, uma vez no fluxo
+   de avisos.
+4. **Uma tabela sem cabeçalho em `poda-subsistemas.md`**, sobra do rascunho da
+   camada D, estava no ponto onde a seção nova entrou. Ganhou título e
+   cabeçalho.
+5. **Um arquivo apareceu modificado no `git status` durante a suíte e sumiu.**
+   Visto uma vez, com a suíte shell rodando dentro do portão. Algum teste mexe
+   na árvore e desfaz. Não apurado.
+
+### Como refazer (os roteiros viviam no scratchpad, que é tmpfs)
+
+A medição, como root, num comando só:
+
+1. guardar quais pontos do `nexus_sense` já têm `p` em
+   `/sys/kernel/debug/dynamic_debug/control`; `trap` que devolve exatamente
+   isso e relê;
+2. marco, três leituras de `usb_charging`, contar: zero com o debug desligado;
+   ligar (`module nexus_sense +p`), marco, três leituras, contar: três;
+3. armar o kprobe da armadilha 35;
+4. laço de 0,3 s: a cada mudança de `ACAD/online`, carga, estado ou perfil, um
+   marco com o mtime do `config.toml`; a cada linha nova `Started Nexus Sense -
+   Controle do laptop` em `journalctl _UID=<uid> --since @<início>`, um marco
+   com a condição e a contagem do kprobe; fim 10 s depois de oito em cada
+   condição, ou por tempo limite;
+5. contar depois do marco de início: `botao N: key_num` (hoje, com o ramo fora,
+   a linha a procurar é `Unknown function number`), `Unknown key number`,
+   `device state:`, e ler o trace.
+
+O portão: uma parte de root que mede a condição, para as duas units pelo
+systemd do usuário (`runuser` com `XDG_RUNTIME_DIR`), roda `install_drivers` e
+`install_nexus_sense` com a entrada em `/dev/null`, confere e religa por
+`trap`; e uma parte sem root com as escritas, o estresse e as suítes. O
+`srcversion` esperado sai de um build `W=1` feito antes, numa cópia.
+
+### Visto e não consertado
+
+- **O caminho de abaixo de 40% continua sem ponta a ponta.** Ver acima.
+- **A carga caiu de 54% para 31% entre 06:38 e 07:33** e o agente não registrou
+  troca de fonte nesse intervalo. Na etapa 2 ela já tinha ido de 60% a 43% com
+  o cabo ligado. Perguntado ao usuário nesta sessão; sem resposta até o
+  fechamento. Não apurado.
+- **O ramo das teclas de função do tratador** (`WMID_HOTKEY_EVENT`) nunca foi
+  exercitado: zero linhas `device state:`. A tecla que o dispararia é a de modo
+  avião, e ela derruba a sessão (armadilha 25).
+- **Os eventos `0x9` e `0x8` chegam ao tirar o cabo e o driver os ignora.** O
+  agente descobre a troca de fonte sondando `ACAD/online` a cada 2 s. Não é
+  defeito; é um canal que existe e ninguém usa.
+- **Um comentário órfão no driver**: `Switch series keyboard dock status`, em
+  cima de `acer_rfkill_set`. Sobra da camada B.
+- **`install_build_deps` continua sem hardware.**
+- **O arquivo que aparece modificado durante a suíte.** Item 5 acima.
+
+### A partida a frio, que fecha a sub-etapa
+
+**A conferir no começo da sessão seguinte.** O esperado:
+
+```
+capability bitmask: 0x00002c26, os seis nomes
+srcversion  C68C01808749B047940186D
+parametros  so force_caps
+linhas      quinze do driver no boot: uma a menos que antes, a de
+            "Max performance profile"; uma delas e "module verification
+            failed", que nao e defeito
+perfis      low-power quiet balanced balanced-performance
+estado      "Thermal states saved successfully" no desligamento e "Thermal
+            states loaded" na partida; nenhum "Invalid" nem "Incomplete"
+atributos   os cinco 664 root:nexus_sense; version 444 root:root
+hwmon       CPU, GPU, External 2 / ventoinhas CPU, GPU
+rfkill      acer-wireless, acer-bluetooth
+erro WMI    zero "Failed to get profile"; zero "Unknown function number"
+agente      ativo; bandeja subindo sozinha, "bandeja: sni"
+botao N     hwdb com f5=prog1, autostart no lugar, e um aperto abre a janela
+```
+
+### Onde a 4f começa
+
+Numa **sessão nova**. Sub-etapa 4f de [plano-melhorias.md](plano-melhorias.md):
+a rede de segurança térmica — brainstorm e plano próprio, não código.
+
+**Antes dela, a partida a frio da 4e**, pela lista acima. Se algo divergir, a
+4e reabre e a 4f espera.
+
+**Ponto de partida:** `master` em v1.2.7, com o CI verde. O baseline esperado é
+387 passam na suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem
+root e sob `LC_ALL=C`.
+
+**O que vale para ela**, e apareceu nesta:
+
+- condição com prazo — carga, temperatura — se agarra antes de qualquer
+  leitura longa: observador sem root no ar e pedido de gesto no chat, primeiro;
+- silêncio só vale com controle positivo pelo mesmo caminho (armadilha 35);
+- a 4f põe a máquina quente de propósito: o limite de aborto se escreve antes
+  de medir, e a temperatura se lê do hwmon achado pelo nome (armadilha 19);
+- a carga desta máquina já caiu com o cabo ligado, duas vezes registradas.
+  Antes de um ensaio longo sob carga, medir a carga no começo e no fim.
 
 ---
 
