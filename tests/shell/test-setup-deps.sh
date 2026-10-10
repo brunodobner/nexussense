@@ -282,6 +282,72 @@ else
   echo "  FALHA sem nada faltando, install_drivers fez: '${passos}'"; fail=1
 fi
 
+# --- o clang se decide por kernel-ALVO, nao pelo kernel em execucao
+# is_llvm_kernel olhava "uname -r", /proc/version e, na falta de resposta,
+# o nome da distro: a armadilha 2, no instalador. O DKMS constroi para todo
+# kernel bootavel, e o que diz se um deles precisa de clang e a config DELE
+# -- as mesmas duas fontes que o Makefile le.
+#
+# Nenhuma arvore abaixo tem relacao com o kernel desta maquina: com a
+# decisao pelo kernel em execucao, ou o caso "so GCC" ou o caso "tem Clang"
+# reprova, conforme quem roda o teste.
+BOOT="$T/boot"
+mkdir -p "$BOOT"
+alvo() {  # $1=arvore  $2=versao  $3=pkgbase  $4=vmlinuz sim|nao  $5=clang|gcc|sem-config
+  mkdir -p "$T/$1/$2/build"
+  echo "$3" > "$T/$1/$2/pkgbase"
+  [ "$4" = sim ] && : > "$T/$1/$2/vmlinuz"
+  case "$5" in
+    clang) echo 'CONFIG_CC_IS_CLANG=y' > "$T/$1/$2/build/.config" ;;
+    gcc)   echo 'CONFIG_CC_IS_GCC=y'   > "$T/$1/$2/build/.config" ;;
+  esac
+}
+alvo so-gcc     6.18.9-1-lts      linux-lts      sim gcc
+
+alvo misto      6.18.9-1-lts      linux-lts      sim gcc
+alvo misto      7.0.1-1-cachyos   linux-cachyos  sim clang
+
+alvo so-headers 6.18.9-1-lts      linux-lts      sim gcc
+alvo so-headers 7.0.1-1-cachyos   linux-cachyos  nao clang   # headers sem kernel: ninguem constroi para ele
+
+alvo pelo-boot  6.1.0-debian      linux-debian   sim sem-config
+echo 'CONFIG_CC_IS_CLANG=y' > "$BOOT/config-6.1.0-debian"
+
+duble pacman 'exit 0'
+
+clang() {  # $1=descricao  $2=sim|nao  $3=arvore
+  roda "install_build_deps '$T/$3' '$BOOT'"
+  local pediu=nao
+  grep -q '^pacman .* clang llvm lld$' "$CHAMADAS" && pediu=sim
+  if [ "$pediu" = "$2" ] && grep -q '^pacman .* base-devel dkms ' "$CHAMADAS"; then
+    echo "  OK   $1"
+  else
+    echo "  FALHA $1 (clang pedido: $pediu, esperado: $2)"
+    sed 's/^/        /' "$CHAMADAS"; fail=1
+  fi
+}
+clang "so kernel GCC: nao pede clang"                         nao so-gcc
+clang "um kernel Clang entre os bootaveis: pede clang"        sim misto
+clang "kernel Clang so com headers, sem vmlinuz: nao pede"    nao so-headers
+clang "config em /boot/config-<versao>, como o Makefile le"   sim pelo-boot
+
+espera "target_kernels_use_llvm: so GCC"        1 "target_kernels_use_llvm '$T/so-gcc' '$BOOT'"
+espera "target_kernels_use_llvm: um Clang"      0 "target_kernels_use_llvm '$T/misto' '$BOOT'"
+espera "target_kernels_use_llvm: arvore vazia"  1 "target_kernels_use_llvm '$T/nao-existe' '$BOOT'"
+
+decide=$(sed -n '/^target_kernels_use_llvm() {/,/^}/p' "$S" | grep -v '^\s*#')
+if [ -z "$decide" ]; then
+  echo "  FALHA target_kernels_use_llvm ausente"; fail=1
+elif printf '%s\n%s' "$decide" "$trecho" | grep -v '^\s*#' \
+       | grep -vE 'linux-headers-\$\(uname -r\)' \
+       | grep -qE 'uname|/proc/|os-release|is_llvm_kernel'; then
+  # A unica consulta ao kernel em execucao que fica e a dos headers do
+  # Debian, cujo apt so conhece o pacote por versao.
+  echo "  FALHA a decisao do clang ainda consulta o kernel em execucao ou a distro"; fail=1
+else
+  echo "  OK   a decisao do clang nao consulta o kernel em execucao nem a distro"
+fi
+
 # nvidia-settings saiu: o PowerMizer fala com a NVML direto desde
 # 2026-09-07 e nada mais no codigo chama o binario.
 if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'nvidia-settings'; then

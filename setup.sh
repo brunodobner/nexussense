@@ -400,42 +400,27 @@ cleanup_nitro_service() {
   echo -e "${GREEN}Nitro Key Detection Service cleanup completed.${NC}"
 }
 
-# Detect the compiler used to build the running kernel.
-is_llvm_kernel() {
-  local kernel_release
-  local kernel_build
-  local config_file
-
-  kernel_release=$(uname -r)
-  kernel_build="/lib/modules/${kernel_release}/build"
-
-  for config_file in "/boot/config-${kernel_release}" "${kernel_build}/.config"; do
-    if [ -r "$config_file" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"; then
+# Algum kernel-ALVO foi construido com Clang?
+#
+# O DKMS constroi para todo kernel bootavel, e cada um pede o compilador
+# com que foi feito. A resposta esta na config de cada alvo, nas mesmas
+# duas fontes que o Makefile le -- nunca no kernel em execucao, que e so
+# um deles. Ate 2026-10-10 esta decisao olhava "uname -r", /proc/version
+# e, sem resposta, o nome da distro: rodando um kernel GCC com um Clang
+# instalado ao lado, o clang nao era pedido e o build do segundo falhava.
+# Ver docs/armadilhas.md, armadilha 2.
+#
+# vmlinuz e o discriminador de "bootavel", o mesmo de install_drivers. Os
+# argumentos existem para o teste plantar uma arvore.
+target_kernels_use_llvm() {
+  local raiz="${1:-/lib/modules}" boot="${2:-/boot}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] || continue
+    if grep -qs '^CONFIG_CC_IS_CLANG=y' "${d}build/.config" \
+         "${boot}/config-$(basename "$d")"; then
       return 0
     fi
   done
-
-  if command -v zgrep &> /dev/null &&
-     [ -r /proc/config.gz ] &&
-     zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz; then
-    return 0
-  fi
-
-  if grep -qsiE 'clang|llvm' /proc/version 2>/dev/null; then
-    return 0
-  fi
-
-  if [ -r "${kernel_build}/include/generated/compile.h" ] &&
-     grep -qsiE 'clang|llvm' "${kernel_build}/include/generated/compile.h"; then
-    return 0
-  fi
-
-  # CachyOS kernels are LLVM-built by default. Keep this fallback for
-  # installations where the running kernel does not expose its build config.
-  if [ -r /etc/os-release ] && grep -qi 'cachyos' /etc/os-release; then
-    return 0
-  fi
-
   return 1
 }
 
@@ -484,17 +469,18 @@ build_deps_missing() {
 # the module to survive kernel upgrades. Neither base-devel nor
 # build-essential includes headers, so they are requested explicitly.
 install_build_deps() {
+  local raiz="${1:-/lib/modules}" boot="${2:-/boot}"
   if command -v pacman &> /dev/null; then
     # Arch-based (including CachyOS, Manjaro, EndeavourOS).
     local headers
-    headers=$(arch_header_packages)
+    headers=$(arch_header_packages "$raiz")
     if [ -z "$headers" ]; then
       echo -e "${YELLOW}Nenhum kernel com pkgbase em /lib/modules: instale os headers do seu kernel a mao.${NC}"
     fi
     # $headers sem aspas de proposito: e uma lista, um pacote por palavra.
     # shellcheck disable=SC2086
     pacman -S --needed --noconfirm base-devel dkms $headers
-    if is_llvm_kernel; then
+    if target_kernels_use_llvm "$raiz" "$boot"; then
       pacman -S --needed --noconfirm clang llvm lld
     fi
   elif command -v apt-get &> /dev/null; then
