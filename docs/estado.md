@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-09 (melhorias, sub-etapa 4a fechada: CI no ar, sem versão nova; 4b a 4f abertas)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4b fechada: v1.2.4, a janela deixa a dGPU dormir; 4c a 4f abertas)
 
 ---
 
@@ -13,11 +13,11 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
-| versão | **v1.2.3** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.4** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 21 testes: 19 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
-| suíte Python | 364 passam, 1 xfail (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte Python | 380 passam, 1 xfail (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
@@ -54,7 +54,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 2 -- driver     v1.2.2: bitmask identico, partida a frio conferida
 [x] Melhorias, etapa 3 -- instalador v1.2.3: desinstala o que instala, partida a frio conferida
 [x] Melhorias, etapa 4a -- CI        suites e shellcheck por push, modulo semanal
-[ ] Melhorias, etapa 4b -- GPU       temperatura pelo EC, a janela e a dGPU: medir
+[x] Melhorias, etapa 4b -- GPU       v1.2.4: a janela deixa a dGPU dormir; temperatura fica no nvidia-smi
 [ ] Melhorias, etapa 4c -- bandeja   registro SNI: tres defeitos, dois vistos pelo CI
 [ ] Melhorias, etapa 4d -- instalador cinco sobras da etapa 3; reinstalacao no portao
 [ ] Melhorias, etapa 4e -- botao N   o evento WMI chega? medir na bateria antes de podar
@@ -998,11 +998,13 @@ root e sob `LC_ALL=C`.
 
 ---
 
-## Melhorias de 2026-10, etapa 4b — o que a medição disse
+## Melhorias de 2026-10, etapa 4b — fechada, e onde a 4c começa
 
 Sub-etapa de medição: as três perguntas da seção 6 de
 [plano-melhorias.md](plano-melhorias.md), respondidas em 2026-10-10 entre 02:45
-e 03:34, antes de qualquer linha de código. Ramo `melhorias/4b-gpu`.
+e 03:34, antes de qualquer linha de código. Uma delas mandou consertar a
+janela, e o conserto foi ao hardware no mesmo dia. Ramo `melhorias/4b-gpu`,
+**v1.2.3 → v1.2.4.**
 
 O baseline capturado antes de tudo conferiu com o esperado: 364 passam e 1
 xfail na suíte Python; shell 19 passam e 2 pulam, idêntico sob `LC_ALL=C`.
@@ -1024,7 +1026,7 @@ instrumento enxerga um despertar.
 | 1a | ler `temp2` acorda a placa? | **não**, nem atrasa o sono | — |
 | 1b | o que ele devolve com a placa `suspended`? | **zero** | — |
 | 1c | a diferença contra o `nvidia-smi` cabe em 5 °C? | no repouso sim; **na carga não** | a temperatura **fica no `nvidia-smi`** |
-| 2 | a janela impede a dGPU de dormir? | **sim** | conserto na janela, nos commits seguintes deste ramo |
+| 2 | a janela impede a dGPU de dormir? | **sim** | conserto na janela — "O conserto", abaixo |
 | 3 | o que `temp3` mede? | é o `SEN3` do ACPI; o que o `SEN3` mede, o firmware não diz | só este registro |
 
 ### Pergunta 1 — `temp2` contra o `nvidia-smi`
@@ -1168,6 +1170,86 @@ busctl --user call com.nexussense.NexusSense /com/nexussense/NexusSense \
 - **Controle positivo no fim de toda fase que conclui "não acordou"**: um
   `nvidia-smi`, e o status tem de ir a `active`.
 
+### O conserto: a janela se cala quando a placa para
+
+A janela não tem como perguntar quem mais segura a placa — processo de root é
+ilegível, cliente NVML não aparece em lista (armadilha 31). Então ela testa.
+`GpuProbe`, em `telemetry.py`, guarda estado entre as passadas do poller:
+
+```
+uso 0% por 10 leituras seguidas     para de chamar o nvidia-smi; le so runtime_status
+a placa dorme em ate 30 s           era so a janela: cai no "adormecida" de sempre
+continua active depois de 30 s      outro programa a segura: volta a sondar
+   e so repete o teste              depois de 5 min parada, ou assim que a GPU
+                                    trabalhar e parar de novo
+qualquer uso acima de 0%            zera a contagem: jogo rodando nunca e pausado
+```
+
+Durante a pausa o cartão GPU mantém o último valor lido, com o selo **ociosa**,
+e a linha do gráfico segue reta. Último valor em vez de travessão foi escolha
+do usuário — com o `coolercontrold` no ar a pausa volta a cada cinco minutos.
+
+| commit | o quê | teste que falhou primeiro |
+|---|---|---|
+| `78a93f3` | `GpuProbe`, e o poller passa a usá-la | 40 passadas com uso 0%, isca contadora no `PATH`: `assert 40 == 10` |
+| `8e778da` | selo "ociosa" no cartão | o selo não aparecia |
+| `1a369c8` | versão nos três lugares, antes do portão | — |
+
+Oito mutações da sonda, oito reprovações. Suíte Python de 364 para 380, com o
+mesmo xfail; shell 19 passam e 2 pulam, mesmos nomes do baseline, idêntica sob
+`LC_ALL=C` — rodadas antes de cada commit.
+
+### O portão
+
+Em 2026-10-10, de 03:46 a 03:57, na tomada, bateria em 80%, modo máximo
+desligado. Uma chamada de root: `install_nexus_sense` e a parada do
+`coolercontrold`, religado por bandeira 193 s depois.
+
+```
+instalacao    18 OK, 0 FALHA: pacote identico ao fonte, --version 1.2.4, gid 948
+              antes e depois, os seis atributos 664 root:nexus_sense, agente e
+              bandeja reiniciados, uma instancia, item SNI no watcher
+
+janela aberta, coolercontrold parado, um nvidia-smi em t=0
+   antes do conserto     4 min 12 s sem dormir
+   depois                suspended em 21,0 s, 2 de 2 -- igual a janela fechada
+                         a janela sondou ~12 s e calou; 60 s seguintes dormindo
+
+janela aberta, coolercontrold rodando, 400 s
+   sondou 12 s, pausa de 30 s, voltou a sondar
+   segunda pausa 5 min 02 s depois da retomada, de novo 30 s
+   placa active o tempo todo: quem a segura e ele
+```
+
+**O gesto humano:** com a janela aberta no primeiro ensaio, o usuário viu no
+cartão GPU o selo "ociosa" e depois "adormecida". Nenhum comando confere o que
+desenha na tela, e por isso a linha só fechou com olho humano.
+
+**A leitura mais simples que fecha com todos os números** — interpretação, não
+medição: o driver põe a placa para dormir depois de 7 a 10 s sem consulta, mas
+nunca antes de 21 s acordada. Por isso ela dormiu em 21,0 s com o conserto, e
+não 10 s mais tarde: a última consulta da janela foi por volta do segundo 11.
+
+### Cinco coisas que só apareceram executando
+
+1. **A condição do plano não bastava.** "Modo máximo desligado" não faz a placa
+   dormir nesta máquina; a terceira fase parou até achar o `coolercontrold`.
+   Está em "Quem segura a placa acordada", acima, e na armadilha 31.
+2. **O suspeito à vista era inocente.** O `nvidia-smi` listava só o
+   `kwin_wayland`. A prova veio de parar o serviço e religá-lo, não da lista.
+3. **Um bloco de comando com marcador foi executado.** O pedido do portão
+   trazia `<espera bandeira, limite 30 min>` dentro de um bloco que o aplicativo
+   mostra com botão de rodar. O usuário rodou, o bash recusou a linha inteira e
+   nada foi executado — conferido antes de seguir. Bloco executável leva comando
+   completo; o que ainda é esboço vai em prosa.
+4. **A CPU do processo só diz "janela aberta" com a janela à vista.** No portão
+   ela caiu de ~20 ticks a cada 2 s para 1 a 5, por 12 s, com a sondagem
+   seguindo normalmente. Não foi apurado o que cobriu a janela. Os filhos
+   colhidos são o indicador que não depende disso.
+5. **A carga de CPU com a placa dormindo perdeu o objeto** antes de rodar:
+   `temp2` vale zero dormindo, e não havia "último valor" a separar de
+   "temperatura de verdade".
+
 ### Visto e não consertado
 
 - **O `coolercontrold` segura a dGPU acordada o dia inteiro.** Configuração do
@@ -1182,6 +1264,31 @@ busctl --user call com.nexussense.NexusSense /com/nexussense/NexusSense \
   com os filhos. Não foi apurado onde vai a diferença.
 - **O caminho de abaixo de 40%** segue sem ensaio de ponta a ponta: a bateria
   esteve em 79–80%. É da 4e.
+- **O uso da GPU continua vindo do `nvidia-smi`**, um processo por segundo
+  enquanto a placa trabalha. O EC não dá uso, e a NVML em processo é o que o
+  agente já faz no modo máximo — com a placa presa acordada. Fica como está.
+
+### Onde a 4c começa
+
+Numa **sessão nova**. Sub-etapa 4c de [plano-melhorias.md](plano-melhorias.md):
+a bandeja sobrevive ao watcher — três defeitos no registro SNI.
+
+**Ponto de partida:** `master` em v1.2.4, com o CI verde. O baseline esperado é
+380 passam e 1 xfail na suíte Python e, na shell, 19 passam e 2 pulam — sem
+root e sob `LC_ALL=C`. O xfail é `test_build_tray_diz_qual_bandeja_subiu`, e é
+a 4c que o tira.
+
+**O que vale para o portão dela**, e apareceu neste:
+
+- a bandeja se reinicia com `systemctl --user restart
+  'app-nexus\x2dsense\x2dautostart@autostart.service'`; o processo novo aparece
+  no barramento em um segundo, e o item SNI se confere em
+  `RegisteredStatusNotifierItems` do `org.kde.StatusNotifierWatcher`;
+- a janela se abre sem gesto por `busctl --user call com.nexussense.NexusSense
+  /com/nexussense/NexusSense com.nexussense.NexusSense Show`;
+- se algum ensaio depender de a dGPU dormir, o `coolercontrold` tem de estar
+  parado (armadilha 31);
+- pedido de root vai em prosa até o comando estar completo.
 
 ---
 

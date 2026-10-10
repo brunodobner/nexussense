@@ -237,7 +237,7 @@ As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
 | | ramo | o que entra | root, gesto, push |
 |---|---|---|---|
 | 4a | `melhorias/4a-ci` | CI (decisão D7); a suíte para de chamar o `nvidia-smi` de verdade; shellcheck | push |
-| 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | sem root; modo máximo desligado pelo usuário |
+| 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | **fechada, v1.2.4** — teve root: o `coolercontrold` parado para medir, e a reinstalação do portão |
 | 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | root na reinstalação do portão; derrubar o watcher da sessão real é gesto combinado |
 | 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | root na reinstalação do portão; **nunca `uninstall`** |
 | 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | root para o `pr_debug`; apertos e cabo; se podar, DKMS, recarga e reinício |
@@ -263,6 +263,10 @@ O shellcheck não está instalado nesta máquina: o que ele acusou no primeiro
 push — 3 erros e 7 avisos — foi consertado no mesmo ramo, antes do merge.
 
 ### 4b — a GPU sem o `nvidia-smi`
+
+**Fechada em 2026-10-10, v1.2.4.** A temperatura fica no `nvidia-smi`: o EC
+passa de 5 °C na carga. A janela impedia a placa de dormir e foi consertada. O
+que foi medido e o que a execução refutou estão em [estado.md](estado.md).
 
 Três perguntas, uma sessão de medição, nenhuma linha de código antes dela.
 
