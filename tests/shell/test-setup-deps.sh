@@ -151,8 +151,11 @@ NOME=$(grep -oP '^SERVICE = "\K[^"]+' "$PPD")
 [ -n "$NOME" ] || { echo "  ERRO alvo ausente: SERVICE em ppd.py"; exit 3; }
 
 # O formato e o do busctl desta maquina: NAME PID PROCESS USER CONNECTION ...
+# Os vizinhos sao os que um casamento frouxo aceitaria: o nome que e prefixo
+# do procurado, o que o tem por prefixo, e o legado.
 OUTROS='org.freedesktop.Accounts - - - (activatable) - - -
 org.freedesktop.UPower 827 upowerd root :1.17 upower.service - -
+org.freedesktop.UPower.PowerProfiles.Outro - - - (activatable) - - -
 net.hadess.PowerProfiles 1450 power-profiles- root :1.41 power-profiles-daemon.service - -'
 barramento() {  # $1=linhas que o "busctl list" devolve
   duble busctl "case \"\$*\" in *list*) cat << 'EOL'
@@ -177,8 +180,7 @@ barramento "$OUTROS
 $NOME 1450 power-profiles- root :1.41 power-profiles-daemon.service - -"
 espera "servico com dono no barramento: serve" 0 runtime_dependencies_ok
 
-# org.freedesktop.UPower e prefixo do nome procurado, e net.hadess e o
-# nome legado, que o codigo nao usa: nenhum dos dois serve.
+# Nenhum dos vizinhos serve: so o nome inteiro, que e o que o codigo chama.
 barramento "$OUTROS"
 duble powerprofilesctl 'exit 0'
 espera "powerprofilesctl instalado e o nome fora do barramento: nao serve" 1 runtime_dependencies_ok
@@ -315,7 +317,7 @@ echo 'CONFIG_CC_IS_CLANG=y' > "$BOOT/config-6.1.0-debian"
 
 duble pacman 'exit 0'
 
-clang() {  # $1=descricao  $2=sim|nao  $3=arvore
+pede_clang() {  # $1=descricao  $2=sim|nao  $3=arvore
   roda "install_build_deps '$T/$3' '$BOOT'"
   local pediu=nao
   grep -q '^pacman .* clang llvm lld$' "$CHAMADAS" && pediu=sim
@@ -326,10 +328,10 @@ clang() {  # $1=descricao  $2=sim|nao  $3=arvore
     sed 's/^/        /' "$CHAMADAS"; fail=1
   fi
 }
-clang "so kernel GCC: nao pede clang"                         nao so-gcc
-clang "um kernel Clang entre os bootaveis: pede clang"        sim misto
-clang "kernel Clang so com headers, sem vmlinuz: nao pede"    nao so-headers
-clang "config em /boot/config-<versao>, como o Makefile le"   sim pelo-boot
+pede_clang "so kernel GCC: nao pede clang"                         nao so-gcc
+pede_clang "um kernel Clang entre os bootaveis: pede clang"        sim misto
+pede_clang "kernel Clang so com headers, sem vmlinuz: nao pede"    nao so-headers
+pede_clang "config em /boot/config-<versao>, como o Makefile le"   sim pelo-boot
 
 espera "target_kernels_use_llvm: so GCC"        1 "target_kernels_use_llvm '$T/so-gcc' '$BOOT'"
 espera "target_kernels_use_llvm: um Clang"      0 "target_kernels_use_llvm '$T/misto' '$BOOT'"
