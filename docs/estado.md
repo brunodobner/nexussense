@@ -1997,10 +1997,13 @@ systemd do usuário (`runuser` com `XDG_RUNTIME_DIR`), roda `install_drivers` e
 ### Visto e não consertado
 
 - **O caminho de abaixo de 40% continua sem ponta a ponta.** Ver acima.
-- **A carga caiu de 54% para 31% entre 06:38 e 07:33** e o agente não registrou
-  troca de fonte nesse intervalo. Na etapa 2 ela já tinha ido de 60% a 43% com
-  o cabo ligado. Perguntado ao usuário nesta sessão; sem resposta até o
-  fechamento. Não apurado.
+- **A máquina descarrega com o cabo ligado.** A carga caiu de 54% para 31%
+  entre 06:38 e 07:33, o agente não registrou troca de fonte, e o usuário
+  confirmou: o cabo ficou ligado o tempo todo. Na etapa 2 ela já tinha ido de
+  60% a 43% em 70 minutos, também na tomada. Às 07:33 estava carregando de
+  novo, a 32 W. **A causa não foi apurada** — nem a carga da máquina nesse
+  intervalo, nem o que o firmware fazia. É por aí que se chega abaixo de 40%
+  sem tirar o cabo, que é a condição que a carona da armadilha 27 precisa.
 - **O ramo das teclas de função do tratador** (`WMID_HOTKEY_EVENT`) nunca foi
   exercitado: zero linhas `device state:`. A tecla que o dispararia é a de modo
   avião, e ela derruba a sessão (armadilha 25).
@@ -2053,8 +2056,10 @@ root e sob `LC_ALL=C`.
 - silêncio só vale com controle positivo pelo mesmo caminho (armadilha 35);
 - a 4f põe a máquina quente de propósito: o limite de aborto se escreve antes
   de medir, e a temperatura se lê do hwmon achado pelo nome (armadilha 19);
-- a carga desta máquina já caiu com o cabo ligado, duas vezes registradas.
-  Antes de um ensaio longo sob carga, medir a carga no começo e no fim.
+- esta máquina descarrega com o cabo ligado — duas vezes registradas, a
+  segunda confirmada pelo usuário. Num ensaio longo sob carga, a bateria se
+  mede a cada amostra, junto com a temperatura; e a causa é pergunta para o
+  brainstorm.
 
 ---
 
