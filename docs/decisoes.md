@@ -374,6 +374,10 @@ todo esquema de limpeza tem o caso em que falha.
 Quem registra o nome é a instância dona; quem não consegue pede a ela que
 apareça e sai.
 
+Sem barramento de sessão não há nome a disputar, e o aplicativo abre sem essa
+garantia. Até a v1.2.5 ele lia a falha do registro como "já há uma instância"
+e saía sem abrir nada (armadilha 32).
+
 ## 16. `StatusNotifierItem` escrito à mão
 
 **Escolha:** `QSystemTrayIcon` **vs.** implementar SNI sobre QtDBus.
@@ -387,6 +391,11 @@ fora do objeto DBus**, testáveis sem barramento, sem host e sem sessão gráfic
 
 Há fallback com a mesma superfície, então trocar um pelo outro não muda o
 controlador.
+
+Falar DBus à mão inclui o que o `QSystemTrayIcon` faria sozinho: o item se
+registra de novo cada vez que o watcher ganha dono, e desistir do registro —
+sem barramento, ou sem watcher — tem de cair no fallback sem derrubar o
+processo. As duas coisas entraram na v1.2.5; ver armadilha 32.
 
 ## 17. O instalador nunca sobrescreve escolha do usuário
 

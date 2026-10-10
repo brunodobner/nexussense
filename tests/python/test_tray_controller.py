@@ -1,8 +1,5 @@
 import os
 
-import dbus
-import pytest
-
 from nexus_sense.device import Controls, read_state
 from nexus_sense.sysfs import Sysfs
 from nexus_sense.tray import build_tray
@@ -199,27 +196,13 @@ def test_a_suite_nao_enxerga_o_barramento_de_sessao_de_verdade():
     assert not os.path.exists(endereco.removeprefix("unix:path="))
 
 
-# Defeito conhecido, visto pelo CI em 2026-10-09 e reproduzido fora dele:
-#
-#   sem barramento de sessao      register() levanta DBusException, porque
-#                                 publish() abre a conexao fora do try
-#   barramento sem watcher SNI    register() devolve False e o PROCESSO sai
-#                                 com 1 no laco de eventos: publish() fecha
-#                                 a conexao privada e a libdbus encerra quem
-#                                 perde o barramento
-#
-# Nos dois casos a reserva (QSystemTrayIcon, ou nenhuma) nunca e alcancada.
-# O conserto e da sub-etapa 4c do plano de melhorias, que mexe no registro
-# SNI. O xfail e estrito de proposito: no dia em que build_tray parar de
-# levantar, este teste passa, o xfail reprova, e a marca tem de sair.
-@pytest.mark.xfail(
-    strict=True,
-    raises=dbus.exceptions.DBusException,
-    reason="sem barramento de sessao o registro SNI levanta em vez de cair na reserva; sub-etapa 4c",
-)
 def test_build_tray_diz_qual_bandeja_subiu(qtbot, fake_root):
-    """Sem host SNI no barramento de teste, o resultado tem de ser um dos
-    tres caminhos previstos -- nunca excecao. Ver spec secao 7.3."""
+    """Sem barramento de sessao -- e o que a fixture autouse do conftest
+    entrega -- o registro SNI nao tem como dar certo, e o resultado tem de
+    ser uma das duas reservas, nunca excecao. Ver spec secao 7.3.
+
+    Ate a sub-etapa 4c isto levantava DBusException: publish() abria a
+    conexao fora do try."""
     s = Sysfs(fake_root)
     controlador_, modo = build_tray(s, Controls(s))
-    assert modo in ("sni", "qsystemtrayicon", "nenhuma")
+    assert modo in ("qsystemtrayicon", "nenhuma")

@@ -9,7 +9,7 @@ from .. import __version__
 from ..device import Controls
 from ..sysfs import Sysfs
 from ..tray import build_tray
-from .single import SingleInstance, claim, raise_existing
+from .single import SingleInstance, bus_available, claim, raise_existing
 from .style import apply_to
 from .window import Window
 
@@ -42,14 +42,20 @@ def main(argv=None):
     # Uma instancia so. Sem isto, reabrir o app deixa dois icones na
     # bandeja -- o nome do servico do SNI leva o PID -- e o antigo pode
     # sobreviver ao processo que o criou, virando icone morto.
+    #
+    # Sem barramento de sessao nao ha nome a disputar nem outra instancia a
+    # quem pedir a janela: a recusa do registro nao quer dizer "ja ha uma".
     dono = SingleInstance(lambda: _abre(janela))
-    if not claim(dono):
+    if bus_available() and not claim(dono):
         raise_existing()
         print("já havia uma instância: pedi para ela aparecer")
         return 0
 
     controlador, modo = build_tray(sysfs, controls)
-    print(f"bandeja: {modo}")
+    # Com flush: sob a unit a saida e um socket, o Python a guarda em bloco,
+    # e a linha so sairia no encerramento -- que e por SIGTERM, e a perde.
+    # O journal passou um boot inteiro sem ela.
+    print(f"bandeja: {modo}", flush=True)
 
     if controlador is None:
         janela.show()

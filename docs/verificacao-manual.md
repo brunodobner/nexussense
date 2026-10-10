@@ -62,8 +62,24 @@ abrir o aplicativo. A entrada em `/etc/xdg/autostart` foi restaurada em
 2026-09-06; a verificação após essa restauração continua pendente.
 
 **Se o ícone não aparecer:** o app caiu para `QSystemTrayIcon` (menu sim,
-scroll não) ou para janela direta. Confirme no terminal, que imprime qual
-bandeja subiu.
+scroll não) ou para janela direta. Ele diz qual bandeja subiu — no terminal,
+se foi aberto por um, e no journal, se subiu com a sessão:
+
+```bash
+journalctl --user -b -o cat -u 'app-nexus\x2dsense\x2dautostart@autostart.service' | grep '^bandeja:'
+```
+
+**O watcher reinicia:** o ícone tem de voltar sozinho, sem reabrir o
+aplicativo. O watcher do Plasma mora no `kded6`:
+
+```bash
+systemctl --user restart plasma-kded6.service
+```
+
+Todos os ícones da bandeja piscam, e os demais módulos do `kded6` reiniciam junto.
+Não troque por `unloadModule` do módulo do watcher: ele zera a lista sem
+trocar o dono do nome, e nenhum ícone é avisado (armadilha 33). O caso em
+barramento privado está em `test_tray_dbus.py`.
 
 **Sobre o tooltip:** o `ToolTip` do padrão SNI é uma struct `(sa(iiay)ss)`,
 cujo empacotamento em PySide6 daria muito trabalho para pouco. O Plasma cai

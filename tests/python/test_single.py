@@ -6,18 +6,23 @@ from nexus_sense.gui.single import (
     APP_PATH,
     APP_SERVICE,
     SingleInstance,
+    bus_available,
     claim,
     raise_existing,
 )
 
 
 class BarramentoFalso:
-    def __init__(self, servico=True, objeto=True):
+    def __init__(self, servico=True, objeto=True, ligado=True):
         self._servico = servico
         self._objeto = objeto
+        self._ligado = ligado
         self.servicos = []
         self.caminho = None
         self.opcoes = None
+
+    def isConnected(self):
+        return self._ligado
 
     def registerService(self, nome):
         self.servicos.append(nome)
@@ -87,3 +92,11 @@ def test_o_pedido_chega_a_quem_abre_a_janela(qtbot):
     alvo = SingleInstance(lambda: abriu.append(True))
     alvo.Show()
     assert abriu == [True]
+
+
+def test_sem_barramento_nao_ha_instancia_unica_a_disputar(qtbot):
+    """claim devolve False nos dois casos -- nome ja tomado e barramento
+    ausente -- e so o primeiro quer dizer "ja ha uma instancia". Quem
+    chama pergunta antes."""
+    assert bus_available(bus=BarramentoFalso()) is True
+    assert bus_available(bus=BarramentoFalso(ligado=False)) is False
