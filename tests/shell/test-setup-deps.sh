@@ -105,6 +105,251 @@ else
   echo "  PULADO sem pacman ou sem pkgbase: derivacao so conferida na arvore plantada"
 fi
 
+# ─── funcoes do instalador, rodadas com um PATH so de dublês ─────────
+# O PATH do ensaio tem o que o teste poe la e mais nada. Um dublê que
+# faltasse deixaria a funcao alcancar o binario de verdade -- o pacman, como
+# root, no CI -- e um binario que "nao existe" tem de nao existir mesmo: o
+# command -v do bash devolve ate arquivo nao executavel quando nao acha
+# outro (armadilha 30).
+BIN="$T/bin"
+mkdir -p "$BIN"
+for c in bash cat sort grep awk sed tr cut basename dirname; do
+  real=$(command -v "$c") || { echo "  ERRO alvo ausente: $c"; exit 3; }
+  ln -s "$real" "$BIN/$c"
+done
+CHAMADAS="$T/chamadas"
+
+duble() {  # $1=nome  $2=corpo; toda chamada fica em $CHAMADAS
+  printf '#!/bin/bash\necho "%s $*" >> "%s"\n%s\n' "$1" "$CHAMADAS" "$2" > "$BIN/$1"
+  chmod +x "$BIN/$1"
+}
+sem() { rm -f "$BIN/$1"; }
+
+roda() {  # roda "$1" dentro do setup.sh importado, so com os dublês
+  : > "$CHAMADAS"
+  PATH="$BIN" "$BIN/bash" -c "source '$S'; $1" > "$T/saida" 2>&1
+}
+
+espera() {  # $1=descricao  $2=codigo esperado  $3=o que rodar
+  roda "$3"
+  local rc=$?
+  if [ "$rc" -eq "$2" ]; then
+    echo "  OK   $1"
+  else
+    echo "  FALHA $1 (esperado $2, veio $rc)"; fail=1
+  fi
+}
+
+# --- runtime_dependencies_ok pergunta pelo que o codigo usa
+# O perfil de CPU sai por "busctl --system" para um nome no barramento
+# (src/nexus_sense/ppd.py) desde a etapa 1. O instalador perguntava pelo
+# powerprofilesctl, que ninguem chama mais: onde outro pacote fornece o
+# mesmo nome (tuned-ppd), ele mandava instalar o que ja estava servido.
+PPD="$ROOT/src/nexus_sense/ppd.py"
+exigir "$PPD"
+NOME=$(grep -oP '^SERVICE = "\K[^"]+' "$PPD")
+[ -n "$NOME" ] || { echo "  ERRO alvo ausente: SERVICE em ppd.py"; exit 3; }
+
+# O formato e o do busctl desta maquina: NAME PID PROCESS USER CONNECTION ...
+# Os vizinhos sao os que um casamento frouxo aceitaria: o nome que e prefixo
+# do procurado, o que o tem por prefixo, e o legado.
+OUTROS='org.freedesktop.Accounts - - - (activatable) - - -
+org.freedesktop.UPower 827 upowerd root :1.17 upower.service - -
+org.freedesktop.UPower.PowerProfiles.Outro - - - (activatable) - - -
+net.hadess.PowerProfiles 1450 power-profiles- root :1.41 power-profiles-daemon.service - -'
+barramento() {  # $1=linhas que o "busctl list" devolve
+  duble busctl "case \"\$*\" in *list*) cat << 'EOL'
+$1
+EOL
+;; *) exit 1 ;; esac"
+}
+
+duble python3 'exit 0'
+sem powerprofilesctl
+
+barramento "$OUTROS
+$NOME - - - (activatable) - - -"
+espera "servico ativavel no barramento, sem powerprofilesctl: serve" 0 runtime_dependencies_ok
+if grep -q '^busctl --system .*list' "$CHAMADAS" && ! grep -vE '^(python3|busctl --system .*list)' "$CHAMADAS" | grep -q .; then
+  echo "  OK   ... e so listou os nomes: nao ativou o servico para perguntar"
+else
+  echo "  FALHA ... chamadas inesperadas: $(tr '\n' ';' < "$CHAMADAS")"; fail=1
+fi
+
+barramento "$OUTROS
+$NOME 1450 power-profiles- root :1.41 power-profiles-daemon.service - -"
+espera "servico com dono no barramento: serve" 0 runtime_dependencies_ok
+
+# Nenhum dos vizinhos serve: so o nome inteiro, que e o que o codigo chama.
+barramento "$OUTROS"
+duble powerprofilesctl 'exit 0'
+espera "powerprofilesctl instalado e o nome fora do barramento: nao serve" 1 runtime_dependencies_ok
+sem powerprofilesctl
+
+duble busctl 'exit 1'
+espera "sem barramento de sistema: nao serve" 1 runtime_dependencies_ok
+
+sem busctl
+duble powerprofilesctl 'exit 0'
+espera "sem busctl: nao serve, com ou sem powerprofilesctl" 1 runtime_dependencies_ok
+sem powerprofilesctl
+
+barramento "$NOME - - - (activatable) - - -"
+duble python3 'exit 1'
+espera "modulos Python faltando: nao serve" 1 runtime_dependencies_ok
+duble python3 'exit 0'
+
+if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'command -v powerprofilesctl'; then
+  echo "  FALHA o instalador ainda pergunta pelo powerprofilesctl"; fail=1
+else
+  echo "  OK   o instalador nao pergunta pelo powerprofilesctl"
+fi
+
+# --- os headers que faltam sao instalados mesmo com make e dkms presentes
+# install_build_deps so rodava quando faltava uma das duas ferramentas. Com
+# elas no lugar e um kernel sem headers, check_kernel_headers avisava e a
+# instalacao seguia sem construir para ele. A 3.5 consertou QUAIS headers
+# pedir; isto e o QUANDO.
+H="$T/modulos"
+kernel() {  # $1=versao  $2=vmlinuz sim|nao  $3=build sim|nao|pendurado
+  mkdir -p "$H/$1"
+  [ "$2" = sim ] && : > "$H/$1/vmlinuz"
+  case "$3" in
+    sim)       mkdir "$H/$1/build" ;;
+    pendurado) ln -s "/usr/src/linux-headers-$1" "$H/$1/build" ;;  # o do Debian, sem o pacote
+  esac
+}
+kernel 7.0.1-completo       sim sim
+kernel 6.9.9-resto          nao nao
+kernel 7.0.0-so-headers     nao sim
+
+duble make 'exit 0'
+duble dkms 'exit 0'
+
+roda "kernels_missing_headers '$H'"
+if [ ! -s "$T/saida" ]; then
+  echo "  OK   kernel bootavel com headers, resto e so-headers: nada falta"
+else
+  echo "  FALHA acusou falta onde nao ha: $(tr '\n' ' ' < "$T/saida")"; fail=1
+fi
+espera "... e com make e dkms no lugar, nao ha o que instalar" 1 "build_deps_missing '$H'"
+
+kernel 7.0.2-sem-headers    sim nao
+kernel 6.1.0-debian         sim pendurado
+roda "kernels_missing_headers '$H'"
+obtido=$(tr '\n' ' ' < "$T/saida")
+if [ "$obtido" = "6.1.0-debian 7.0.2-sem-headers " ]; then
+  echo "  OK   kernels bootaveis sem headers: $obtido"
+else
+  echo "  FALHA kernels sem headers errados: '$obtido'"; fail=1
+fi
+espera "... e isso basta para instalar, com make e dkms no lugar" 0 "build_deps_missing '$H'"
+
+rm -rf "$H/7.0.2-sem-headers" "$H/6.1.0-debian"
+sem dkms
+espera "sem dkms: ha o que instalar" 0 "build_deps_missing '$H'"
+duble dkms 'exit 0'
+sem make
+espera "sem make: ha o que instalar" 0 "build_deps_missing '$H'"
+duble make 'exit 0'
+
+# A fiacao, executada: install_drivers com as ferramentas no lugar e um
+# kernel sem headers tem de chamar install_build_deps. Tres travas param a
+# funcao antes de ela tocar em qualquer coisa: check_kernel_headers devolve
+# 1, driver_version devolve vazio, e o PATH so tem dublês.
+cat > "$T/fiacao.sh" << EOL
+source '$S'
+pause()                { :; }
+install_build_deps()   { echo install_build_deps >> '$T/passos'; return 1; }
+check_kernel_headers() { echo check_kernel_headers >> '$T/passos'; return 1; }
+driver_version()       { :; }
+kernels_missing_headers() { [ "\$FALTA" = sim ] && echo 7.0.2-sem-headers; return 0; }
+install_drivers < /dev/null > /dev/null 2>&1
+EOL
+fiacao() {  # $1=FALTA  -> os passos que install_drivers deu
+  : > "$T/passos"
+  FALTA="$1" PATH="$BIN" "$BIN/bash" "$T/fiacao.sh"
+  tr '\n' ' ' < "$T/passos"
+}
+passos=$(fiacao sim)
+if [ "$passos" = "install_build_deps " ]; then
+  echo "  OK   install_drivers instala os headers que faltam"
+else
+  echo "  FALHA com headers faltando, install_drivers fez: '${passos}'"; fail=1
+fi
+passos=$(fiacao nao)
+if [ "$passos" = "check_kernel_headers " ]; then
+  echo "  OK   ... e nao chama o gerenciador de pacotes quando nada falta"
+else
+  echo "  FALHA sem nada faltando, install_drivers fez: '${passos}'"; fail=1
+fi
+
+# --- o clang se decide por kernel-ALVO, nao pelo kernel em execucao
+# is_llvm_kernel olhava "uname -r", /proc/version e, na falta de resposta,
+# o nome da distro: a armadilha 2, no instalador. O DKMS constroi para todo
+# kernel bootavel, e o que diz se um deles precisa de clang e a config DELE
+# -- as mesmas duas fontes que o Makefile le.
+#
+# Nenhuma arvore abaixo tem relacao com o kernel desta maquina: com a
+# decisao pelo kernel em execucao, ou o caso "so GCC" ou o caso "tem Clang"
+# reprova, conforme quem roda o teste.
+BOOT="$T/boot"
+mkdir -p "$BOOT"
+alvo() {  # $1=arvore  $2=versao  $3=pkgbase  $4=vmlinuz sim|nao  $5=clang|gcc|sem-config
+  mkdir -p "$T/$1/$2/build"
+  echo "$3" > "$T/$1/$2/pkgbase"
+  [ "$4" = sim ] && : > "$T/$1/$2/vmlinuz"
+  case "$5" in
+    clang) echo 'CONFIG_CC_IS_CLANG=y' > "$T/$1/$2/build/.config" ;;
+    gcc)   echo 'CONFIG_CC_IS_GCC=y'   > "$T/$1/$2/build/.config" ;;
+  esac
+}
+alvo so-gcc     6.18.9-1-lts      linux-lts      sim gcc
+
+alvo misto      6.18.9-1-lts      linux-lts      sim gcc
+alvo misto      7.0.1-1-cachyos   linux-cachyos  sim clang
+
+alvo so-headers 6.18.9-1-lts      linux-lts      sim gcc
+alvo so-headers 7.0.1-1-cachyos   linux-cachyos  nao clang   # headers sem kernel: ninguem constroi para ele
+
+alvo pelo-boot  6.1.0-debian      linux-debian   sim sem-config
+echo 'CONFIG_CC_IS_CLANG=y' > "$BOOT/config-6.1.0-debian"
+
+duble pacman 'exit 0'
+
+pede_clang() {  # $1=descricao  $2=sim|nao  $3=arvore
+  roda "install_build_deps '$T/$3' '$BOOT'"
+  local pediu=nao
+  grep -q '^pacman .* clang llvm lld$' "$CHAMADAS" && pediu=sim
+  if [ "$pediu" = "$2" ] && grep -q '^pacman .* base-devel dkms ' "$CHAMADAS"; then
+    echo "  OK   $1"
+  else
+    echo "  FALHA $1 (clang pedido: $pediu, esperado: $2)"
+    sed 's/^/        /' "$CHAMADAS"; fail=1
+  fi
+}
+pede_clang "so kernel GCC: nao pede clang"                         nao so-gcc
+pede_clang "um kernel Clang entre os bootaveis: pede clang"        sim misto
+pede_clang "kernel Clang so com headers, sem vmlinuz: nao pede"    nao so-headers
+pede_clang "config em /boot/config-<versao>, como o Makefile le"   sim pelo-boot
+
+espera "target_kernels_use_llvm: so GCC"        1 "target_kernels_use_llvm '$T/so-gcc' '$BOOT'"
+espera "target_kernels_use_llvm: um Clang"      0 "target_kernels_use_llvm '$T/misto' '$BOOT'"
+espera "target_kernels_use_llvm: arvore vazia"  1 "target_kernels_use_llvm '$T/nao-existe' '$BOOT'"
+
+decide=$(sed -n '/^target_kernels_use_llvm() {/,/^}/p' "$S" | grep -v '^\s*#')
+if [ -z "$decide" ]; then
+  echo "  FALHA target_kernels_use_llvm ausente"; fail=1
+elif printf '%s\n%s' "$decide" "$trecho" | grep -v '^\s*#' \
+       | grep -vE 'linux-headers-\$\(uname -r\)' \
+       | grep -qE 'uname|/proc/|os-release|is_llvm_kernel'; then
+  # A unica consulta ao kernel em execucao que fica e a dos headers do
+  # Debian, cujo apt so conhece o pacote por versao.
+  echo "  FALHA a decisao do clang ainda consulta o kernel em execucao ou a distro"; fail=1
+else
+  echo "  OK   a decisao do clang nao consulta o kernel em execucao nem a distro"
+fi
+
 # nvidia-settings saiu: o PowerMizer fala com a NVML direto desde
 # 2026-09-07 e nada mais no codigo chama o binario.
 if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'nvidia-settings'; then

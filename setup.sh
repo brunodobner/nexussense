@@ -20,7 +20,7 @@
 # A versao e a do PROJETO, nao a do modulo. O driver tem a sua propria em
 # DRIVER_VERSION (nexus_sense.c), que alimenta o pacote DKMS -- sao dois
 # espacos de numeracao de proposito. Ver docs/decisoes.md secao 7.
-SCRIPT_VERSION="1.2.5"
+SCRIPT_VERSION="1.2.6"
 # Caminhos de instalacoes ANTIGAS, mantidos so para a limpeza encontra-los.
 # Nada deste projeto e instalado neles: o pacote vai para
 # /usr/lib/nexus-sense e os lancadores para /usr/bin. Ver docs/decisoes.md
@@ -41,6 +41,12 @@ DRIVER_DIR="${RAIZ}/driver"
 # Legacy paths for cleanup (uppercase naming convention)
 LEGACY_INSTALL_DIR="/opt/DAMX"
 LEGACY_DAEMON_SERVICE_NAME="DAMX-Daemon.service"
+
+# Onde o systemd poe o diretorio de cada usuario com gerenciador no ar, e
+# onde o kernel lista os processos. Sao variaveis para os testes plantarem
+# uma arvore no lugar -- nenhum deles fala com a sessao de quem os roda.
+RUN_USER_DIR="/run/user"
+PROC_DIR="/proc"
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -400,42 +406,27 @@ cleanup_nitro_service() {
   echo -e "${GREEN}Nitro Key Detection Service cleanup completed.${NC}"
 }
 
-# Detect the compiler used to build the running kernel.
-is_llvm_kernel() {
-  local kernel_release
-  local kernel_build
-  local config_file
-
-  kernel_release=$(uname -r)
-  kernel_build="/lib/modules/${kernel_release}/build"
-
-  for config_file in "/boot/config-${kernel_release}" "${kernel_build}/.config"; do
-    if [ -r "$config_file" ] && grep -q '^CONFIG_CC_IS_CLANG=y' "$config_file"; then
+# Algum kernel-ALVO foi construido com Clang?
+#
+# O DKMS constroi para todo kernel bootavel, e cada um pede o compilador
+# com que foi feito. A resposta esta na config de cada alvo, nas mesmas
+# duas fontes que o Makefile le -- nunca no kernel em execucao, que e so
+# um deles. Ate 2026-10-10 esta decisao olhava "uname -r", /proc/version
+# e, sem resposta, o nome da distro: rodando um kernel GCC com um Clang
+# instalado ao lado, o clang nao era pedido e o build do segundo falhava.
+# Ver docs/armadilhas.md, armadilha 2.
+#
+# vmlinuz e o discriminador de "bootavel", o mesmo de install_drivers. Os
+# argumentos existem para o teste plantar uma arvore.
+target_kernels_use_llvm() {
+  local raiz="${1:-/lib/modules}" boot="${2:-/boot}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] || continue
+    if grep -qs '^CONFIG_CC_IS_CLANG=y' "${d}build/.config" \
+         "${boot}/config-$(basename "$d")"; then
       return 0
     fi
   done
-
-  if command -v zgrep &> /dev/null &&
-     [ -r /proc/config.gz ] &&
-     zgrep -q '^CONFIG_CC_IS_CLANG=y' /proc/config.gz; then
-    return 0
-  fi
-
-  if grep -qsiE 'clang|llvm' /proc/version 2>/dev/null; then
-    return 0
-  fi
-
-  if [ -r "${kernel_build}/include/generated/compile.h" ] &&
-     grep -qsiE 'clang|llvm' "${kernel_build}/include/generated/compile.h"; then
-    return 0
-  fi
-
-  # CachyOS kernels are LLVM-built by default. Keep this fallback for
-  # installations where the running kernel does not expose its build config.
-  if [ -r /etc/os-release ] && grep -qi 'cachyos' /etc/os-release; then
-    return 0
-  fi
-
   return 1
 }
 
@@ -458,22 +449,45 @@ arch_header_packages() {
   done | sort -u
 }
 
+# Kernels BOOTAVEIS sem headers, um por linha.
+#
+# "-d" segue o link: no Debian o build/ vem com o kernel e aponta para um
+# diretorio que so existe depois de instalar os headers. vmlinuz separa o
+# kernel que da boot do resto que uma remocao deixa em /lib/modules.
+kernels_missing_headers() {
+  local raiz="${1:-/lib/modules}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] || continue
+    [ -d "${d}build" ] || basename "$d"
+  done
+}
+
+# Ha o que instalar antes de construir? Faltar make ou dkms era o unico
+# criterio, e com os dois no lugar ninguem instalava os headers de um
+# kernel novo: check_kernel_headers avisava e a instalacao seguia sem ele.
+build_deps_missing() {
+  local raiz="${1:-/lib/modules}"
+  ! command -v make &> /dev/null || ! command -v dkms &> /dev/null ||
+    [ -n "$(kernels_missing_headers "$raiz")" ]
+}
+
 # Install build dependencies based on distribution.
 # Kernel headers are required for any module build; DKMS is required for
 # the module to survive kernel upgrades. Neither base-devel nor
 # build-essential includes headers, so they are requested explicitly.
 install_build_deps() {
+  local raiz="${1:-/lib/modules}" boot="${2:-/boot}"
   if command -v pacman &> /dev/null; then
     # Arch-based (including CachyOS, Manjaro, EndeavourOS).
     local headers
-    headers=$(arch_header_packages)
+    headers=$(arch_header_packages "$raiz")
     if [ -z "$headers" ]; then
       echo -e "${YELLOW}Nenhum kernel com pkgbase em /lib/modules: instale os headers do seu kernel a mao.${NC}"
     fi
     # $headers sem aspas de proposito: e uma lista, um pacote por palavra.
     # shellcheck disable=SC2086
     pacman -S --needed --noconfirm base-devel dkms $headers
-    if is_llvm_kernel; then
+    if target_kernels_use_llvm "$raiz" "$boot"; then
       pacman -S --needed --noconfirm clang llvm lld
     fi
   elif command -v apt-get &> /dev/null; then
@@ -495,9 +509,21 @@ install_build_deps() {
 #
 # A GPU não entra aqui: o PowerMizer fala com a NVML, que vem com o driver
 # da NVIDIA, e onde ela falta o modo máximo segue sem essa parte.
+#
+# O perfil de CPU se pergunta como o codigo o usa: "busctl --system" para o
+# nome org.freedesktop.UPower.PowerProfiles (src/nexus_sense/ppd.py). O
+# powerprofilesctl, que esta funcao procurava, ninguem chama desde a etapa 1
+# -- e onde outro pacote serve o mesmo nome ele nem vem instalado.
 runtime_dependencies_ok() {
-  python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null &&
-    command -v powerprofilesctl &> /dev/null
+  python3 -c 'import PySide6, dbus, tomli_w' &> /dev/null || return 1
+  command -v busctl &> /dev/null || return 1
+
+  # "list" traz os nomes com dono e os ativaveis, e nao ativa ninguem. A
+  # saida vai inteira para a variavel antes da busca: um "grep -q" no cano
+  # sai no primeiro acerto e deixa o busctl escrevendo para ninguem.
+  local nomes
+  nomes=$(busctl --system list --no-legend 2> /dev/null | awk '{ print $1 }')
+  grep -qxF 'org.freedesktop.UPower.PowerProfiles' <<< "$nomes"
 }
 
 install_runtime_deps() {
@@ -524,7 +550,8 @@ install_runtime_deps() {
   fi
 
   if ! runtime_dependencies_ok; then
-    echo -e "${RED}Error: Python runtime dependencies are still unavailable.${NC}"
+    echo -e "${RED}Error: runtime dependencies are still unavailable: the Python modules,${NC}"
+    echo -e "${RED}busctl, or org.freedesktop.UPower.PowerProfiles on the system bus.${NC}"
     return 1
   fi
 }
@@ -786,8 +813,8 @@ install_drivers() {
     return 1
   fi
 
-  if ! command -v make &> /dev/null || ! command -v dkms &> /dev/null; then
-    echo -e "${YELLOW}Installing build tools...${NC}"
+  if build_deps_missing; then
+    echo -e "${YELLOW}Installing build tools and kernel headers...${NC}"
     install_build_deps || { pause; return 1; }
   fi
 
@@ -1019,6 +1046,12 @@ EOL
   install -m 644 "${RAIZ}/packaging/systemd/nexus-sense-agent.service" \
     /usr/lib/systemd/user/nexus-sense-agent.service
   systemctl daemon-reload
+  # O daemon-reload acima fala com o systemd do SISTEMA. Quem carrega esta
+  # unit -- e a que o gerador cria a partir do autostart -- e o de cada
+  # usuario: sem aviso ele segue com a definicao antiga na memoria
+  # (NeedDaemonReload=yes) ate relogar, e um restart do agente logo depois
+  # de atualizar sobe a unit velha.
+  each_user_manager daemon-reload
   # --global habilita para todo usuario sem precisar de sessao ativa.
   systemctl --global enable nexus-sense-agent.service
 
@@ -1038,9 +1071,10 @@ EOL
 #   o grupo nexus_sense     esta limpeza roda tambem antes de reinstalar, e
 #                           recriar o grupo troca o gid. Quem o remove e a
 #                           desinstalacao: cleanup_nexus_group.
-#   agente e bandeja em execucao   sao processos da sessao do usuario e
-#                           saem com ela. O disable abaixo so impede que
-#                           voltem na proxima.
+#   agente e bandeja em execucao   encerra-los aqui os tiraria de quem
+#                           reinstala. Quem os encerra e a desinstalacao:
+#                           stop_nexus_sense. O disable abaixo so impede
+#                           que voltem na proxima sessao.
 cleanup_nexus_sense() {
   echo "Removendo o aplicativo Nexus Sense..."
 
@@ -1063,6 +1097,64 @@ cleanup_nexus_sense() {
   rm -f /usr/bin/nexus-sense
   rm -f /usr/bin/nexus-sense-agent
   rm -rf /usr/lib/nexus-sense
+}
+
+# Roda "systemctl --user ..." no gerenciador de cada usuario com sessao.
+#
+# O instalador e root, e quem carrega a unit do agente e o systemd do
+# USUARIO: o que o root diz ao "systemctl" chega a outro gerenciador.
+# /run/user/<uid> existe enquanto o daquele usuario esta no ar.
+each_user_manager() {
+  local d uid nome
+  for d in "${RUN_USER_DIR}"/*/; do
+    uid=$(basename "$d")
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    nome=$(id -nu "$uid" 2> /dev/null) || continue
+    runuser -u "$nome" -- env XDG_RUNTIME_DIR="${RUN_USER_DIR}/${uid}" \
+      systemctl --user "$@" &> /dev/null || true
+  done
+}
+
+# PIDs dos processos que os lancadores criaram: o agente e a interface.
+#
+# O argv e comparado elemento a elemento -- /usr/bin/python3 na frente e,
+# adiante, "-m" seguido do modulo. Procurar o texto na linha de comando
+# acharia tambem o shell que o contem (armadilha 10).
+nexus_sense_pids() {
+  local p argv i
+  for p in "${PROC_DIR}"/[0-9]*/; do
+    argv=()
+    # O processo pode sair no meio da varredura e levar o arquivo junto.
+    mapfile -d '' -t argv 2> /dev/null < "${p}cmdline" || continue
+    [ "${argv[0]:-}" = /usr/bin/python3 ] || continue
+    for ((i = 1; i + 1 < ${#argv[@]}; i++)); do
+      [ "${argv[i]}" = -m ] || continue
+      # O primeiro "-m" decide: o que vem depois do modulo e argumento dele.
+      case "${argv[i + 1]}" in
+        nexus_sense|nexus_sense.gui.app) basename "$p" ;;
+      esac
+      break
+    done
+  done
+}
+
+# Encerra o agente e a bandeja de quem estiver com sessao aberta. So a
+# desinstalacao chama: a limpeza que antecede uma reinstalacao os deixa
+# rodando, como deixa o grupo.
+stop_nexus_sense() {
+  local pid
+  echo "Encerrando o agente e a bandeja..."
+
+  # A unit do agente tem Restart=always: morto por sinal, o systemd o
+  # reabre em 3 s. Quem o para de verdade e o gerenciador do usuario.
+  each_user_manager stop nexus-sense-agent.service
+
+  # A bandeja nao tem unit fixa -- sobe pelo autostart, pelo menu ou pelo
+  # botao N -- e se acha pelo processo. Um agente aberto a mao tambem.
+  for pid in $(nexus_sense_pids); do
+    kill -TERM "$pid" 2> /dev/null || true
+  done
+  return 0
 }
 
 # Remove o grupo nexus_sense. So a desinstalacao chama (decisao D5); a
@@ -1187,6 +1279,7 @@ perform_install() {
 
 uninstall() {
   echo -e "${YELLOW}Uninstalling Nexus Sense...${NC}"
+  stop_nexus_sense
   comprehensive_cleanup
   cleanup_nexus_group
   echo -e "${GREEN}Nexus Sense uninstalled successfully!${NC}"

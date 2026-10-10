@@ -239,7 +239,7 @@ As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
 | 4a | `melhorias/4a-ci` | CI (decisão D7); a suíte para de chamar o `nvidia-smi` de verdade; shellcheck | push |
 | 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | **fechada, v1.2.4** — teve root: o `coolercontrold` parado para medir, e a reinstalação do portão |
 | 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | **fechada, v1.2.5** — teve root: duas reinstalações no portão; o gesto foi reiniciar o `kded6` |
-| 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | root na reinstalação do portão; **nunca `uninstall`** |
+| 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | **fechada, v1.2.6** — teve root: uma reinstalação no portão; a desinstalação rodou só num namespace |
 | 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | root para o `pr_debug`; apertos e cabo; se podar, DKMS, recarga e reinício |
 | 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | a decidir no plano |
 
@@ -343,6 +343,14 @@ o portão reinstala o pacote (`install_nexus_sense`, com root) e reinicia a
 bandeja.
 
 ### 4d — instalador
+
+**Fechada em 2026-10-10, v1.2.6.** Os cinco consertados ou provados, e um
+sexto que a medição mandou entrar: a instalação recarrega o systemd de cada
+usuário (armadilha 34). `uninstall` e `comprehensive_cleanup` foram executadas
+inteiras num namespace, sobre uma cópia de `/etc/group`; nesta máquina não
+rodaram. As tarefas de `install_drivers` ficaram provadas por árvore plantada e
+dublês, sem hardware. O que foi medido e o que a execução refutou estão em
+[estado.md](estado.md).
 
 Cinco itens em `setup.sh`, todos com teste em shell antes:
 

@@ -43,6 +43,26 @@ kernels, é falha garantida.
 O Makefile lê `CONFIG_CC_IS_CLANG` do `.config` **do kernel alvo**, com
 fallback em `/boot/config-$(KVER)`.
 
+**O instalador deste projeto herdou a função e a usou até 2026-10-10** — não
+no build, na escolha dos pacotes. `is_llvm_kernel` decidia se pedia `clang`
+pelo `uname -r`, depois por `/proc/version` e, sem resposta, pelo nome da
+distro. Rodando um kernel GCC com um Clang instalado ao lado, o `clang` não
+era pedido e o DKMS falhava para o segundo. Hoje `target_kernels_use_llvm` lê
+a config de cada kernel bootável, nas mesmas duas fontes do Makefile.
+
+E "CachyOS, logo Clang" não vale nem nesta máquina:
+
+```
+6.18.55-1-cachyos-lts    CONFIG_CC_IS_GCC=y      gcc 16.2.1
+7.2.9-1-cachyos          CONFIG_CC_IS_CLANG=y    clang 23.1.1
+```
+
+Nome de distro não diz compilador. A pergunta é por kernel:
+
+```bash
+grep -s '^CONFIG_CC_IS_' /lib/modules/*/build/.config
+```
+
 **`KERNELRELEASE` precisa de `override`.** Ele chega pela linha de comando
 do `make`, e atribuição comum não vence variável de linha de comando. Sem
 `override`, um `KVER` solto redireciona o build para outro kernel em
@@ -256,6 +276,14 @@ ps -eo comm --no-headers | grep -c '^DivAcerManagerMax$'
 
 Dois processos `DAMX-Daemon` são normais: o empacotamento PyInstaller onefile
 gera bootloader (o `MainPID` da unit) mais o app real como filho.
+
+**Quando o executável é `python3`, o nome não separa ninguém.** O agente e a
+bandeja deste projeto são `/usr/bin/python3 -P -m nexus_sense…`. Aí se compara
+o argv **elemento a elemento** — `/proc/<pid>/cmdline` vem separado por NUL —
+e não o texto da linha: o shell que roda a busca tem a linha procurada dentro
+de um argumento só, e não casa. É o que `nexus_sense_pids` faz no `setup.sh`.
+Conferido em 2026-10-10: a busca por texto achava três processos, e o terceiro
+era o shell da própria busca.
 
 ---
 
@@ -1049,6 +1077,12 @@ antes e depois:
 getent group nexus_sense | cut -d: -f3
 ```
 
+**E a desinstalação não se roda aqui para conferir nada.** Ela se executa num
+namespace, sobre uma cópia de `/etc/group`:
+`tests/shell/test-desinstalacao-namespace.sh` roda `uninstall` e
+`comprehensive_cleanup` inteiras dentro de um `bwrap`, com a raiz
+somente-leitura e um `PATH` só de dublês, e lê o gid de verdade antes e depois.
+
 ---
 
 ## 30. A suíte fala com a máquina de quem a roda — e passa por causa disso
@@ -1079,7 +1113,8 @@ de barramento que não existe, `XDG_CONFIG_HOME` próprio. Quem precisa de
 barramento sobe o seu. E para saber se algo vaza, **meça com a isca** — não
 leia o código procurando.
 
-**Três parentes do mesmo defeito**, da mesma sessão:
+**Quatro parentes do mesmo defeito** — três da mesma sessão, o último de
+2026-10-10:
 
 - *Pulo que não aparece.* `test-setup-deps.sh` dizia "PULADO shellcheck não
   instalado" dentro de um teste que passava. O `setup.sh` tinha três erros de
@@ -1090,6 +1125,12 @@ leia o código procurando.
 - *Esconder não é desabilitar.* O `command -v` do bash devolve arquivo **não
   executável** quando não acha outro no `PATH`. Para simular a falta de um
   binário, tire-o do `PATH`; montar algo por cima não basta.
+- *`PATH` só de dublês que esquece uma ferramenta.* No ensaio da desinstalação
+  em namespace faltavam `mkdir` e `seq` no `PATH` de dentro. O passo que criava
+  `/run/user/<uid>` sumiu calado, o laço que esperava os processos-isca rodou
+  zero vezes, e 18 de 19 conferências passaram — os processos estavam de pé na
+  hora certa por sorte. Quem roda um roteiro com `PATH` restrito cobra a saída
+  de erro dele: tem de vir vazia.
 
 ---
 
@@ -1217,6 +1258,63 @@ confira isso lendo, depois, não supondo.
 
 **De carona:** isto não é defeito de quem registra item. Um watcher que perde a
 lista sem trocar de dono não tem como ser percebido por cliente nenhum.
+
+---
+
+## 34. O root fala com o systemd errado
+
+**Sintoma.** Depois de reinstalar, todo `systemctl --user restart` do agente
+ou da bandeja avisa:
+
+```
+Warning: The unit file, source configuration file or drop-ins of
+nexus-sense-agent.service changed on disk. Run 'systemctl --user daemon-reload'
+```
+
+Mais nada, porque o conteúdo regravado era idêntico. No dia em que a unit
+mudar, o restart feito logo depois de atualizar sobe a definição velha.
+
+**Causa.** O instalador é root e chama `systemctl daemon-reload`, que fala com
+o PID 1. A unit do agente mora em `/usr/lib/systemd/user/` e quem a carrega é o
+`systemd --user` de cada sessão — outro processo, com outra memória. Vale
+também para a unit que o `systemd-xdg-autostart-generator` cria a partir do
+`.desktop` do autostart: regravar o `.desktop` a deixa velha do mesmo jeito.
+
+Medido em 2026-10-10, só com leitura, horas depois de uma reinstalação:
+
+```
+$ systemctl --user show -p NeedDaemonReload --value nexus-sense-agent.service \
+      'app-nexus\x2dsense\x2dautostart@autostart.service'
+yes
+yes
+```
+
+**E vale para parar, não só para recarregar.** A unit do agente tem
+`Restart=always`: um `kill` do root o derruba e o systemd do usuário o reabre em
+3 s. Quem o para de verdade é o gerenciador que o subiu.
+
+**Como o root chega lá.** `/run/user/<uid>` existe enquanto o gerenciador
+daquele usuário está no ar, e o `XDG_RUNTIME_DIR` certo basta para o
+`systemctl` achar o socket — sem `DBUS_SESSION_BUS_ADDRESS`:
+
+```bash
+runuser -u "$nome" -- env XDG_RUNTIME_DIR="/run/user/$uid" systemctl --user daemon-reload
+```
+
+É o que `each_user_manager` faz no `setup.sh`, para todo usuário com sessão.
+No portão de 2026-10-10, sob `pkexec`, o journal mostra os dois em sequência —
+`systemd[1]: Reloading...` e, 0,35 s depois, `systemd[1039]: Reloading...` — e
+as duas units passaram de `yes` a `no` sem ninguém recarregar à mão.
+
+Nesta máquina o `runuser` abre uma sessão PAM a cada chamada
+(`/etc/pam.d/runuser` inclui `system-login`): aparece no journal como `session
+opened` e `session closed`, 0,2 s uma da outra, e não sobra sessão no
+`loginctl`.
+
+**Regra.** Num instalador que roda como root e instala unit de usuário, cada
+`systemctl` tem de saber com qual gerenciador fala. E a conferência é uma
+pergunta ao gerenciador certo — `systemctl --user show -p NeedDaemonReload` —
+não o código de retorno do `daemon-reload` do sistema, que dá certo sempre.
 
 ---
 

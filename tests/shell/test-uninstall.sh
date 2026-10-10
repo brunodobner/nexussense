@@ -175,6 +175,25 @@ else
   echo "  FALHA uninstall nao remove o grupo: '$ordem'"; fail=1
 fi
 
+# Agente e bandeja saem na desinstalacao -- e SO nela, como o grupo. A
+# limpeza roda antes de toda reinstalacao, e encerra-los ali os tiraria de
+# quem reinstala. E saem ANTES da limpeza: o gerenciador do usuario para a
+# unit do agente enquanto ela ainda esta no disco.
+ordem=$(printf '%s' "$desinstala" | grep -nE '^\s*(stop_nexus_sense|comprehensive_cleanup)\s*$' \
+        | sed 's/^[0-9]*:\s*//' | tr '\n' ' ')
+if [ "$ordem" = "stop_nexus_sense comprehensive_cleanup " ]; then
+  echo "  OK   a desinstalacao encerra agente e bandeja, antes da limpeza"
+else
+  echo "  FALHA uninstall nao encerra agente e bandeja antes da limpeza: '$ordem'"; fail=1
+fi
+
+if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' \
+     | grep -qE 'stop_nexus_sense|nexus_sense_pids|each_user_manager stop|kill '; then
+  echo "  FALHA a limpeza da reinstalacao encerra agente e bandeja"; fail=1
+else
+  echo "  OK   a reinstalacao nao encerra agente nem bandeja"
+fi
+
 if printf '%s\n%s' "$app" "$trecho" | grep -v '^\s*#' | grep -qE 'groupdel nexus_sense|cleanup_nexus_group'; then
   echo "  FALHA a limpeza da reinstalacao apaga o grupo: o gid muda a cada uma"; fail=1
 else
