@@ -27,6 +27,10 @@ exigir() { [ -e "$1" ] || { echo "ERRO alvo ausente: $1"; exit 3; }; }
 exigir "$ROOT/setup.sh"
 exigir "$ROOT/driver/Makefile"
 exigir "$ROOT/packaging"
+# cmp vem do diffutils, que uma imagem minima nao traz. Sem ele a
+# comparacao das licencas lia "comando nao existe" como "as duas diferem"
+# -- foi assim que o container do CI reprovou uma arvore certa.
+command -v cmp > /dev/null 2>&1 || { echo "ERRO alvo ausente: cmp (pacote diffutils)"; exit 3; }
 
 cd "$ROOT" || exit 3
 fail=0

@@ -30,13 +30,20 @@ jobs:
     container: archlinux:latest
     timeout-minutes: 15
     steps:
-      # python-typing_extensions: o pytest-qt o importa e o pacote do Arch
-      # nao o declara. Numa maquina de uso ele ja veio por outro caminho;
-      # num container limpo o pytest nem chega a coletar.
+      # A imagem do Arch e minima, e o que falta nela nao avisa:
+      #
+      #   base-devel                traz o diffutils. Sem ele nao ha cmp, e
+      #                             test-arvore.sh lia "comando nao existe"
+      #                             como "as duas licencas diferem".
+      #   python-typing_extensions  o pytest-qt o importa e o pacote do Arch
+      #                             nao o declara; num container limpo o
+      #                             pytest nem chega a coletar.
+      #
+      # Numa maquina de uso os dois ja vieram por outro caminho.
       - name: Dependencias
         run: |
           pacman -Syu --noconfirm --needed \
-            git make gcc python python-pytest python-pytest-qt pyside6 \
+            base-devel git python python-pytest python-pytest-qt pyside6 \
             python-typing_extensions python-dbus python-tomli-w dbus \
             ttf-dejavu shellcheck desktop-file-utils
           useradd -m ci
