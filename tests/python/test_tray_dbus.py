@@ -355,3 +355,30 @@ def test_watcher_que_volta_e_recusa_nao_derruba_o_aplicativo(stage, tmp_path):
     wait_for(lambda: 'recusou o registro' in log.read_text())
     assert app.poll() is None
     assert bus.name_has_owner(name)
+
+
+def test_sem_barramento_o_aplicativo_abre_em_vez_de_se_dar_por_repetido(tmp_path):
+    """Sem barramento de sessao nao ha nome de instancia unica a disputar.
+    O aplicativo lia a recusa do registro como "ja ha outra aberta", pedia
+    a ela que aparecesse e saia com 0 -- antes de chegar a bandeja, e sem
+    abrir nada. O endereco e o da fixture autouse do conftest, que nao
+    existe."""
+    address = os.environ['DBUS_SESSION_BUS_ADDRESS']
+    assert not os.path.exists(address.removeprefix('unix:path='))
+    tree = build_tree(tmp_path / 'sysfs', module='nexus_sense')
+    env = {**private_env(address), 'PYTHONUNBUFFERED': '1'}
+    log = tmp_path / 'app.log'
+    with log.open('w') as handle:
+        app = subprocess.Popen([sys.executable, '-m', 'nexus_sense.gui.app', '--tray-only', '--root', str(tree)],
+                               env=env, stdout=handle, stderr=handle)
+        try:
+            wait_for(lambda: app.poll() is not None or 'bandeja: ' in log.read_text())
+            assert 'já havia uma instância' not in log.read_text()
+            assert app.poll() is None, log.read_text()
+            assert log.read_text().splitlines()[-1] in ('bandeja: qsystemtrayicon', 'bandeja: nenhuma')
+            time.sleep(0.7)     # o laco de eventos roda, e o processo segue
+            assert app.poll() is None, log.read_text()
+        finally:
+            if app.poll() is None:
+                app.terminate()
+            app.wait(timeout=5)

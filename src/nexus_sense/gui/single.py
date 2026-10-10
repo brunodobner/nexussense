@@ -46,6 +46,18 @@ class SingleInstance(QObject):
         self._on_show()
 
 
+def bus_available(*, bus=None):
+    """Ha barramento de sessao? Sem ele nao ha nome a disputar.
+
+    `claim` devolve False tanto para "o nome ja e de outro" quanto para
+    "nao ha barramento", e so o primeiro quer dizer que ja existe uma
+    instancia. Quem chama pergunta isto antes.
+    """
+    if bus is None:
+        bus = QDBusConnection.sessionBus()
+    return bool(bus.isConnected())
+
+
 def claim(objeto, *, bus=None):
     """Tenta ser a instancia dona. False se ja ha uma.
 
