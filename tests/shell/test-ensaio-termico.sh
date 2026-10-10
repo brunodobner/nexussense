@@ -1,0 +1,405 @@
+#!/bin/bash
+# O roteiro do ensaio termico devolve a ventoinha -- provado numa arvore de
+# mentira, antes de ele encostar na maquina.
+#
+# tests/hardware/ensaio-termico.sh escreve em fan_speed de verdade. O que
+# este teste guarda e o que nao pode falhar la: todo limite da secao 7 de
+# docs/plano-termico.md encerra o ensaio e devolve 0,0; todo sinal devolve;
+# um kill -9 e coberto pelo vigia; e uma escrita de outra mao NAO e desfeita.
+#
+# Nada aqui toca em /sys: o roteiro recebe ENSAIO_RAIZ, uma arvore plantada
+# num tmpdir, com um "EC" de mentira que faz a rotacao seguir o fan_speed. Os
+# indices de hwmon e de zona termica sao embaralhados de proposito: o roteiro
+# tem de achar tudo pelo nome (armadilha 19).
+#
+# Saidas: 0 passou   3 alvo ausente   1 falhou
+set -u
+
+RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
+S="$RAIZ/tests/hardware/ensaio-termico.sh"
+
+[ -f "$S" ] || { echo "ERRO alvo ausente: $S"; exit 3; }
+[ -x "$S" ] || { echo "ERRO alvo ausente: $S nao e executavel"; exit 3; }
+for c in setsid awk sort mktemp env; do
+    command -v "$c" > /dev/null 2>&1 || { echo "ERRO alvo ausente: $c"; exit 3; }
+done
+# O caso do SIGINT precisa devolver o sinal ao padrao: um processo lancado
+# em segundo plano por um shell sem controle de jobs nasce com ele ignorado.
+env --default-signal=INT true 2> /dev/null \
+    || { echo "ERRO alvo ausente: env --default-signal (coreutils 8.31 ou mais novo)"; exit 3; }
+
+T=$(mktemp -d)
+ECS=()
+limpa() {
+    local p
+    for p in "${ECS[@]}"; do kill "$p" 2> /dev/null; done
+    rm -rf "$T"
+}
+trap limpa EXIT
+
+fail=0
+ok()    { echo "  OK    $1"; }
+falha() { echo "  FALHA $1"; fail=1; }
+
+# ─── a arvore de mentira ────────────────────────────────────────────
+poe() {      # troca atomica: quem le nunca pega o arquivo vazio
+    printf '%s\n' "$2" > "$1.novo" && mv "$1.novo" "$1"
+}
+
+monta() {    # $1 = raiz da arvore
+    local d=$1 h=$1/sys/class/hwmon z=$1/sys/class/thermal n
+    mkdir -p "$h"/hwmon{2,3,7,11,40} "$z"/thermal_zone{0,2,4,6,9} \
+        "$d/sys/class/power_supply/BAT1" "$d/sys/class/power_supply/ACAD" \
+        "$d/sys/devices/platform/acer-wmi/nitro_sense" "$d/sys/firmware/acpi" \
+        "$d/sys/devices/system/cpu/cpu0/thermal_throttle" \
+        "$d/sys/devices/system/cpu/cpu0/cpufreq" "$d/proc" "$d/bin" "$d/run" "$d/state"
+
+    echo BAT1 > "$h/hwmon2/name"
+    echo acer > "$h/hwmon7/name"
+    n=1
+    for par in "CPU:48000" "GPU:47000" "External 2:46000"; do
+        echo "${par%%:*}" > "$h/hwmon7/temp${n}_label"
+        echo "${par##*:}" > "$h/hwmon7/temp${n}_input"
+        n=$((n + 1))
+    done
+    echo CPU > "$h/hwmon7/fan1_label"; echo 2300 > "$h/hwmon7/fan1_input"
+    echo GPU > "$h/hwmon7/fan2_label"; echo 2000 > "$h/hwmon7/fan2_input"
+
+    echo coretemp > "$h/hwmon11/name"
+    # O pacote NAO e o temp1: o roteiro tem de ir pelo rotulo.
+    echo "Core 0" > "$h/hwmon11/temp1_label";       echo 44000 > "$h/hwmon11/temp1_input"
+    echo "Package id 0" > "$h/hwmon11/temp4_label"; echo 45000 > "$h/hwmon11/temp4_input"
+    echo 0 > "$h/hwmon11/temp4_crit_alarm"
+
+    for n in 3 40; do
+        echo nvme > "$h/hwmon$n/name"
+        echo Composite > "$h/hwmon$n/temp1_label"; echo 42000 > "$h/hwmon$n/temp1_input"
+    done
+
+    echo acpitz > "$z/thermal_zone0/type"; echo 48000 > "$z/thermal_zone0/temp"
+    echo SEN4 > "$z/thermal_zone2/type";   echo 46050 > "$z/thermal_zone2/temp"
+    echo SEN2 > "$z/thermal_zone4/type";   echo 46050 > "$z/thermal_zone4/temp"
+    echo SEN5 > "$z/thermal_zone6/type";   echo 46050 > "$z/thermal_zone6/temp"
+    echo SEN3 > "$z/thermal_zone9/type";   echo 46050 > "$z/thermal_zone9/temp"
+
+    echo 2800000 > "$d/sys/class/power_supply/BAT1/charge_now"
+    echo 3500000 > "$d/sys/class/power_supply/BAT1/charge_full"
+    echo 0 > "$d/sys/class/power_supply/BAT1/current_now"
+    echo 1 > "$d/sys/class/power_supply/ACAD/online"
+    echo "0,0" > "$d/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"
+    echo balanced-performance > "$d/sys/firmware/acpi/platform_profile"
+    echo 0 > "$d/sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count"
+    echo 0 > "$d/sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_total_time_ms"
+    echo 2400000 > "$d/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
+    echo "0.50 0.40 0.30 1/100 1" > "$d/proc/loadavg"
+    echo "maximum_mode = false" > "$d/config.toml"
+
+    # O ps de mentira: os "processos" sao as linhas de um arquivo.
+    : > "$d/processos"
+    printf '#!/bin/bash\ncat "%s/processos"\n' "$d" > "$d/bin/ps"
+    # Um escritor que recusa o automatico, para o caso do 100,100.
+    printf '#!/bin/bash\n[ "$1" = "0,0" ] && exit 1\nprintf "%%s\\n" "$1" > "$2"\n' > "$d/bin/recusa-zero"
+    chmod +x "$d/bin/ps" "$d/bin/recusa-zero"
+}
+
+FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
+
+ec_falso() { # $1 = arvore, $2 = normal | surdo. A rotacao segue o fan_speed.
+    local f h v c g antes=
+    f=$(FAN_DE "$1"); h="$1/sys/class/hwmon/hwmon7"
+    while [ -d "$h" ]; do
+        v=
+        read -r v < "$f"
+        case "$v" in
+            *,*) c=${v%,*}; g=${v#*,} ;;
+            *) v=$antes ;;       # pego no meio de uma escrita: fica o de antes
+        esac
+        if [ "$v" != "$antes" ]; then
+            if [ "$2" = surdo ] || [ "$v" = "0,0" ]; then
+                poe "$h/fan1_input" 2300; poe "$h/fan2_input" 2000
+            else
+                poe "$h/fan1_input" $((600 + c * 50)); poe "$h/fan2_input" $((500 + g * 45))
+            fi
+            antes=$v
+        fi
+        sleep 0.02
+    done 2> /dev/null
+}
+
+nova() {     # $1 = nome do caso, $2 = modo do EC -> a arvore fica em $D
+    local p
+    for p in "${ECS[@]}"; do kill "$p" 2> /dev/null; done
+    ECS=()
+    D="$T/$1"
+    monta "$D"
+    ec_falso "$D" "${2:-normal}" &
+    ECS+=("$!")
+}
+
+roda() {     # $1 = arvore; o resto e o comando. Em primeiro plano.
+    local d=$1
+    shift
+    ENSAIO_RAIZ="$d" ENSAIO_CONFIG="$d/config.toml" PATH="$d/bin:$PATH" \
+        XDG_RUNTIME_DIR="$d/run" XDG_STATE_HOME="$d/state" \
+        ENSAIO_PASSO="${PASSO:-0.05}" ENSAIO_PASSO_VIGIA="${PASSO_VIGIA:-0.05}" \
+        ENSAIO_ASSENTA=2 ENSAIO_LEITURAS=2 "$@" > "$d/saida.txt" 2>&1
+}
+
+lanca() {    # o mesmo, em segundo plano. O exec faz PID ser o do roteiro, e
+             # nao o de um subshell: e nele que os sinais tem de chegar.
+    local d=$1
+    shift
+    (
+        ENSAIO_RAIZ="$d" ENSAIO_CONFIG="$d/config.toml" PATH="$d/bin:$PATH" \
+            XDG_RUNTIME_DIR="$d/run" XDG_STATE_HOME="$d/state" \
+            ENSAIO_PASSO="${PASSO:-0.05}" ENSAIO_PASSO_VIGIA="${PASSO_VIGIA:-0.05}" \
+            ENSAIO_ASSENTA=2 ENSAIO_LEITURAS=2 exec "$@"
+    ) > "$d/saida.txt" 2>&1 &
+    PID=$!
+}
+
+espera_fan() {   # $1 = arvore, $2 = valor, $3 = decimos de segundo
+    local i
+    for ((i = 0; i < $3; i++)); do
+        [ "$(cat "$(FAN_DE "$1")" 2> /dev/null)" = "$2" ] && return 0
+        sleep 0.1
+    done
+    return 1
+}
+
+fan() { cat "$(FAN_DE "$1")" 2> /dev/null; }
+
+confere() {  # $1 = descricao, $2 = rc visto, $3 = rc esperado, $4 = fan esperado
+    if [ "$2" = "$3" ] && [ "$(fan "$D")" = "$4" ]; then
+        ok "$1"
+    else
+        falha "$1: saiu com $2 (esperado $3), fan_speed '$(fan "$D")' (esperado '$4')"
+    fi
+}
+
+# ─── 1. todo limite e toda condicao encerram e devolvem ─────────────
+# O roteiro escreve 40,40 e fica amostrando; a provocacao vem com ele ja no
+# ar. Limite de temperatura sai com 10; pessoa, bateria e sensor que some
+# saem com 11. Nos dois a ventoinha volta a 0,0 -- menos quando foi outra
+# mao que escreveu nela.
+provoca() {
+    local h="$D/sys/class/hwmon" z="$D/sys/class/thermal" b="$D/sys/class/power_supply"
+    case "$1" in
+        pacote)      poe "$h/hwmon11/temp4_input" 98500 ;;
+        crit_alarm)  poe "$h/hwmon11/temp4_crit_alarm" 1 ;;
+        ec_cpu)      poe "$h/hwmon7/temp1_input" 99000 ;;
+        ec_gpu)      poe "$h/hwmon7/temp2_input" 85000 ;;
+        sen2)        poe "$z/thermal_zone4/temp" 81050 ;;
+        sen3)        poe "$z/thermal_zone9/temp" 77050 ;;
+        sen4)        poe "$z/thermal_zone2/temp" 91050 ;;
+        sen5)        poe "$z/thermal_zone6/temp" 81050 ;;
+        nvme1)       poe "$h/hwmon3/temp1_input" 75000 ;;
+        nvme2)       poe "$h/hwmon40/temp1_input" 75000 ;;
+        cabo)        poe "$b/ACAD/online" 0 ;;
+        carga)       poe "$b/BAT1/charge_now" 1700000 ;;
+        perfil)      poe "$D/sys/firmware/acpi/platform_profile" balanced ;;
+        maximo)      poe "$D/config.toml" "maximum_mode = true" ;;
+        jogo)        poe "$D/processos" GameThread ;;
+        sensor_some) rm -f "$z/thermal_zone2/temp" ;;
+        outra_mao)   poe "$(FAN_DE "$D")" "33,33" ;;
+        automatico)  poe "$(FAN_DE "$D")" "0,0" ;;
+    esac
+}
+
+caso() {     # $1 = provocacao, $2 = rc esperado, $3 = fan_speed esperado
+    local rc
+    nova "limite-$1"
+    lanca "$D" env ENSAIO_SEGURA=40 "$S" _segura
+    if ! espera_fan "$D" "40,40" 50; then
+        falha "$1: o roteiro nao chegou a escrever 40,40"
+        kill "$PID" 2> /dev/null
+        return
+    fi
+    provoca "$1"
+    wait "$PID"; rc=$?
+    confere "$1 encerra com $2 e deixa fan_speed em $3" "$rc" "$2" "$3"
+}
+
+echo "--- limites de temperatura"
+for l in pacote crit_alarm ec_cpu ec_gpu sen2 sen3 sen4 sen5 nvme1 nvme2; do
+    caso "$l" 10 "0,0"
+done
+
+echo "--- pessoa, bateria e sensor que some"
+for l in cabo carga perfil maximo jogo sensor_some; do
+    caso "$l" 11 "0,0"
+done
+
+echo "--- outra mao na ventoinha: o roteiro para e NAO escreve por cima"
+caso outra_mao 11 "33,33"
+caso automatico 11 "0,0"
+grep -q 'nao escreveu' "$T/limite-outra_mao/saida.txt" \
+    && ok "o roteiro diz que deixou a ventoinha como a outra mao escreveu" \
+    || falha "faltou a linha dizendo que a ventoinha ficou como estava"
+
+# Um degrau abaixo de cada limite nao encerra: senao o teste acima passaria
+# com um roteiro que aborta por qualquer coisa.
+nova folga
+poe "$D/sys/class/hwmon/hwmon11/temp4_input" 84000
+poe "$D/sys/class/hwmon/hwmon7/temp1_input" 98000
+poe "$D/sys/class/hwmon/hwmon7/temp2_input" 84000
+poe "$D/sys/class/thermal/thermal_zone2/temp" 90050
+poe "$D/sys/class/hwmon/hwmon3/temp1_input" 74000
+roda "$D" env ENSAIO_SEGURA=40 ENSAIO_SEGURA_N=6 "$S" _segura
+confere "logo abaixo dos limites o roteiro vai ate o fim" "$?" 0 "0,0"
+
+# O pacote pede tres amostras seguidas: duas nao bastam.
+nova pacote-duas
+PASSO=0.2 lanca "$D" env ENSAIO_SEGURA=40 ENSAIO_SEGURA_N=12 "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "pacote por duas amostras: o roteiro nao escreveu 40,40"
+poe "$D/sys/class/hwmon/hwmon11/temp4_input" 99000
+sleep 0.3
+poe "$D/sys/class/hwmon/hwmon11/temp4_input" 60000
+wait "$PID"
+confere "pacote acima do limite por menos de tres amostras nao encerra" "$?" 0 "0,0"
+
+# ─── 2. sinais ──────────────────────────────────────────────────────
+echo "--- sinais"
+sinal() {    # $1 = nome, $2 = rc esperado
+    nova "sinal-$1"
+    lanca "$D" env --default-signal=INT env ENSAIO_SEGURA=40 "$S" _segura
+    if ! espera_fan "$D" "40,40" 50; then
+        falha "SIG$1: o roteiro nao chegou a escrever 40,40"; kill "$PID" 2> /dev/null; return
+    fi
+    kill "-$1" "$PID"
+    wait "$PID"
+    confere "SIG$1 devolve a ventoinha" "$?" "$2" "0,0"
+}
+sinal TERM 143
+sinal INT 130
+sinal HUP 129
+
+# ─── 3. o vigia ─────────────────────────────────────────────────────
+echo "--- o vigia"
+nova vigia-kill9
+lanca "$D" env ENSAIO_SEGURA=40 "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "kill -9: o roteiro nao chegou a escrever 40,40"
+kill -KILL "$PID"
+wait "$PID" 2> /dev/null
+if espera_fan "$D" "0,0" 30; then
+    ok "depois de um kill -9 o vigia devolve 0,0"
+else
+    falha "3 s depois do kill -9, fan_speed ainda e '$(fan "$D")'"
+fi
+
+# O vigia tambem respeita a outra mao: roteiro morto, valor que ele nao
+# escreveu, e a ventoinha fica.
+nova vigia-outra-mao
+PASSO=5 lanca "$D" env ENSAIO_SEGURA=40 "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "vigia e outra mao: o roteiro nao escreveu 40,40"
+poe "$(FAN_DE "$D")" "77,77"
+kill -KILL "$PID"
+wait "$PID" 2> /dev/null
+sleep 0.6
+[ "$(fan "$D")" = "77,77" ] \
+    && ok "o vigia nao desfaz o que outra mao escreveu" \
+    || falha "o vigia escreveu por cima da outra mao: fan_speed '$(fan "$D")'"
+
+# Roteiro travado (SIGSTOP) e prazo vencido: o vigia o acorda e o encerra.
+# O prazo e de 2 s e nao de 1: ele se conta em segundos inteiros, e com 1 o
+# roteiro podia vencer o proprio prazo e devolver a ventoinha antes de este
+# teste chegar a ver o 40,40 -- reprovava sob carga, por um defeito do teste.
+nova vigia-prazo
+lanca "$D" env ENSAIO_SEGURA=40 ENSAIO_PRAZO=2 ENSAIO_FOLGA_VIGIA=0 "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "prazo: o roteiro nao chegou a escrever 40,40"
+kill -STOP "$PID"
+if espera_fan "$D" "0,0" 60; then
+    ok "roteiro travado: vencido o prazo, o vigia faz a ventoinha voltar"
+else
+    falha "roteiro travado: 6 s depois, fan_speed ainda e '$(fan "$D")'"
+fi
+kill -CONT "$PID" 2> /dev/null
+wait "$PID" 2> /dev/null
+
+# ─── 4. o automatico recusado vira maximo ───────────────────────────
+echo "--- 0,0 recusado tres vezes"
+nova recusa-zero
+lanca "$D" env ENSAIO_SEGURA=40 ENSAIO_ESCRITOR="$D/bin/recusa-zero" "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "recusa: o roteiro nao chegou a escrever 40,40"
+kill -TERM "$PID"
+wait "$PID"
+confere "sem conseguir 0,0, o roteiro deixa 100,100 e sai com 15" "$?" 15 "100,100"
+
+nova recusa-zero-vigia
+lanca "$D" env ENSAIO_SEGURA=40 ENSAIO_ESCRITOR="$D/bin/recusa-zero" "$S" _segura
+espera_fan "$D" "40,40" 50 || falha "recusa pelo vigia: o roteiro nao escreveu 40,40"
+kill -KILL "$PID"
+wait "$PID" 2> /dev/null
+espera_fan "$D" "100,100" 30 \
+    && ok "sem conseguir 0,0, o vigia tambem deixa 100,100" \
+    || falha "vigia com 0,0 recusado: fan_speed '$(fan "$D")'"
+
+# ─── 5. a condicao de partida ───────────────────────────────────────
+echo "--- a condicao de partida do E2"
+recusa() {   # $1 = caso, $2 = descricao, $3 = arquivo na arvore, $4 = valor, $5 = fan esperado
+    nova "partida-$1"
+    poe "$D/$3" "$4"
+    roda "$D" "$S" e2 "$D/e2.tsv"
+    confere "E2 recusa comecar: $2" "$?" 12 "$5"
+}
+recusa manual  "ventoinha em manual"   sys/devices/platform/acer-wmi/nitro_sense/fan_speed "30,30" "30,30"
+recusa cabo    "fora da tomada"        sys/class/power_supply/ACAD/online 0 "0,0"
+recusa carga   "bateria abaixo de 60%" sys/class/power_supply/BAT1/charge_now 2000000 "0,0"
+recusa pacote  "pacote quente"         sys/class/hwmon/hwmon11/temp4_input 66000 "0,0"
+recusa jogo    "jogo aberto"           processos wineserver "0,0"
+recusa ocupada "maquina ocupada"       proc/loadavg "3.50 1.00 0.50 1/100 1" "0,0"
+
+nova partida-sem-sensor
+rm -f "$D/sys/class/thermal/thermal_zone2/temp"
+roda "$D" "$S" e2 "$D/e2.tsv"
+confere "E2 sem a zona SEN4 sai com alvo ausente" "$?" 3 "0,0"
+
+# ─── 6. o E2 inteiro ────────────────────────────────────────────────
+echo "--- o E2 inteiro"
+nova e2
+roda "$D" "$S" e2 "$D/e2.tsv"
+confere "E2 completo termina com 0 e a ventoinha em automatico" "$?" 0 "0,0"
+[ "$(grep -c '  OK$' "$D/saida.txt")" -eq 2 ] \
+    && ok "os dois exercicios passaram antes do mapa" \
+    || falha "os dois exercicios nao passaram: $(grep -c '  OK$' "$D/saida.txt") de 2"
+faltam=0
+for p in 100 80 60 50 40 30 20 15 10 5 1; do
+    # coluna 3 e a fase, coluna 4 o que o roteiro escreveu, 5 o que leu
+    awk -F'\t' -v p="$p" '$3 == "p=" p && $4 == p "," p && $5 == p "," p { n++ } END { exit !(n >= 4) }' \
+        "$D/e2.tsv" || { falha "o traco nao tem as amostras de $p%"; faltam=1; }
+done
+[ "$faltam" -eq 0 ] && ok "o traco tem as onze porcentagens, escritas e lidas de volta"
+# A rotacao do EC de mentira e 600 + 50 por ponto: 100% da 5600, 1% da 650.
+grep -qE '^100 +5600 5600 5600 ' "$D/e2.resumo.txt" && grep -qE '^1 +650 650 650 ' "$D/e2.resumo.txt" \
+    && ok "o resumo traz a rotacao de cada porcentagem" \
+    || falha "o resumo nao traz as rotacoes esperadas"
+[ -z "$(ls -A "$D/run")" ] \
+    && ok "nenhum diretorio de trabalho sobrou" \
+    || falha "sobrou em run/: $(ls -A "$D/run" | tr '\n' ' ')"
+
+# Um EC que nao obedece: a rotacao nao segue a escrita, e o plano para ali.
+nova e2-surdo surdo
+roda "$D" env ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
+confere "rotacao que nao acompanha a escrita: controle positivo reprova" "$?" 13 "0,0"
+
+# Um vigia lento demais: o exercicio tem de reprovar, e nao passar calado.
+nova e2-vigia-lento
+PASSO_VIGIA=8 roda "$D" env ENSAIO_VIGIA_MAX=1 ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
+confere "vigia que nao devolve a tempo: o exercicio reprova" "$?" 14 "0,0"
+
+# ─── 7. o roteiro nao sabe o indice de ninguem ──────────────────────
+codigo() { grep -v '^[[:space:]]*#' "$S"; }
+if codigo | grep -qE 'hwmon[0-9]|thermal_zone[0-9]|rfkill[0-9]'; then
+    falha "o roteiro cita um indice de hwmon ou de zona termica"
+else
+    ok "nenhum indice de hwmon ou de zona termica no roteiro"
+fi
+if codigo | grep -q 'nvidia-smi'; then
+    falha "o roteiro chama o nvidia-smi"
+else
+    ok "o roteiro nao chama o nvidia-smi"
+fi
+
+echo
+[ "$fail" -eq 0 ] && echo "PASSOU" || echo "FALHOU"
+exit "$fail"

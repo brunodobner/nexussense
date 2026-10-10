@@ -167,10 +167,13 @@ Lido, nada medido:
   sentido só: automático. Se você estiver em manual, ele se recusa a começar.
 - **O limite de aborto é o da seção 7**, igual para todos, e está escrito antes
   de qualquer medição.
-- **O roteiro mora no repositório**, não no scratchpad: `tests/hardware/`, com
-  a raiz do sysfs como parâmetro. A lógica de aborto e de devolução é testada
-  contra uma árvore falsa antes de encostar na máquina — é o controle positivo
-  do caminho de aborto, sem calor.
+- **O roteiro mora no repositório**, não no scratchpad:
+  `tests/hardware/ensaio-termico.sh`, com a raiz do sysfs como parâmetro
+  (`ENSAIO_RAIZ`). A lógica de aborto e de devolução é testada contra uma
+  árvore falsa antes de encostar na máquina, em
+  `tests/shell/test-ensaio-termico.sh` — é o controle positivo do caminho de
+  aborto, sem calor. O traço de cada ensaio vai para
+  `~/.local/state/nexus-sense/`, que não é tmpfs.
 - **O que for medido vai para [estado.md](estado.md) antes de qualquer
   reinício.** O scratchpad é tmpfs.
 
@@ -214,9 +217,10 @@ Dois exercícios entram aqui, antes de qualquer calor:
 - **O vigia.** Com `60,60` escrito, o roteiro principal leva um `kill -9`. O
   vigia tem de devolver `0,0` em até 3 s, e a rotação tem de voltar à do
   automático.
-- **O aborto.** O roteiro roda com o limite do pacote rebaixado para 5 °C
-  abaixo da temperatura corrente. Tem de abortar na primeira amostra, devolver
-  `0,0` e sair com o código de aborto.
+- **O aborto.** O roteiro roda com o limite da CPU pelo EC rebaixado para 5 °C
+  abaixo da leitura corrente. Tem de abortar na primeira amostra, devolver
+  `0,0` e sair com o código de aborto. (O limite rebaixado é o do EC e não o
+  do pacote porque o do pacote, por regra, pede três amostras seguidas.)
 
 Nenhum dos dois é teste por vácuo de si mesmo: os dois conferem o efeito
 (`fan_speed` e rotação), não o código de saída sozinho (armadilha 11).
