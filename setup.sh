@@ -42,6 +42,12 @@ DRIVER_DIR="${RAIZ}/driver"
 LEGACY_INSTALL_DIR="/opt/DAMX"
 LEGACY_DAEMON_SERVICE_NAME="DAMX-Daemon.service"
 
+# Onde o systemd poe o diretorio de cada usuario com gerenciador no ar, e
+# onde o kernel lista os processos. Sao variaveis para os testes plantarem
+# uma arvore no lugar -- nenhum deles fala com a sessao de quem os roda.
+RUN_USER_DIR="/run/user"
+PROC_DIR="/proc"
+
 # Colors for terminal output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -1058,9 +1064,10 @@ EOL
 #   o grupo nexus_sense     esta limpeza roda tambem antes de reinstalar, e
 #                           recriar o grupo troca o gid. Quem o remove e a
 #                           desinstalacao: cleanup_nexus_group.
-#   agente e bandeja em execucao   sao processos da sessao do usuario e
-#                           saem com ela. O disable abaixo so impede que
-#                           voltem na proxima.
+#   agente e bandeja em execucao   encerra-los aqui os tiraria de quem
+#                           reinstala. Quem os encerra e a desinstalacao:
+#                           stop_nexus_sense. O disable abaixo so impede
+#                           que voltem na proxima sessao.
 cleanup_nexus_sense() {
   echo "Removendo o aplicativo Nexus Sense..."
 
@@ -1083,6 +1090,64 @@ cleanup_nexus_sense() {
   rm -f /usr/bin/nexus-sense
   rm -f /usr/bin/nexus-sense-agent
   rm -rf /usr/lib/nexus-sense
+}
+
+# Roda "systemctl --user ..." no gerenciador de cada usuario com sessao.
+#
+# O instalador e root, e quem carrega a unit do agente e o systemd do
+# USUARIO: o que o root diz ao "systemctl" chega a outro gerenciador.
+# /run/user/<uid> existe enquanto o daquele usuario esta no ar.
+each_user_manager() {
+  local d uid nome
+  for d in "${RUN_USER_DIR}"/*/; do
+    uid=$(basename "$d")
+    case "$uid" in ''|*[!0-9]*) continue ;; esac
+    nome=$(id -nu "$uid" 2> /dev/null) || continue
+    runuser -u "$nome" -- env XDG_RUNTIME_DIR="${RUN_USER_DIR}/${uid}" \
+      systemctl --user "$@" &> /dev/null || true
+  done
+}
+
+# PIDs dos processos que os lancadores criaram: o agente e a interface.
+#
+# O argv e comparado elemento a elemento -- /usr/bin/python3 na frente e,
+# adiante, "-m" seguido do modulo. Procurar o texto na linha de comando
+# acharia tambem o shell que o contem (armadilha 10).
+nexus_sense_pids() {
+  local p argv i
+  for p in "${PROC_DIR}"/[0-9]*/; do
+    argv=()
+    # O processo pode sair no meio da varredura e levar o arquivo junto.
+    mapfile -d '' -t argv 2> /dev/null < "${p}cmdline" || continue
+    [ "${argv[0]:-}" = /usr/bin/python3 ] || continue
+    for ((i = 1; i + 1 < ${#argv[@]}; i++)); do
+      [ "${argv[i]}" = -m ] || continue
+      # O primeiro "-m" decide: o que vem depois do modulo e argumento dele.
+      case "${argv[i + 1]}" in
+        nexus_sense|nexus_sense.gui.app) basename "$p" ;;
+      esac
+      break
+    done
+  done
+}
+
+# Encerra o agente e a bandeja de quem estiver com sessao aberta. So a
+# desinstalacao chama: a limpeza que antecede uma reinstalacao os deixa
+# rodando, como deixa o grupo.
+stop_nexus_sense() {
+  local pid
+  echo "Encerrando o agente e a bandeja..."
+
+  # A unit do agente tem Restart=always: morto por sinal, o systemd o
+  # reabre em 3 s. Quem o para de verdade e o gerenciador do usuario.
+  each_user_manager stop nexus-sense-agent.service
+
+  # A bandeja nao tem unit fixa -- sobe pelo autostart, pelo menu ou pelo
+  # botao N -- e se acha pelo processo. Um agente aberto a mao tambem.
+  for pid in $(nexus_sense_pids); do
+    kill -TERM "$pid" 2> /dev/null || true
+  done
+  return 0
 }
 
 # Remove o grupo nexus_sense. So a desinstalacao chama (decisao D5); a
@@ -1207,6 +1272,7 @@ perform_install() {
 
 uninstall() {
   echo -e "${YELLOW}Uninstalling Nexus Sense...${NC}"
+  stop_nexus_sense
   comprehensive_cleanup
   cleanup_nexus_group
   echo -e "${GREEN}Nexus Sense uninstalled successfully!${NC}"
