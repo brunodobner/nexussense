@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4e: v1.2.7, o caminho WMI do botão N saiu do driver; falta a partida a frio, que se confere ao abrir a 4f)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4e fechada: v1.2.7, o caminho WMI do botão N saiu do driver, partida a frio conferida; 4f aberta)
 
 ---
 
@@ -57,7 +57,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4b -- GPU       v1.2.4: a janela deixa a dGPU dormir; temperatura fica no nvidia-smi
 [x] Melhorias, etapa 4c -- bandeja   v1.2.5: o item volta com o watcher; sem ele, ou sem barramento, cai na reserva
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
-[x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega; o caminho saiu, bitmask identico
+[x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
 ```
 
@@ -1739,13 +1739,13 @@ desenho.
 
 ---
 
-## Melhorias de 2026-10, etapa 4e — o botão N, e onde a 4f começa
+## Melhorias de 2026-10, etapa 4e — fechada, e onde a 4f começa
 
 A sub-etapa 4e da seção 6 de [plano-melhorias.md](plano-melhorias.md): o
 evento WMI do botão N chega ao driver? Ramo `melhorias/4e-botao-n`, em
 2026-10-10, **v1.2.6 → v1.2.7.** Não chega, e o caminho saiu: 168 linhas do
-driver, bitmask idêntico. **Falta a partida a frio**, que se confere ao abrir a
-4f — só então a sub-etapa se dá por fechada.
+driver, bitmask idêntico. A partida a frio foi conferida no mesmo dia — o
+resultado está no fim desta seção.
 
 O baseline capturado antes da primeira edição conferiu com o esperado: 387
 passam na suíte Python, sem xfail; shell 21 passam e 2 pulam, idêntico sob
@@ -1946,8 +1946,9 @@ já em vigor.
    `test-install-drivers.sh` reprova com `fonte em /usr/src difere do
    repositório`. É o teste fazendo o que promete. Foram 20 passam, 1 falha e 2
    pulam nos três commits, e 21 e 2 depois do portão.
-7. **"Dezesseis linhas do driver no boot"** — a seção da etapa 2. A partir do
-   próximo boot são quinze.
+7. **"Dezesseis linhas do driver no boot"** — a seção da etapa 2. São
+   catorze. E a conta de quinze, escrita aqui antes do reinício, também errou:
+   ver a partida a frio, abaixo.
 
 ### Cinco coisas que só apareceram executando
 
@@ -2017,33 +2018,52 @@ systemd do usuário (`runuser` com `XDG_RUNTIME_DIR`), roda `install_drivers` e
 
 ### A partida a frio, que fecha a sub-etapa
 
-**A conferir no começo da sessão seguinte.** O esperado:
+Conferida em 2026-10-10 às 08:33, um minuto e meio depois do boot das
+08:32:25 — na mesma conversa, que sobreviveu ao reinício.
 
 ```
-capability bitmask: 0x00002c26, os seis nomes
-srcversion  C68C01808749B047940186D
+capability bitmask: 0x00002c26 [WIRELESS BLUETOOTH SET_FUNCTION_MODE
+                                PLATFORM_PROFILE FAN_SPEED_READ NITRO_SENSE]
+srcversion  C68C01808749B047940186D   <- o do build podado
 parametros  so force_caps
-linhas      quinze do driver no boot: uma a menos que antes, a de
-            "Max performance profile"; uma delas e "module verification
-            failed", que nao e defeito
+linhas      catorze do driver, todas de carga; nenhuma "Max performance
+            profile"
 perfis      low-power quiet balanced balanced-performance
-estado      "Thermal states saved successfully" no desligamento e "Thermal
-            states loaded" na partida; nenhum "Invalid" nem "Incomplete"
-atributos   os cinco 664 root:nexus_sense; version 444 root:root
-hwmon       CPU, GPU, External 2 / ventoinhas CPU, GPU
-rfkill      acer-wireless, acer-bluetooth
-erro WMI    zero "Failed to get profile"; zero "Unknown function number"
-agente      ativo; bandeja subindo sozinha, "bandeja: sni"
-botao N     hwdb com f5=prog1, autostart no lugar, e um aperto abre a janela
+perfil      balanced-performance      <- restaurado do estado salvo
+estado      "Thermal states saved successfully" as 08:32:08, no desligamento;
+            "Thermal states loaded" e "restored successfully" as 08:32:30;
+            nenhum "Invalid" nem "Incomplete"
+atributos   os cinco 664 root:nexus_sense; version 444 root:root; profile 664
+            root:nexus_sense; gid 948
+hwmon       acer: CPU, GPU, External 2 / ventoinhas CPU, GPU
+rfkill      acer-wireless, acer-bluetooth  (indices 0 e 1)
+erro WMI    zero "Failed to get profile"; zero "Unknown function number"; zero
+            aviso do driver
+DKMS        installed nos dois kernels
+agente      ativo desde 08:32:41; --version 1.2.7
+bandeja     subiu sozinha, filha do systemd do usuario, 16 s depois do boot;
+            "bandeja: sni"
+botao N     f5=prog1 no banco hwdb e no teclado (event3, atkbd); atalho
+            "Launch (1)"; autostart no lugar
 ```
+
+**A previsão de quinze linhas estava errada.** Contava as catorze de carga
+mais `module verification failed`, que no boot anterior saiu em nome do
+`nexus_sense`. Esse aviso o kernel dá uma vez por boot, ao primeiro módulo sem
+assinatura que carregar — e neste boot foi o `v4l2loopback`, 53 ms antes. O
+número de linhas do driver num boot depende de quem ganha essa corrida: catorze
+ou quinze, e nenhum dos dois é notícia.
+
+**O gesto humano:** o usuário apertou o botão N às 08:34:18, na tomada, a 80%,
+e a janela abriu. O journal do usuário registrou a abertura e o kernel ficou
+calado: zero aviso do driver, zero `Unknown function number` no boot inteiro.
 
 ### Onde a 4f começa
 
 Numa **sessão nova**. Sub-etapa 4f de [plano-melhorias.md](plano-melhorias.md):
 a rede de segurança térmica — brainstorm e plano próprio, não código.
 
-**Antes dela, a partida a frio da 4e**, pela lista acima. Se algo divergir, a
-4e reabre e a 4f espera.
+Nada pendente da 4e a bloqueia: a partida a frio já foi conferida.
 
 **Ponto de partida:** `master` em v1.2.7, com o CI verde. O baseline esperado é
 387 passam na suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem

@@ -240,7 +240,7 @@ As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
 | 4b | `melhorias/4b-gpu` | temperatura da GPU pelo EC; a janela impede a dGPU de dormir?; o que `temp3` mede | **fechada, v1.2.4** — teve root: o `coolercontrold` parado para medir, e a reinstalação do portão |
 | 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | **fechada, v1.2.5** — teve root: duas reinstalações no portão; o gesto foi reiniciar o `kded6` |
 | 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | **fechada, v1.2.6** — teve root: uma reinstalação no portão; a desinstalação rodou só num namespace |
-| 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | **fechada, v1.2.7** — teve root: o `pr_debug` e um kprobe na medição, e DKMS com recarga no portão; 16 apertos e o cabo. A partida a frio se confere na abertura da 4f |
+| 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | **fechada, v1.2.7** — teve root: o `pr_debug` e um kprobe na medição, e DKMS com recarga no portão; 16 apertos e o cabo; partida a frio conferida |
 | 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | a decidir no plano |
 
 Item que é hipótese começa **medindo**, com a regra de decisão escrita antes da
@@ -376,7 +376,7 @@ sobe antes dele, nos três lugares — `__version__` viaja no pacote instalado.
 
 ### 4e — o botão N
 
-**Fechada em 2026-10-10, v1.2.7.** Zero eventos nas duas condições — 8 apertos
+**Fechada em 2026-10-10, v1.2.7**, com a partida a frio conferida. Zero eventos nas duas condições — 8 apertos
 na tomada e 8 na bateria, com o `pr_debug` e um kprobe no tratador, e o cabo
 como controle positivo — e o caminho saiu: 168 linhas, bitmask idêntico. O
 botão continua abrindo o aplicativo, porque isso nunca passou pelo driver. O
