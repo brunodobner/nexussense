@@ -276,6 +276,61 @@ precisa saber onde o automático vai parar:
 - e se um exercício falhar de verdade, a máquina fica com a ventoinha alta —
   barulho, não calor.
 
+#### O resultado de E2 — medido em 2026-10-10
+
+Rodado pelo usuário, de 10:40:35 a 10:46:27. Perfil `balanced-performance`,
+modo máximo desligado, na tomada, 79%, sem jogo: 316 amostras, nenhuma fora
+da condição. Throttle zero do começo ao fim.
+
+```
+exercicio do vigia    95% girou 7139 / 6696 rpm; o roteiro levou kill -9;
+                      fan_speed de volta a 0,0 em 819 ms; rotacao 700 rpm
+                      abaixo na leitura seguinte
+exercicio do aborto   limite do EC rebaixado: saiu com 10 na primeira amostra,
+                      0,0 devolvido
+
+   %     CPU rpm   GPU rpm
+  100     7539      7069
+   80     6250      5891
+   60     4911      4647
+   50     4170      3970
+   40     3411      3252
+   30     2582      2469
+   20     2009      1675
+   15     2005      1667
+   10     2003      1663
+    5     2000      1668
+    1     2000      1663
+
+automatico, antes     2807 / 2576 rpm
+automatico, depois    de 2246 a 3267 rpm em cinco segundos; assenta em 3045 / 2708
+```
+
+O que isso responde:
+
+- **P2 — há piso, e a ventoinha não para.** De 20% para baixo nada muda:
+  ~2000 / ~1665 rpm, até 1%. De 30% a 100% sobe quase em linha reta, 65 a 83
+  rpm por ponto. A rotação assenta em um a dois segundos depois da escrita.
+- **O pior "manual baixo" que a interface consegue criar** é a ventoinha a
+  ~2000 / ~1665 rpm: pouco abaixo do automático parado, menos da metade do
+  automático quente. Não existe ventoinha parada para ensaiar.
+- **P3 — o automático, em porcentagem de manual:**
+
+  ```
+                              modo maximo desligado     modo maximo ligado
+  automatico parado           2240 / 1990 = 25% / 23%   3350 / 2890 = 39% / 35%
+  automatico quente           4400 / 4000 = 53% / 50%   6196 / 5689 = 79% / 77%
+  ```
+
+- **100% gira 7539 rpm, e o automático nunca passou de 6196.** O EC não usa a
+  ventoinha inteira por conta própria.
+- **Em repouso o piso já esquenta um pouco:** em dois minutos e meio a ~2000
+  rpm o pacote foi de 47 a 52 °C e a CPU pelo EC de 45 a 49. De volta ao
+  automático, a ventoinha subiu sozinha a 3267 rpm.
+
+Os dois exercícios passaram na máquina. O controle positivo também: 100%
+gira 3369 rpm acima de 50%.
+
 ### E3 — manual baixo com carga de CPU (escreve em `fan_speed` e **esquenta**)
 
 | | |
@@ -285,7 +340,7 @@ precisa saber onde o automático vai parar:
 | carga | 8 processos em laço ocupado, cada um debaixo de `timeout`: a fonte de calor morre sozinha no prazo, com ou sem roteiro |
 | estágio 0 | **automático**, 120 s de carga. É o controle positivo: a rotação tem de subir com a temperatura, pelo mesmo `fanN_input`. Sem isso, "a rotação não subiu em manual" não quer dizer nada (armadilha 35). Dois minutos bastam: na 4b a CPU foi a 91 °C em 90 s, e na seção 2 a rotação respondeu em 20 s |
 | estágio 1 | manual a 30%, até 180 s de carga. É o degrau antes do pior caso, e só isso: a CPU chega ao corte em ~90 s |
-| estágio 2 | manual na porcentagem mais baixa que E2 mostrar — **inclusive a que para a ventoinha, se houver** (decidido no grill) — até **600 s** de carga. É o estágio que decide a primeira pergunta, e as zonas de placa são lentas: com o jogo, `SEN3` ainda subia aos nove minutos |
+| estágio 2 | manual a **1%** — o piso que E2 mediu, ~2000 / ~1665 rpm; a ventoinha não para em porcentagem nenhuma — até **600 s** de carga. É o estágio que decide a primeira pergunta, e as zonas de placa são lentas: com o jogo, `SEN3` ainda subia aos nove minutos |
 | em cada estágio manual | 30 s frio na porcentagem, para medir a rotação de referência **na hora**; a carga; carga fora, `0,0`, e a descida gravada até o pacote voltar a 60 °C ou 300 s — três minutos, pela seção 2 |
 | um estágio só roda | se o anterior terminou sem aborto |
 | instrumento | rotação das duas ventoinhas, pacote, `temp1`/`temp2`/`temp3` do acer, `SEN2` a `SEN5`, os dois NVMe, contador e tempo de throttle, frequência média, bateria (`charge_now`, corrente), cabo, perfil, `fan_speed` |
@@ -616,12 +671,12 @@ cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count \
 
 | | pergunta | resposta |
 |---|---|---|
-| 1 | até onde E3 desce | até a porcentagem mais baixa, **inclusive com a ventoinha parada**, se E2 mostrar que existe |
+| 1 | até onde E3 desce | até a porcentagem mais baixa, **inclusive com a ventoinha parada**, se E2 mostrar que existe. E2 mostrou que não existe: o piso é ~2000 rpm |
 | 2 | E3b, o ensaio com jogo | decide depois de ver E3 |
 | 3 | se der R2, quer a rede? | decide com os números de E3 |
 | 4 | disparada a rede, o manual volta sozinho? | **não: fica em automático** até você escolher de novo — contra a recomendação |
 | 5 | como você fica sabendo | **só o journal** — contra a recomendação, que era uma linha na janela |
-| 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2 |
+| 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2. **E2 feito: nenhuma para; de 20% para baixo o cursor não muda nada.** A decisão está de volta com você |
 | 7 | potência da fonte | 135 W, lido da etiqueta |
 
 **Ainda suas** — autorização, e é o que a aprovação deste plano quer dizer:

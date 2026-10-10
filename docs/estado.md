@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (rede térmica, sessão 1: o roteiro de E2 está pronto e provado em árvore falsa; nenhuma escrita na ventoinha ainda)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2 rodou — há piso em ~2000 rpm e a ventoinha não para; falta E3)
 
 ---
 
@@ -59,7 +59,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  roteiro de E2 pronto e provado; E2 e E3 por rodar
+[ ] Rede termica, sessao 1 -- medicao  E2 feito: piso em ~2000 rpm, a ventoinha nao para; falta E3
 [ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
 ```
 
@@ -2263,10 +2263,10 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
 
 ---
 
-## Rede térmica, sessão 1 — o roteiro pronto, E2 ainda por rodar
+## Rede térmica, sessão 1 — E2 feito, E3 por fazer
 
 Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
-aprovado. **Nenhuma escrita em `fan_speed` aconteceu ainda.** O que existe:
+aprovado. O que existe:
 
 | | |
 |---|---|
@@ -2337,10 +2337,53 @@ O que mudou no roteiro, cada item com teste que falhou primeiro:
 - **A sessão do Claude reiniciou no meio** e levou o observador passivo junto;
   ele foi religado. O traço da manhã ficou no scratchpad antigo.
 
+### E2 rodou: há piso, e a ventoinha não para
+
+Rodado pelo usuário em 2026-10-10, de 10:40:35 a 10:46:27, por um bloco no
+terminal. Modo máximo desligado, na tomada, 79%, sem jogo: 316 amostras,
+nenhuma fora da condição, throttle zero.
+
+```
+vigia     95% girou 7139 / 6696 rpm; kill -9 no roteiro; fan_speed em 0,0
+          819 ms depois; rotacao 700 rpm abaixo na leitura seguinte
+aborto    limite rebaixado: saiu com 10 na primeira amostra, 0,0 devolvido
+
+  %     100    80    60    50    40    30    20    15    10     5     1
+CPU    7539  6250  4911  4170  3411  2582  2009  2005  2003  2000  2000
+GPU    7069  5891  4647  3970  3252  2469  1675  1667  1663  1668  1663
+```
+
+- **De 20% para baixo nada muda**: ~2000 / ~1665 rpm. A ventoinha não para em
+  porcentagem nenhuma. O pior "manual baixo" possível é pouco abaixo do
+  automático parado e menos da metade do automático quente.
+- **O automático quente equivale a 53% / 50% de manual** com o modo máximo
+  desligado, e a 79% / 77% com ele ligado.
+- **100% gira 7539 rpm**; o automático nunca passou de 6196.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e2-20261010-104034.tsv`,
+  fora do repositório e fora do tmpfs.
+
+**O que E2 refutou:** "inclusive com a ventoinha parada" — a resposta 1 do
+grill. Não existe ventoinha parada: o firmware segura um piso. E o cursor tem
+uma faixa morta, de 1% a 20%, que este projeto oferecia sem saber.
+
+**Duas coisas que só apareceram executando:**
+
+1. **O painel de terminal do aplicativo perdeu a linha de comando, duas
+   vezes.** A aba abriu, o fish esperou 10 s por uma resposta do terminal, e o
+   comando não chegou a ser digitado. Conferido antes de seguir: nenhum
+   processo, `fan_speed` em `0,0`, nenhum traço. Rodou pelo bloco, como o
+   plano mandava desde o começo.
+2. **A ventoinha responde em um segundo.** Eu esperava que a conferência da
+   rotação no exercício do aborto valesse pouco — o alvo aborta um segundo
+   depois de escrever. Valeu: nessa amostra ela já girava 7260 rpm, e caiu
+   depois. Os 20 s de espera por degrau, no mapa, são folga.
+
 ### Onde continua
 
-Por E2, quando o usuário mandar: um bloco no terminal, ~7 min, modo máximo
-desligado, sem jogo. Depois E3, combinado no chat antes do comando.
+Por E3: o roteiro ganha a carga de CPU e os estágios (automático, 30%, 1%),
+com teste em árvore falsa antes — e o ensaio se combina no chat antes do
+comando, porque esquenta a máquina. Com o usuário, a decisão que E2 devolveu:
+o que fazer com a faixa morta do cursor.
 
 ---
 
