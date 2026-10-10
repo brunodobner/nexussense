@@ -6,7 +6,7 @@ RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
 DIR="$RAIZ/packaging/icons/22x22/status"
 
 for polaridade in claro escuro; do
-    arquivos=("$DIR"/nexus-sense-tray-v2-nivel*-$polaridade.png)
+    arquivos=("$DIR"/nexus-sense-tray-v2-nivel*-"$polaridade".png)
     [ "${#arquivos[@]}" -eq 4 ] || {
         echo "FALHA: $polaridade tem ${#arquivos[@]} variantes, esperado 4"
         exit 1

@@ -16,7 +16,7 @@ exigir() {
   [ -e "$1" ] || { echo "  ERRO alvo ausente: $1"; exit 3; }
 }
 exigir "$DRV/Makefile"
-cd "$DRV"
+cd "$DRV" || exit 3
 fail=0
 
 check() {

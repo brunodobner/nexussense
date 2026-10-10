@@ -79,7 +79,9 @@ fi
 # carregado. O teste ficava vermelho por um modulo que ninguem quer.
 # Ver armadilha 22.
 achou_bootavel=0
-for kver in $(ls /lib/modules); do
+for kdir in /lib/modules/*/; do
+  [ -d "$kdir" ] || continue
+  kver=$(basename "$kdir")
   [ -d "/lib/modules/${kver}/build" ] || continue
   if [ ! -e "/lib/modules/${kver}/vmlinuz" ]; then
     printf '  NOTA %s tem headers sem kernel bootavel; nao se exige modulo\n' "$kver"

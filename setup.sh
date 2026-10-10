@@ -218,29 +218,28 @@ comprehensive_cleanup() {
   # disputam o mesmo dispositivo WMI e qual carrega e indeterminado.
   #
   # Roda antes do novo ser registrado, e por isso vive na limpeza.
-  for antigo in linuwu_sense; do
-    if dkms status 2> /dev/null | grep "^${antigo}" > /dev/null; then
-      echo "Removendo o pacote DKMS antigo: ${antigo}"
-      for v in $(dkms status 2> /dev/null | grep "^${antigo}" \
-                 | sed -E "s|^${antigo}[/,] *([^,]+).*|\\1|" | sort -u); do
-        dkms remove -m "${antigo}" -v "${v}" --all &> /dev/null || true
-      done
-    fi
-    rm -rf "/usr/src/${antigo}-"*
-    rm -f "/etc/modules-load.d/${antigo}.conf"
-    if [ -f "${SYSTEMD_DIR}/${antigo}.service" ]; then
-      systemctl disable --now "${antigo}.service" &> /dev/null || true
-      rm -f "${SYSTEMD_DIR}/${antigo}.service"
-    fi
-    modprobe -r "${antigo}" &> /dev/null || true
-    find /lib/modules -name "${antigo}.ko*" -delete &> /dev/null || true
-    # O grupo do nome antigo tambem sobreviveu a renomeacao: o usuario
-    # seguia dentro dele, sem atributo nenhum que o usasse.
-    if getent group "${antigo}" > /dev/null; then
-      echo "Removendo o grupo antigo: ${antigo}"
-      groupdel "${antigo}" || true
-    fi
-  done
+  local antigo=linuwu_sense
+  if dkms status 2> /dev/null | grep "^${antigo}" > /dev/null; then
+    echo "Removendo o pacote DKMS antigo: ${antigo}"
+    for v in $(dkms status 2> /dev/null | grep "^${antigo}" \
+               | sed -E "s|^${antigo}[/,] *([^,]+).*|\\1|" | sort -u); do
+      dkms remove -m "${antigo}" -v "${v}" --all &> /dev/null || true
+    done
+  fi
+  rm -rf "/usr/src/${antigo}-"*
+  rm -f "/etc/modules-load.d/${antigo}.conf"
+  if [ -f "${SYSTEMD_DIR}/${antigo}.service" ]; then
+    systemctl disable --now "${antigo}.service" &> /dev/null || true
+    rm -f "${SYSTEMD_DIR}/${antigo}.service"
+  fi
+  modprobe -r "${antigo}" &> /dev/null || true
+  find /lib/modules -name "${antigo}.ko*" -delete &> /dev/null || true
+  # O grupo do nome antigo tambem sobreviveu a renomeacao: o usuario
+  # seguia dentro dele, sem atributo nenhum que o usasse.
+  if getent group "${antigo}" > /dev/null; then
+    echo "Removendo o grupo antigo: ${antigo}"
+    groupdel "${antigo}" || true
+  fi
 
   if [ -d "$DRIVER_DIR" ]; then
     echo "Uninstalling drivers..."
@@ -535,9 +534,11 @@ install_runtime_deps() {
 # build failure waiting to happen -- worth naming up front rather than
 # hitting mid-install.
 check_kernel_headers() {
-  local kver missing=0
+  local kdir kver missing=0
   echo -e "${BLUE}Checking kernel headers...${NC}"
-  for kver in $(ls /lib/modules); do
+  for kdir in /lib/modules/*/; do
+    [ -d "$kdir" ] || continue
+    kver=$(basename "$kdir")
     if [ -d "/lib/modules/${kver}/build" ]; then
       echo -e "  ${GREEN}OK${NC}      ${kver}"
     else
@@ -858,8 +859,10 @@ install_drivers() {
   # todos os kernels" cobrar um modulo que nunca vai ser carregado.
   #
   # vmlinuz e o discriminador: so o pacote do kernel o instala.
-  local kver built=0 pulados=0
-  for kver in $(ls /lib/modules); do
+  local kdir kver built=0 pulados=0
+  for kdir in /lib/modules/*/; do
+    [ -d "$kdir" ] || continue
+    kver=$(basename "$kdir")
     [ -d "/lib/modules/${kver}/build" ] || continue
     if [ ! -e "/lib/modules/${kver}/vmlinuz" ]; then
       echo -e "  ${YELLOW}PULADO${NC} ${kver} (headers sem kernel bootavel)"

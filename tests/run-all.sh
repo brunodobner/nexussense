@@ -10,7 +10,7 @@
 # Uso:  ./tests/run-all.sh          testes que nao exigem root
 #       sudo ./tests/run-all.sh     inclui os que exigem
 set -u
-cd "$(dirname "$0")/shell"
+cd "$(dirname "$0")/shell" || exit 1
 
 VERDE='\033[0;32m'; VERMELHO='\033[0;31m'; AMARELO='\033[0;33m'; NC='\033[0m'
 ok=0; falhou=0; pulou=0; erro=0
