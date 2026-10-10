@@ -362,11 +362,16 @@ def test_sem_barramento_o_aplicativo_abre_em_vez_de_se_dar_por_repetido(tmp_path
     O aplicativo lia a recusa do registro como "ja ha outra aberta", pedia
     a ela que aparecesse e saia com 0 -- antes de chegar a bandeja, e sem
     abrir nada. O endereco e o da fixture autouse do conftest, que nao
-    existe."""
+    existe.
+
+    A saida vai para um arquivo, como a da unit vai para o journal: a
+    linha "bandeja: ..." tem de chegar la com o processo vivo. Sem flush
+    ela ficava no buffer ate o SIGTERM, e o journal nunca a viu."""
     address = os.environ['DBUS_SESSION_BUS_ADDRESS']
     assert not os.path.exists(address.removeprefix('unix:path='))
     tree = build_tree(tmp_path / 'sysfs', module='nexus_sense')
-    env = {**private_env(address), 'PYTHONUNBUFFERED': '1'}
+    env = private_env(address)
+    assert 'PYTHONUNBUFFERED' not in env
     log = tmp_path / 'app.log'
     with log.open('w') as handle:
         app = subprocess.Popen([sys.executable, '-m', 'nexus_sense.gui.app', '--tray-only', '--root', str(tree)],

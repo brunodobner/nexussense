@@ -52,7 +52,10 @@ def main(argv=None):
         return 0
 
     controlador, modo = build_tray(sysfs, controls)
-    print(f"bandeja: {modo}")
+    # Com flush: sob a unit a saida e um socket, o Python a guarda em bloco,
+    # e a linha so sairia no encerramento -- que e por SIGTERM, e a perde.
+    # O journal passou um boot inteiro sem ela.
+    print(f"bandeja: {modo}", flush=True)
 
     if controlador is None:
         janela.show()
