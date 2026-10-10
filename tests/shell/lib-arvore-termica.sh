@@ -34,8 +34,11 @@ limpa() {
 }
 trap limpa EXIT
 
+# fail e lido por quem importa este arquivo; daqui o shellcheck nao ve o uso.
+# shellcheck disable=SC2034
 fail=0
 ok()    { echo "  OK    $1"; }
+# shellcheck disable=SC2034
 falha() { echo "  FALHA $1"; fail=1; }
 
 # ─── a arvore de mentira ────────────────────────────────────────────
@@ -130,8 +133,8 @@ FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 # tambem a zona SEN4, que e a do lado da GPU: ate 87 C com a ventoinha alta,
 # ate 89 com ela baixa -- e sem parar de subir, no temperamento estoura.
 ec_falso() {
-    local f h hc z v c g x fs= manual=0 r1 r2 a1 a2 pac=45000 s4=46050 jogo carga alvo
-    local u1= u2= up=45000 us=46050
+    local f h hc z v c g x fs='' manual=0 r1 r2 a1 a2 pac=45000 s4=46050 jogo carga alvo
+    local u1='' u2='' up=45000 us=46050
     f=$(FAN_DE "$1"); h="$1/sys/class/hwmon/hwmon7"
     hc="$1/sys/class/hwmon/hwmon11"; z="$1/sys/class/thermal/thermal_zone2"
     while [ -d "$h" ]; do
