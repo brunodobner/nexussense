@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4c fechada: v1.2.5, a bandeja sobrevive ao watcher; 4d a 4f abertas)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4d fechada: v1.2.6, as sobras do instalador; 4e e 4f abertas)
 
 ---
 
@@ -13,12 +13,12 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 2 parâmetros, 3032 linhas (eram 5167) |
-| versão | **v1.2.5** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.6** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 21 testes: 19 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
+| suíte shell | 23 testes: 21 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
 | suíte Python | 387 passam (`python3 -m pytest -q`), incluindo DBus privado |
-| build | `W=1` limpo sob Clang 23, nos dois kernels instalados |
+| build | `W=1` limpo nos dois kernels instalados, no registro da etapa 2 — um é Clang 23 e o outro GCC 16, ver a 4d |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
 ---
@@ -56,7 +56,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4a -- CI        suites e shellcheck por push, modulo semanal
 [x] Melhorias, etapa 4b -- GPU       v1.2.4: a janela deixa a dGPU dormir; temperatura fica no nvidia-smi
 [x] Melhorias, etapa 4c -- bandeja   v1.2.5: o item volta com o watcher; sem ele, ou sem barramento, cai na reserva
-[ ] Melhorias, etapa 4d -- instalador cinco sobras da etapa 3; reinstalacao no portao
+[x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [ ] Melhorias, etapa 4e -- botao N   o evento WMI chega? medir na bateria antes de podar
 [ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
 ```
@@ -1507,6 +1507,238 @@ root e sob `LC_ALL=C`.
 
 ---
 
+## Melhorias de 2026-10, etapa 4d — fechada, e onde a 4e começa
+
+As cinco sobras do instalador da seção 6 de
+[plano-melhorias.md](plano-melhorias.md), e uma sexta que a medição mandou
+entrar. Ramo `melhorias/4d-instalador`, em 2026-10-10, **v1.2.5 → v1.2.6.**
+Só o `setup.sh` e os testes mudaram; em `src/` mudou a linha da versão.
+
+O baseline capturado antes da primeira edição conferiu com o esperado: 387
+passam na suíte Python, sem xfail; shell 19 passam e 2 pulam, idêntico sob
+`LC_ALL=C`.
+
+### O que entrou
+
+| commit | o quê | teste que falhou primeiro |
+|---|---|---|
+| `8d0cfb8` | `runtime_dependencies_ok` pergunta pelo `busctl` e pelo nome `org.freedesktop.UPower.PowerProfiles` no barramento de sistema, com dono ou ativável | a função sob um `PATH` só de dublês: serviço no barramento sem o `powerprofilesctl` era recusado, binário sem o serviço era aceito — seis pontos |
+| `1cb324c` | `kernels_missing_headers` e `build_deps_missing`: kernel bootável sem headers basta para chamar `install_build_deps` | `install_drivers` executada com três travas: com headers faltando, o passo dado era `check_kernel_headers` |
+| `9a21662` | `target_kernels_use_llvm` lê a config de cada kernel bootável; `is_llvm_kernel` sai | `install_build_deps` com `pacman` dublê e uma árvore só GCC: o `clang` era pedido |
+| `a1b9081` | `uninstall` chama `stop_nexus_sense`: o agente pelo gerenciador do usuário, a bandeja pelo processo | alvo ausente, e a fiação estática de `test-uninstall.sh` |
+| `0f74b4d` | teste: `uninstall` e `comprehensive_cleanup` executadas num namespace | não havia código a mudar; a prova de que o teste reprova são seis mutações |
+| `37c4133` | **o sexto:** `install_nexus_sense` recarrega o systemd de cada usuário | `install_nexus_sense` no mesmo namespace: as únicas chamadas eram `daemon-reload` do sistema e `--global enable` |
+| `0028a47` | teste endurecido contra a mutação que passou | — |
+| `41f9f3b` | versão nos três lugares, antes do portão | — |
+| `b1e1b62` | `build_deps_missing` recebe a raiz como as vizinhas | o shellcheck do CI, SC2120 |
+
+Suíte Python em 387; shell de 19 e 2 para **21 passam e 2 pulam**, mesmos
+nomes do baseline mais os dois testes novos, idêntica sob `LC_ALL=C` —
+rodadas inteiras antes de cada commit.
+
+### O sexto candidato: medido antes de entrar
+
+A 4c tinha visto `NeedDaemonReload=yes` depois da reinstalação e deixado para
+cá. A regra, antes de medir: entra se o gerenciador do usuário ficar de fato
+com a definição antiga depois de uma reinstalação. Só com leitura, antes da
+primeira edição:
+
+```
+nexus-sense-agent.service                            NeedDaemonReload=yes
+app-nexus\x2dsense\x2dautostart@autostart.service    NeedDaemonReload=yes
+os dois arquivos de origem regravados as 04:32:32 -- a reinstalacao da 4c
+```
+
+Entrou, como tarefa própria. **O que não foi medido:** que um restart sobe a
+unit velha quando o conteúdo muda. É o comportamento documentado do systemd, e
+medi-lo exigiria alterar uma unit instalada. Com conteúdo idêntico o efeito de
+hoje era um aviso a cada restart. Armadilha 34.
+
+### Como a desinstalação foi provada sem desinstalar
+
+Três cercados, do mais leve ao mais fechado:
+
+```
+tarefas 1 a 3    PATH so com dublês (pacman, busctl, make, dkms) e arvores de
+                 kernel plantadas; install_drivers com tres travas
+tarefa 4         /proc e /run/user plantados; runuser, systemctl e kill como
+                 funcoes que anotam; PIDs acima do pid_max; iscas no PATH
+tarefas 4 a 6    bwrap --unshare-all: uninstall, comprehensive_cleanup e
+                 install_nexus_sense INTEIRAS, com a raiz somente-leitura, /run
+                 vazio, um /etc com a copia de /etc/group e um gshadow
+                 sintetico, e processos-isca com o argv dos lancadores
+```
+
+O que o terceiro mostrou, executando — `test-desinstalacao-namespace.sh`, 2,5 s:
+
+```
+limpeza da reinstalacao   o grupo fica com o mesmo gid; /etc/group sai igual;
+                          agente e bandeja seguem rodando
+desinstalacao             a linha do grupo sai de group e de gshadow, e so ela;
+                          agente e bandeja encerrados; o processo de outro
+                          modulo e o shell que cita o agente seguem rodando; a
+                          unit e parada no gerenciador do usuario antes de a
+                          limpeza desabilita-la
+instalacao do aplicativo  recarrega o gerenciador do usuario; nao cria nem
+                          apaga grupo; nao para nada
+a maquina de verdade      grupo, processos e arquivos instalados lidos antes e
+                          depois: iguais
+```
+
+O teste pula como root — sem privilégio um erro do roteiro não tem como
+desinstalar nada — e onde não há `bwrap`. Por isso entrou na lista de pulos do
+`ci.yml`.
+
+**Mutações.** 29 pares de mutação e teste sobre uma **cópia** do repositório —
+27 mutações distintas do `setup.sh`, duas conferidas por dois testes. Na
+primeira rodada uma passou; o teste foi consertado e hoje as 29 reprovam.
+
+### O CI
+
+```
+                       simulacao (bwrap)    container, 1o push    2o push
+pytest                 --                   387 passam            387 passam
+shell, sem root        14 passam, 9 pulam   14 passam, 9 pulam    igual
+shell, como root       15 passam, 8 pulam   15 passam, 8 pulam    igual
+shellcheck             nao ha como          1 aviso (SC2120)      0 erros, 0 avisos
+```
+
+A simulação previu de novo os números e os nomes. O que ela não tem como
+prever é o shellcheck, que não está instalado aqui: foi um push a mais. Ficam
+72 notas de info e estilo (eram 62): 36 SC2015, 14 SC2329, 7 SC2059, 7 SC2016.
+
+Para refazer a simulação vale a receita da seção da 4a, tirando também o
+`bwrap` do `PATH` — senão o teste novo roda onde no container pularia.
+
+### O portão
+
+Em 2026-10-10, de 06:38:25 a 06:38:33, na tomada, bateria em 54%. Antes, às
+05:11, o roteiro rodou contra o pacote **antigo** e o `setup.sh` de `master`:
+19 OK e 11 FALHA — a versão, o pacote, o `NeedDaemonReload` das duas units, a
+versão que a bandeja tinha carregado e as seis conferências das funções novas.
+
+```
+reinstalacao     uma chamada de root (pkexec): gid 948 antes e depois, no mesmo
+                 comando; "Usuário brunodobner já está no grupo nexus_sense."
+systemd          o do sistema recarregou em 266 ms; o do usuario, 0,35 s
+                 depois, em 136 ms. NeedDaemonReload yes -> no nas duas units,
+                 sem ninguem recarregar a mao
+reinicio         restart das duas units: codigo 0 e stderr vazio -- sem o aviso
+                 agente 540503 -> 670940, bandeja 540498 -> 670936
+                 journal: "agente encerrado", "agente no ar", "bandeja: sni"
+instalado        --version 1.2.6; pacote identico ao fonte; unit, autostart,
+                 .desktop, regra udev e apply-perms identicos ao repositorio
+permissoes       os seis 664 root:nexus_sense; version 444 root:root
+watcher          um item do Nexus Sense, com o pid da bandeja nova
+funcoes novas    contra esta maquina, so leitura: nenhum kernel sem headers,
+                 nada a instalar, um alvo Clang; nexus_sense_pids devolve os
+                 dois MainPID do systemd e so eles
+
+                 30 OK, 0 FALHA
+```
+
+Não houve gesto humano neste portão: o ícone de volta depois do reinício está
+provado pela lista do watcher, não por olho.
+
+**As tarefas 2 e 3 não foram ao hardware.** O portão é `install_nexus_sense`,
+que não passa por `install_drivers` nem por `install_build_deps`: o `pacman` de
+verdade nunca foi chamado pelo critério novo. As tarefas 4 e 5 também não, por
+decisão — é o que o namespace existe para evitar.
+
+### O que a execução refutou
+
+1. **"Os kernels desta máquina são todos Clang."** Este arquivo dizia isso em
+   mais de um lugar, e era a última reserva de `is_llvm_kernel` ("CachyOS, logo
+   Clang"). Medido: `6.18.55-1-cachyos-lts` é GCC 16.2.1, `7.2.9-1-cachyos` é
+   Clang 23.1.1. O `test-toolchain.sh` já cobria os dois ramos aqui, sem root,
+   e ninguém tinha lido a saída dele assim.
+2. **"`is_llvm_kernel` olha o kernel em execução."** Olhava quatro coisas, e
+   todas eram do sistema em execução: `uname -r`, `/proc/config.gz`,
+   `/proc/version` e o nome da distro. Com o `uname` fora do `PATH` do ensaio
+   ela ainda respondia Clang, por `/proc/version`.
+3. **"O resto roda na reinstalação da sub-etapa 4d"** — a nota da 4a sobre as
+   mudanças mecânicas em `install_drivers` e `check_kernel_headers`. O portão
+   da 4d não passa por lá. `comprehensive_cleanup` rodou, mas no namespace e
+   com dublês. Continuam sem hardware.
+4. **"O ensaio em namespace passou."** Na primeira rodada, 18 de 19 — com
+   `mkdir` e `seq` faltando no `PATH` de dentro. O laço que esperava os
+   processos-isca rodou zero vezes e eles estavam de pé por sorte. O teste
+   agora cobra que a saída de erro de dentro venha vazia. Armadilha 30.
+5. **"As mutações reprovam."** Uma passou: `grep -qxF` trocado por `grep -qF`
+   na busca do nome no barramento. O barramento de mentira não tinha nenhum
+   nome que um casamento frouxo aceitasse.
+6. **"A simulação previu o CI."** Previu as suítes. O shellcheck reprovou no
+   primeiro push.
+
+### Cinco coisas que só apareceram executando
+
+1. **A busca por texto achou o meu próprio shell.** A primeira medição dos
+   processos casava `-m nexus_sense` na linha de comando e devolveu três: o
+   agente, a bandeja e o shell da busca. É a armadilha 10, e foi o que decidiu
+   o desenho de `nexus_sense_pids` — argv comparado elemento a elemento.
+2. **O `runuser` abre sessão PAM nesta máquina.** `/etc/pam.d/runuser` inclui
+   `system-login`. No portão a sessão abriu e fechou em 0,2 s e não sobrou nada
+   no `loginctl`.
+3. **O `groupdel` funciona como root de mentira.** Num namespace de usuário,
+   sobre um `/etc` próprio, ele edita `group` e `gshadow` e sai com 0. O `/etc`
+   de dentro é um diretório inteiro, não o arquivo montado por cima como na
+   simulação da 4a — por leitura, não por medição: o `groupdel` grava ao lado e
+   renomeia.
+4. **Um push a mais do que o combinado.** O shellcheck só roda no CI. Quem
+   mexe em shell conta com dois pushes do ramo.
+5. **A mensagem de `0028a47` conta errado.** Diz "29 mutações"; naquele momento
+   eram 28 pares em 29 rodadas, com uma repetida. O 29º par entrou depois, com
+   o conserto do shellcheck.
+
+### Visto e não consertado
+
+- **`install_drivers` e `install_build_deps` não foram ao hardware** com o
+  critério novo. Ver "O portão".
+- **`pacman -S --needed` com o banco de pacotes à frente do kernel instalado**
+  traria headers de outra versão. O "quando" novo aciona o "quais" da 3.5 mais
+  vezes. Lido, não medido.
+- **No Debian o `vmlinuz` mora em `/boot`.** O discriminador de "bootável" é
+  `/lib/modules/<versão>/vmlinuz`, que lá não existe: `kernels_missing_headers`
+  volta sempre vazia e `install_drivers` não constrói para kernel nenhum. É
+  anterior a esta sub-etapa. Lido, não medido.
+- **Onde só existe o nome legado `net.hadess.PowerProfiles`** (power-profiles-
+  daemon anterior à 0.20) o instalador agora recusa. Antes instalava, e a parte
+  do perfil de CPU falhava calada. Não há máquina assim para medir.
+- **`each_user_manager` cala os erros.** Se o gerenciador de um usuário não
+  responder, o agente dele só recebe o sinal — e o systemd o reabre em 3 s
+  sobre um lançador que a limpeza apagou. Não exercitado.
+- **`stop_nexus_sense` não espera os processos saírem** nem insiste com
+  `SIGKILL`.
+- **A desinstalação não recarrega o systemd do usuário.** A unit que o gerador
+  criou a partir do autostart fica na memória, inativa, até relogar.
+- **A desinstalação executada só roda em máquina de desenvolvimento:** o teste
+  pula no CI (sem `bwrap`) e como root.
+
+### Onde a 4e começa
+
+Numa **sessão nova**. Sub-etapa 4e de [plano-melhorias.md](plano-melhorias.md):
+o botão N — o evento WMI chega? — e o caminho de abaixo de 40%.
+
+**Ponto de partida:** `master` em v1.2.6, com o CI verde. O baseline esperado é
+387 passam na suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem
+root e sob `LC_ALL=C`. Como root, `test-desinstalacao-namespace.sh` pula por
+desenho.
+
+**O que vale para o portão dela**, e apareceu neste:
+
+- depois de `install_nexus_sense` o `systemctl --user restart` não avisa mais
+  nada; se avisar `changed on disk`, a tarefa 6 regrediu;
+- agente e bandeja se acham por `nexus_sense_pids` (depois de `source
+  ./setup.sh`) ou pelo `MainPID` das duas units — nunca por texto na linha de
+  comando;
+- se a 4e podar o driver, agente e bandeja param antes da recarga do módulo e
+  voltam depois, como na etapa 2;
+- quem mexe em shell conta com dois pushes do ramo: o shellcheck só roda no CI;
+- `uninstall` e `comprehensive_cleanup` continuam fora desta máquina. O que
+  for delas se executa em `test-desinstalacao-namespace.sh`.
+
+---
+
 ## A sessão de 2026-09-11/12, e onde ela parou
 
 Vinte e nove commits, `v1.1.2` → **`v1.1.9`**. Entrou por três pendências que o
@@ -1773,7 +2005,7 @@ Coisas verdadeiras hoje que alguém pode estranhar:
   `nexus_sense`, então rodar a suíte inteira como root não o resolve — ele
   pula nos dois modos, por motivos opostos.
 - **A cobertura do ramo GCC em `test-toolchain.sh` exige root.** Sem ele o
-  teste cai nos kernels reais da máquina, que hoje são todos Clang, e
+  teste cai nos kernels reais da máquina e
   anuncia a cobertura parcial. Com root, planta configs sintéticas em
   `/boot` e prova os dois ramos. Ver armadilha 22a.
 - **`linux-headers` foi removido em 2026-09-10.** Era órfão: headers sem o
