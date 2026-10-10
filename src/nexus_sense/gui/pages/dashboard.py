@@ -250,7 +250,10 @@ class DashboardPage(QWidget):
             cartao.set_value("temperatura", VAZIO)
             cartao.set_value("uso", VAZIO)
             return
-        cartao.set_badge("")
+        # Ociosa: a sonda se calou para a placa poder dormir, e os numeros
+        # sao os da ultima leitura. Ficam na tela, com o selo dizendo por
+        # que pararam de andar. Ver docs/estado.md, etapa 4b.
+        cartao.set_badge("ociosa" if leitura.idle else "")
         cartao.set_value(
             "temperatura",
             f"{leitura.temperature:.0f} °C" if leitura.temperature is not None else VAZIO,
