@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4f: o plano térmico está escrito, passou pelo grill e foi aprovado; a medição começa por E2)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1 fechada: com um jogo e a ventoinha no piso a GPU bate no limite em 7 s; veredito R3, a rede entra — sessão 2)
 
 ---
 
@@ -16,7 +16,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 | versão | **v1.2.7** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 23 testes: 21 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
+| suíte shell | 25 testes: 23 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
 | suíte Python | 387 passam (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
@@ -59,8 +59,8 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2 e E3 do plano, aprovado em 2026-10-10
-[ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
+[x] Rede termica, sessao 1 -- medicao  piso em ~2000 rpm, o EC nao socorre; com jogo a GPU bate no limite em 7 s (R3)
+[ ] Rede termica, sessao 2 -- a rede   a regra mandou: E3b deu R3
 ```
 
 ### Concluído
@@ -2260,6 +2260,294 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
   plano);
 - depois de qualquer reinício que o plano não previu, ler `fan_speed` antes de
   tudo: desligamento ordenado grava o manual baixo, e ele volta na partida.
+
+---
+
+## Rede térmica, sessão 1 — fechada, e onde a sessão 2 começa
+
+Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
+aprovado. O que existe:
+
+| | |
+|---|---|
+| `tests/hardware/ensaio-termico.sh` | o roteiro de E2: os dois exercícios e o mapa. Escreve na máquina de verdade; não faz parte da suíte |
+| `tests/shell/test-ensaio-termico.sh` | a mesma lógica contra uma árvore plantada, com um EC de mentira e os índices embaralhados: 51 conferências |
+| suítes, nesse ponto | 387 na Python; shell 22 passam e 2 pulam, idêntica sob `LC_ALL=C` |
+
+**O roteiro foi escrito antes do teste, e o teste passou de primeira** — o
+contrário do que a seção 1 de [plano-melhorias.md](plano-melhorias.md) manda.
+O que prova que o teste morde são 23 mutações, uma proteção estragada por
+vez, numa cópia: 23 reprovações. O que veio depois já entrou na ordem certa.
+
+### O que o usuário viu antes de o E2 rodar
+
+Com o comando pronto, ele interrompeu: a ventoinha fica numa faixa mais alta
+do que o plano supunha, mesmo com a máquina quase parada. O traço do
+observador confirmou, e o roteiro teria reprovado na máquina no primeiro
+exercício.
+
+```
+                       modo maximo desligado      modo maximo ligado
+parada, EC a ~50 C     2240 / 1990 rpm            3350 / 2890 rpm
+carga, EC a 64-73 C    --                         5000 a 6196 rpm
+jogo, EC a 73-91 C     4037 a 4464 rpm            --
+```
+
+O automático não tem repouso fixo: são pelo menos duas curvas, e quem troca
+de uma para a outra é o modo máximo — mesmo perfil térmico, GPU na mesma
+temperatura. O plano tinha medido uma só, a do modo desligado, e a chamado de
+"o automático".
+
+O que mudou no roteiro, cada item com teste que falhou primeiro:
+
+- **a volta se prova pela rotação ter saído do manual**, e não por ter
+  chegado à rotação da partida. Os exercícios escrevem `95,95` em vez de
+  `60,60`: a volta tem sentido conhecido (cai), e um exercício que falhe deixa
+  barulho, não calor;
+- **se a 95% a rotação não se distingue do automático, o exercício diz** — e
+  o E2 para no controle positivo, em vez de passar por vácuo;
+- **a condição de partida afrouxou onde não media nada** (`load1` abaixo de 4,
+  pacote abaixo de 70 °C: o aplicativo desta conversa sozinho passava dos
+  limites antigos) **e apertou onde media**: modo máximo desligado.
+
+### O que a execução refutou
+
+1. **"O automático vai de ~2200 em repouso a ~4400 quente"** — a seção 2 do
+   plano, uma hora depois de escrita. Vale para o modo máximo desligado. Com
+   ele ligado: 3350 parada, 6196 sob carga.
+2. **"A rotação tem de voltar à do automático"** — o plano e o roteiro. O
+   automático não volta para onde estava.
+3. **"Sem carga: `load1` abaixo de 2"** — a condição de E2. Com o aplicativo
+   do Claude aberto e mais nada, `load1` andou de 0,6 a 2,1.
+4. **"O teste do prazo passa"** — passava, e reprovava sob carga: com prazo de
+   1 s, contado em segundos inteiros, o roteiro vencia o próprio prazo antes
+   de o teste ver a escrita. Apareceu rodando as mutações quatro por vez.
+
+### Visto e não consertado
+
+- **Por que o modo máximo troca a curva da ventoinha** não foi apurado. O
+  suspeito é o pedido de PowerMizer que o agente segura; o `nvidia-powerd`
+  está no ar. Importa para a rede: "abaixo do que o automático faria" passa a
+  ter duas respostas (seção 11 do plano).
+- **A linha de base e os limites de aborto são do modo desligado.** Um jogo
+  com o modo máximo ligado não foi medido: a ventoinha gira mais, e o envelope
+  deve ser outro.
+- **O shellcheck não roda nesta máquina**: os dois arquivos novos só passam
+  por ele no CI, no primeiro push.
+- **A sessão do Claude reiniciou no meio** e levou o observador passivo junto;
+  ele foi religado. O traço da manhã ficou no scratchpad antigo.
+
+### E2 rodou: há piso, e a ventoinha não para
+
+Rodado pelo usuário em 2026-10-10, de 10:40:35 a 10:46:27, por um bloco no
+terminal. Modo máximo desligado, na tomada, 79%, sem jogo: 316 amostras,
+nenhuma fora da condição, throttle zero.
+
+```
+vigia     95% girou 7139 / 6696 rpm; kill -9 no roteiro; fan_speed em 0,0
+          819 ms depois; rotacao 700 rpm abaixo na leitura seguinte
+aborto    limite rebaixado: saiu com 10 na primeira amostra, 0,0 devolvido
+
+  %     100    80    60    50    40    30    20    15    10     5     1
+CPU    7539  6250  4911  4170  3411  2582  2009  2005  2003  2000  2000
+GPU    7069  5891  4647  3970  3252  2469  1675  1667  1663  1668  1663
+```
+
+- **De 20% para baixo nada muda**: ~2000 / ~1665 rpm. A ventoinha não para em
+  porcentagem nenhuma. O pior "manual baixo" possível é pouco abaixo do
+  automático parado e menos da metade do automático quente.
+- **O automático quente equivale a 53% / 50% de manual** com o modo máximo
+  desligado, e a 79% / 77% com ele ligado.
+- **100% gira 7539 rpm**; o automático nunca passou de 6196.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e2-20261010-104034.tsv`,
+  fora do repositório e fora do tmpfs.
+
+**O que E2 refutou:** "inclusive com a ventoinha parada" — a resposta 1 do
+grill. Não existe ventoinha parada: o firmware segura um piso. E o cursor tem
+uma faixa morta, de 1% a 20%, que este projeto oferecia sem saber.
+
+**Duas coisas que só apareceram executando:**
+
+1. **O painel de terminal do aplicativo perdeu a linha de comando, duas
+   vezes.** A aba abriu, o fish esperou 10 s por uma resposta do terminal, e o
+   comando não chegou a ser digitado. Conferido antes de seguir: nenhum
+   processo, `fan_speed` em `0,0`, nenhum traço. Rodou pelo bloco, como o
+   plano mandava desde o começo.
+2. **A ventoinha responde em um segundo.** Eu esperava que a conferência da
+   rotação no exercício do aborto valesse pouco — o alvo aborta um segundo
+   depois de escrever. Valeu: nessa amostra ela já girava 7260 rpm, e caiu
+   depois. Os 20 s de espera por degrau, no mapa, são folga.
+
+### O roteiro do E3: pronto, provado, por rodar
+
+O mesmo `tests/hardware/ensaio-termico.sh` ganhou o modo `e3`: três estágios
+(automático por 120 s, manual a 30% por 180 s, manual a 1% por 600 s), cada
+um com 30 s frio na frente para medir a rotação de referência e com a descida
+gravada depois. A carga são 8 processos em laço, cada um em grupo próprio e
+debaixo de `timeout`. No fim ele escreve o veredito pela regra da seção 10
+do plano.
+
+`tests/shell/test-ensaio-termico-e3.sh` o exercita na árvore de mentira, com
+um EC que esquenta enquanto houver carga: 36 conferências. O apoio comum aos
+dois testes foi para `tests/shell/lib-arvore-termica.sh`. Suíte shell: 23
+passam, 2 pulam, idêntica sob `LC_ALL=C`. Python: 387.
+
+**35 mutações, 35 reprovações** — 23 das proteções comuns e 12 do E3. Não foi
+de primeira: ver o item 2 abaixo.
+
+Três coisas que só apareceram executando:
+
+1. **O estágio contava amostras, não segundos.** Cada amostra custa o passo
+   mais a leitura, e a carga morre pelo relógio: na máquina, o estágio de 600
+   amostras teria uns 35 s finais sem carga nenhuma. Apareceu lendo o traço da
+   árvore de mentira — o pacote já frio na última amostra de um estágio "sob
+   carga". O estágio passou a durar tempo de relógio, e o teste cobra o pacote
+   quente no fim.
+2. **Uma mutação escapou: `mata_carga` que não mata nada.** O teste esperava
+   até 3 s para ver a carga morta, e com folga de 1 s ela morria sozinha pelo
+   `timeout` dentro dessa janela. A proteção mais importante do E3 — a fonte
+   de calor morre com o roteiro — estava coberta pelo relógio, não por ela.
+   A folga dos casos subiu para 30 s; só o caso "sem roteiro e sem vigia" usa
+   a curta, porque é o relógio que ele mede.
+3. **Um `grep -c` contou a linha do veredito.** "O EC obedeceu ao manual"
+   aparece nos dois estágios e também na frase do veredito R2. O teste
+   reprovava um roteiro certo.
+
+### E3 rodou: o EC não toma a ventoinha de volta, e nada estoura — R2
+
+Rodado pelo usuário em 2026-10-10, de 18:53:54 a 19:12:34, por um bloco no
+terminal, depois de um reinício da máquina. Modo máximo desligado, na tomada,
+79%, sem jogo: 1012 amostras, nenhuma fora da condição. Carga só de CPU.
+
+```
+                         automatico     manual 30%     manual 1% (o piso)
+ventoinha, rpm           4455 / 4030    2623 / 2504    2056 / 1715
+o EC tomou de volta?     --             nao            nao
+pacote, maximo           93 C           93             94
+SEN2 (limite 81)         62             68             74
+SEN4 (limite 91)         54             61             68
+frequencia, ult. minuto  3634 MHz       3286 (-10%)    2965 (-18%)
+```
+
+- **O EC obedece ao manual até o fim**: dez minutos com o pacote a 91–94 °C e
+  a rotação parada em ~2050 rpm. O controle positivo vale — em automático, na
+  mesma carga, ela foi de 2338 a 4482.
+- **Com carga só de CPU nada passa do envelope**, e as zonas de placa param de
+  subir no sexto minuto. Quem segura é o TCC.
+- **O custo é desempenho**: 18% de frequência a menos no piso.
+- **Veredito do roteiro: R2.** A decisão é do usuário, com os números.
+- A fonte de calor morreu com cada estágio, a ventoinha voltou a `0,0`, nada
+  sobrou em `/run/user`. `charge_now` não se mexeu: CPU sozinha não puxa da
+  bateria.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e3-20261010-185354.tsv`.
+
+**O que E3 não responde:** o jogo. Em automático, com jogo, `SEN4` foi a 89 °C
+com a ventoinha a 4400 rpm. A 2050 rpm, com os mesmos 60 W de GPU, não se
+sabe — é E3b, que o usuário decide agora que viu E3.
+
+### E3b rodou: com um jogo, a GPU bate no limite em sete segundos — R3
+
+O usuário disse sim ao E3b, e disse também que costuma jogar com o modo
+máximo ligado. O roteiro ganhou o modo `e3b` (o jogo tem de estar aberto, do
+começo ao fim; nenhuma carga própria), com teste antes: o do E3 passou a 57
+conferências. Rodado em 2026-10-10, de 19:44:48 a 19:48:58, com o modo máximo
+desligado.
+
+```
+com jogo, em automatico     4492 / 4083 rpm; GPU pelo EC 80 C, SEN4 87
+com jogo, manual a 1%       ~2075 / ~1727 rpm; GPU pelo EC 79 80 81 82 84 85
+                            ABORTO aos 7 s, no limite da GPU pelo EC (85 C)
+de volta ao automatico      4436 rpm em 20 s; GPU pelo EC a 74
+```
+
+- **Pela regra escrita antes de medir, a rede entra.**
+- O limite que estourou é o da GPU, que se protege sozinha: não é dano, é
+  desempenho que some em segundos. As zonas de placa não tiveram tempo de se
+  mexer, e onde iriam parar este ensaio não diz.
+- O roteiro abortou na amostra em que o limite apareceu e devolveu o
+  automático. Nenhuma camada além do próprio `trap` precisou agir.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e3b-20261010-194448.tsv`.
+
+**O que a execução refutou:** "o estágio do piso por até 300 s" — durou sete.
+E os 30 s de espera antes de a rede agir, do desenho provisório: a GPU sobe
+um grau por segundo.
+
+**Três coisas que só apareceram executando:**
+
+1. **O corredor de mutações sumiu duas vezes**, com dois reinícios: vivia no
+   scratchpad. Antes do E3b rodou uma versão refeita, com as 13 críticas: 12
+   reprovaram, e a que passou é equivalente — sem a recusa de "sem jogo", a
+   conferência seguinte recusa igual, com o mesmo código.
+2. **O resumo dizia "rotação de ? / ?"**: o aborto veio antes de a referência
+   do manual assentar. Consertado, com teste que falhou primeiro.
+3. **As minhas mutações esquentaram a máquina com o usuário jogando**: de
+   19:38 a 19:43 a ventoinha foi a 5600 rpm, com o modo máximo desligado. O
+   automático passa dos 4400 também nesse modo, se a carga for maior que a
+   do jogo.
+
+### O fechamento da sessão 1
+
+**Sem versão nova**, como a 4a: nada do que se instala mudou. `src/`,
+`packaging/` e `driver/` estão idênticos a `master` de antes; entraram um
+roteiro que ninguém instala, os testes dele e documentos.
+
+As três camadas da seção 1 de [plano-melhorias.md](plano-melhorias.md):
+
+| camada | o que deu |
+|---|---|
+| estática | `bash -n` em todo `.sh`, links dos documentos resolvendo, raiz intacta — `test-arvore.sh` |
+| suítes contra o baseline | Python: 387, igual. Shell: de 21 para **23 passam**, 2 pulam, os mesmos dois — a diferença são os dois testes novos. Idêntica sob `LC_ALL=C` |
+| ensaio na máquina | E2, E3 e E3b, acima |
+| CI, no ramo | no primeiro push o shellcheck reprovou: 4 avisos, todos em `lib-arvore-termica.sh` (uma variável lida só por quem importa o arquivo, e três `var=` vazias). Consertado; no segundo push, shellcheck, pytest e a suíte shell — como usuário e como root — verdes, com os testes novos rodando no container |
+
+E uma quarta, que esta sessão acrescentou: **43 mutações do roteiro, 42
+reprovadas e uma equivalente.** O corredor agora mora no repositório,
+`tests/hardware/mutacoes-ensaio.py`, depois de sumir duas vezes do scratchpad.
+
+O que o usuário decidiu no caminho, além do que está na seção da 4f:
+
+- **o cursor de manual segue de 0 a 100 na tela e vale 20 a 100 no
+  firmware** (`firmware = 20 + barra × 0,8`): a faixa morta some, e some o "0
+  num lado só". Entra na sessão 2;
+- **ele costuma jogar com o modo máximo ligado.** O E3b foi com ele
+  desligado, que é o que tinha linha de base.
+
+### Visto e não consertado
+
+- **O jogo com o modo máximo ligado não foi medido.** A curva do automático é
+  outra (armadilha 37); falta a linha de base dela, que sai de graça do
+  observador passivo numa sessão de jogo com o modo ligado.
+- **Onde as zonas de placa iriam parar com um jogo e a ventoinha no piso** o
+  E3b não diz: abortou aos 7 s, pela GPU.
+- **Por que o modo máximo troca a curva da ventoinha** não foi apurado.
+- **O painel de terminal do aplicativo perde a linha de comando** na partida
+  do fish. Os três ensaios rodaram por bloco.
+- **Os traços dos ensaios estão fora do repositório**, em
+  `~/.local/state/nexus-sense/`. Não é tmpfs, mas também não é o git.
+- **O job das suítes no CI passou de ~1 para ~7 minutos.** Os dois testes do
+  ensaio rodam duas vezes lá, como usuário e como root, num container lento.
+
+### Onde a sessão 2 começa
+
+Numa **sessão nova**, ramo `termica/2-rede`: a rede, no agente. O desenho está
+na seção 11 de [plano-termico.md](plano-termico.md), e o que a medição mandou
+mudar nele, no fim da seção 15.
+
+**Ponto de partida:** `master` com a sessão 1 mesclada, ainda em v1.2.7. O
+baseline esperado é 387 passam na suíte Python, sem xfail e, na shell, 23
+passam e 2 pulam — sem root e sob `LC_ALL=C`.
+
+**O que vale para ela:**
+
+- a rede só arma com o manual abaixo do que o automático faria, e isso são
+  duas porcentagens — ~53% com o modo máximo desligado, ~79% com ele ligado;
+- age em segundos: com jogo e a ventoinha no piso a GPU sobe um grau por
+  segundo;
+- disparada, escreve `0,0`, **fica em automático** e avisa **só no journal** —
+  decisões do usuário;
+- o cursor de 0 a 100 valendo 20 a 100 entra junto, com teste próprio;
+- esta sessão muda `src/`: a versão sobe antes do portão, e o portão
+  reinstala o pacote, com root.
 
 ---
 
