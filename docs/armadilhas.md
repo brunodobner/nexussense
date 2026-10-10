@@ -1393,6 +1393,38 @@ não enxergue o marco conta zero linhas depois dele — por vácuo.
 
 ---
 
+## 36. O `status` da bateria diz `Charging` com a carga caindo
+
+**Sintoma.** Cabo ligado, `ACAD/online` em 1, `BAT1/status` dizendo
+`Charging` — e a carga desce. Quem vigia a bateria pelo `status` não vê nada.
+
+**O que foi medido**, em 2026-10-10, por um observador passivo a cada 5 s:
+
+```
+26 min de jogo     80% -> 77%     corrente ~0,3 A     status Charging
+jogo fechado       77% -> 80%     corrente 2,43 A     status Charging
+no teto de 80%     parado         corrente zero       status Charging
+```
+
+`Charging` nas 635 amostras, nas três situações. Nesta máquina, com o cabo
+ligado, o `status` não distingue carregar, descarregar e estar parado no teto
+do `battery_limiter`.
+
+E `current_now` não tem sinal: o kernel o dá em módulo, e quem diz o sentido é
+o `status` — que aqui não diz. O sentido sai da carga: 0,3 A por 25 min são
+3,5% desta bateria, e ela perdeu três pontos. Era corrente de saída.
+
+**Regra.** Para saber se a bateria enche ou esvazia, leia `charge_now` em duas
+amostras e subtraia. `capacity` serve para o grosso — anda de ponto em ponto.
+`status` e `current_now`, sozinhos, não servem.
+
+**O que isto explica, e o que não.** As duas quedas "com o cabo ligado" deste
+projeto (60% → 43% na etapa 2, 54% → 31% na 4e) não apareceram em lugar nenhum
+porque o único sinal que se olhava era a troca de fonte. A **causa** das
+quedas continua hipótese — ver [plano-termico.md](plano-termico.md), seção 12.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

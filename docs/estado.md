@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4e fechada: v1.2.7, o caminho WMI do botão N saiu do driver, partida a frio conferida; 4f aberta)
+**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4f: o plano térmico está escrito, passou pelo grill e foi aprovado; a medição começa por E2)
 
 ---
 
@@ -58,7 +58,9 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4c -- bandeja   v1.2.5: o item volta com o watcher; sem ele, ou sem barramento, cai na reserva
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
-[ ] Melhorias, etapa 4f -- termica   brainstorm e plano proprio, nao codigo
+[x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
+[ ] Rede termica, sessao 1 -- medicao  E2 e E3 do plano, aprovado em 2026-10-10
+[ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
 ```
 
 ### Concluído
@@ -2080,6 +2082,184 @@ root e sob `LC_ALL=C`.
   segunda confirmada pelo usuário. Num ensaio longo sob carga, a bateria se
   mede a cada amostra, junto com a temperatura; e a causa é pergunta para o
   brainstorm.
+
+---
+
+## Melhorias de 2026-10, etapa 4f — o plano térmico, e onde a medição começa
+
+A sub-etapa 4f da seção 6 de [plano-melhorias.md](plano-melhorias.md): a rede
+de segurança térmica. Era brainstorm e plano, não código, e foi isso: em
+2026-10-10 saiu [plano-termico.md](plano-termico.md), passado pelo grill antes
+de ir à aprovação. **Sem ramo, sem versão nova, sem root.** Nada do que se
+instala mudou, nenhum ensaio esquentou a máquina e ninguém escreveu em
+`fan_speed`.
+
+As suítes, rodadas com os documentos novos já na árvore, conferem com o
+esperado: 387 passam na suíte Python, sem xfail; shell 21 passam e 2 pulam,
+idêntica sob `LC_ALL=C`.
+
+**O plano foi aprovado em 2026-10-10**, na mesma conversa, e o usuário mandou
+rodar E2 em seguida. E3 esquenta a máquina e se combina no chat antes do
+comando, como a seção 9 do plano manda.
+
+### O que o brainstorm decidiu
+
+1. **A rede não é para salvar silício.** A CPU corta frequência sozinha a
+   partir de ~92 °C, o kernel desliga a máquina em 110, a GPU tem alvo próprio
+   em 87. Nada disso depende da ventoinha. O que sobra para uma rede:
+   desempenho que some por um cursor esquecido, calor em placa, SSD e bateria,
+   e o setpoint manual que atravessa o reinício pelo `/etc/predator_state`.
+2. **A primeira pergunta é o que o EC faz sozinho** com o manual baixo e a
+   máquina quente. Só o ensaio responde, e as outras dependem dela.
+3. **Três ensaios, em ordem.** E2 mapeia porcentagem para rotação em repouso,
+   sem calor, e exercita o vigia e o aborto. E3 põe carga de CPU com o manual
+   a 30% e no mais baixo — com um estágio em automático na frente, que é o
+   controle positivo. São ~25 min, 15 de carga; a primeira versão dava 40 e o
+   usuário perguntou por quê: um estágio não decidia nada e dois tinham folga.
+   Só os 600 s do mais baixo não encolhem. E3b, com um jogo, é condicional.
+4. **Os limites de aborto estão escritos**, e os das zonas de placa saem do
+   envelope que o próprio EC permite em automático: o máximo de cada zona em
+   26 minutos de jogo, mais 2 °C.
+5. **Cinco camadas devolvem a ventoinha**: o `trap`, um vigia em processo à
+   parte, o `timeout` de cada processo de carga, o usuário, e o que fazer se a
+   máquina desligar no meio.
+6. **Uma regra de três desfechos, escrita antes**: o EC toma a ventoinha de
+   volta (nenhum código); obedece e nada estoura (o usuário decide, com os
+   números); algum limite estoura (a rede entra).
+7. **A rede, se entrar, é pequena.** No agente, função pura. Só arma com o
+   manual abaixo do que o automático faria quente. Disparada, escreve `0,0` e
+   registra no journal.
+
+### O que o usuário decidiu, no grill
+
+Sete perguntas, uma por vez. Duas respostas foram contra a recomendação, e as
+duas encolheram o desenho.
+
+| | pergunta | resposta |
+|---|---|---|
+| 1 | até onde E3 desce | até a porcentagem mais baixa, inclusive com a ventoinha parada |
+| 2 | E3b, o ensaio com jogo | decide depois de ver E3 |
+| 3 | se a máquina aguenta e só fica lenta, quer a rede? | decide com os números |
+| 4 | disparada a rede, o manual volta sozinho? | **não: fica em automático** até ele escolher de novo |
+| 5 | como fica sabendo | **só o journal**, nada na interface |
+| 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2 |
+| 7 | potência da fonte | 135 W, lido da etiqueta |
+
+Com a 4 e a 5, a rede não guarda setpoint, não tem limiar de volta, não tem
+como oscilar, e a sessão de código não toca na janela.
+
+### O que foi lido, sem provocar nada
+
+```
+coretemp        Package id 0: crit 100 C, crit_alarm 0
+TCC Offset      8  (corte de frequencia a partir de ~92 C)
+acpitz, TCPU    critical 110 C -- o kernel desliga
+SEN2..SEN5      passive 65, hot 75, critical 80,05 C -- e o kernel nao age:
+                nenhuma zona com dispositivo de resfriamento, thermald inativo
+GPU             alvo 87 C; reducao 2 C acima do limite, desligamento 12 C acima
+NVMe            max 85,85 / crit 92,85 num; 99,85 / 109,85 no outro
+CPU             i5-13420H; limite de potencia 55 W sustentados, 115 W de pico
+bateria         battery_limiter 1, battery_calibration 0
+```
+
+E do código: `fan_speed` lido é a memória do driver, não o firmware — se o EC
+tomar a ventoinha, o atributo continua dizendo o manual, e a verdade é a
+rotação. O agente não escreve na ventoinha. O cursor aceita de 0 a 100, sem
+piso.
+
+### O que foi medido: automático, com um jogo e depois dele
+
+O usuário abriu um jogo por conta própria às 08:37, um minuto antes da
+primeira leitura desta sessão. O observador sem root subiu às 08:38:50, antes
+da leitura longa dos documentos, e pegou 26 minutos de jogo e a descida — a
+linha de base do que o EC faz sozinho, de graça.
+
+```
+                      com o jogo (26 min)        18 min depois
+ventoinhas, rpm       4414 / 4003 em media       2178 / 1930
+pacote, C             73 a 96, media 84          44
+SEN4, C               72 a 89, media 86          45
+throttle da CPU       18,0% do tempo             zero
+bateria               80% -> 77%                 80%, corrente zero
+```
+
+Os números inteiros, a descida minuto a minuto e o observador estão em
+[plano-termico.md](plano-termico.md), seções 2 e 13.
+
+### O que a medição refutou
+
+1. **"Ventoinha manual baixa com CPU quente"** — a frase do plano. CPU quente
+   não distingue nada: em automático, a 4400 rpm, o pacote vai a 96 °C e a CPU
+   corta frequência em quase um quinto do tempo. A pergunta que serve é se o
+   manual está abaixo do que o automático faria.
+2. **Os pontos `critical` das zonas `SEN*` como limite.** `SEN4` passou 24
+   minutos acima do dela, sem consequência. A régua é o envelope do automático.
+3. **"A bateria se vigia pelo `status`."** Ele disse `Charging` em 635
+   amostras, com a carga caindo três pontos, subindo e parada. Armadilha 36.
+4. **"A causa não foi apurada"** — a seção da 4e, sobre a máquina que
+   descarrega com o cabo ligado. Segue hipótese, mas com um dado a favor: com
+   o jogo a bateria cedeu ~5 W, e fechado o jogo recebeu 40 W na amostra
+   seguinte. CPU a 55 W, GPU a 60–75 W e o resto encostam nos 135 W da fonte.
+   E o usuário disse o que faltava: **nas duas quedas antigas ele estava
+   jogando**, com o cabo sempre ligado. São três de três. A queda de hoje foi
+   de 0,12 ponto por minuto; a da 4e, de 0,42 — falta ver uma carga mais
+   pesada dar a taxa maior.
+5. **As duas recomendações de desenho** — devolver o manual ao esfriar, e uma
+   linha na janela. O usuário escolheu o contrário nas duas.
+6. **As ferramentas do grill.** O extrator e o gerador de perguntas acharam
+   zero ramos: os padrões são em inglês. A árvore foi montada à mão.
+
+### Quatro coisas que só apareceram executando
+
+1. **A condição com prazo desta sessão era um jogo, e ninguém a previu.** O
+   observador subiu antes da leitura longa, como a 4e mandava, e foi isso que
+   a pegou. A primeira versão não gravava as zonas `SEN*` nem o throttle; a
+   segunda entrou um minuto e meio depois, com o jogo já quente.
+2. **O observador não gravava `charge_now`.** Só `capacity`, `status` e
+   corrente — e o `status` não diz nada. A queda apareceu no `capacity`, de
+   ponto em ponto.
+3. **A corrente máxima "com o jogo" era 2,4 A**, e a primeira versão do plano
+   dizia "de 0 a 0,9 A". Eram dois picos, no começo e no fim. Conferir a frase
+   contra o traço inteiro, não contra as linhas que passaram na tela.
+4. **Um comando de `awk` foi barrado** por uma checagem que procura remoção de
+   arquivos: não havia remoção nenhuma. O resumo virou um arquivo `.awk`.
+
+### Visto e não consertado
+
+- **`BAT1/status` diz `Charging` sempre que o cabo está ligado.** É do
+  firmware; o agente não depende dele. Armadilha 36.
+- **O evento `0x9` ("battery boost") chega ao driver e é ignorado** — já
+  estava na lista da 4e. Se a hipótese da fonte se confirmar, é ele o aviso de
+  que a bateria entrou no circuito.
+- **O traço bruto da linha de base ficou no scratchpad**, que é tmpfs. O
+  resumo e o observador estão no repositório; o traço, não — são
+  centenas de kB num repositório que já foi expurgado por tamanho. Se a sessão
+  2 quiser um traço em automático como teste, grava outro.
+- **"São 17 armadilhas"**, em "Como trabalhar aqui", mais abaixo. São 36.
+
+### Onde a medição começa
+
+Aprovado o plano, pela sessão 1 de
+[plano-termico.md](plano-termico.md): o roteiro de ensaio em `tests/hardware/`,
+com a lógica de aborto testada contra uma árvore falsa, e depois E2 e E3.
+Ramo `termica/1-medicao`.
+
+**Ponto de partida:** `master` em v1.2.7. O baseline esperado é 387 passam na
+suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
+`LC_ALL=C`.
+
+**O que vale para ela:**
+
+- os limites de aborto são os da seção 7 do plano, e não se mexe neles depois
+  da aprovação;
+- o roteiro só começa com `fan_speed` em `0,0`, na tomada, com a bateria a
+  partir de 60% — medido na hora de rodar, não na hora de pedir;
+- a bateria se lê por `charge_now` (armadilha 36);
+- E2 e E3 são blocos que o usuário roda no terminal do aplicativo: o que ele
+  faz e não faz durante o ensaio se combina antes, em prosa (seção 9 do
+  plano);
+- depois de qualquer reinício que o plano não previu, ler `fan_speed` antes de
+  tudo: desligamento ordenado grava o manual baixo, e ele volta na partida.
 
 ---
 

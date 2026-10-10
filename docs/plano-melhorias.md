@@ -241,7 +241,7 @@ As sub-etapas não dependem uma da outra; a ordem abaixo é a recomendada.
 | 4c | `melhorias/4c-bandeja` | o SNI se registra de novo quando o `StatusNotifierWatcher` reinicia; sem barramento ou sem watcher, a bandeja cai na reserva em vez de morrer | **fechada, v1.2.5** — teve root: duas reinstalações no portão; o gesto foi reiniciar o `kded6` |
 | 4d | `melhorias/4d-instalador` | `runtime_dependencies_ok` sem `powerprofilesctl`; headers instalados mesmo com `make` e `dkms` presentes; `clang` decidido por kernel-alvo; a desinstalação encerra agente e bandeja; a fiação do `groupdel` provada sem trocar o gid | **fechada, v1.2.6** — teve root: uma reinstalação no portão; a desinstalação rodou só num namespace |
 | 4e | `melhorias/4e-botao-n` | o evento WMI do botão N chega?; se não chega, a poda; o caminho de abaixo de 40% de ponta a ponta | **fechada, v1.2.7** — teve root: o `pr_debug` e um kprobe na medição, e DKMS com recarga no portão; 16 apertos e o cabo; partida a frio conferida |
-| 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | a decidir no plano |
+| 4f | — | rede de segurança térmica: **brainstorm e plano próprio**, não código | **fechada, sem versão nova** — sem root, sem ramo; o plano é [plano-termico.md](plano-termico.md), aprovado no mesmo dia |
 
 Item que é hipótese começa **medindo**, com a regra de decisão escrita antes da
 medição — como na 2b, que só trocou a condição da bateria depois de a amostra
@@ -405,6 +405,14 @@ abaixo de 40% na hora, religar o cabo e observar o agente segurar o perfil
 guardado até o firmware aceitar. Se não estiver, fica registrado que não deu.
 
 ### 4f — rede de segurança térmica
+
+**Fechada em 2026-10-10, sem versão nova.** O brainstorm virou
+[plano-termico.md](plano-termico.md), passado pelo grill e aprovado; a
+execução dele é trabalho próprio, fora deste plano. O que se leu sem esquentar nada já
+mudou a pergunta: a CPU se protege sozinha, e em automático, com um jogo, ela
+já corta frequência em quase um quinto do tempo — "CPU quente" não distingue o
+manual baixo do uso normal. O que foi lido, medido e decidido está em
+[estado.md](estado.md).
 
 Ventoinha manual baixa com CPU quente. **Não começa por código:** não se sabe
 o que o EC já faz sozinho, e medir isso é pôr a máquina quente de propósito. A
