@@ -998,6 +998,193 @@ root e sob `LC_ALL=C`.
 
 ---
 
+## Melhorias de 2026-10, etapa 4b — o que a medição disse
+
+Sub-etapa de medição: as três perguntas da seção 6 de
+[plano-melhorias.md](plano-melhorias.md), respondidas em 2026-10-10 entre 02:45
+e 03:34, antes de qualquer linha de código. Ramo `melhorias/4b-gpu`.
+
+O baseline capturado antes de tudo conferiu com o esperado: 364 passam e 1
+xfail na suíte Python; shell 19 passam e 2 pulam, idêntico sob `LC_ALL=C`.
+
+**A condição, conferida a cada amostra:** na tomada (bateria em 79–80%), modo
+máximo desligado pelo usuário às 02:44 e o agente sem nenhum descritor da NVML,
+perfil `balanced-performance`, ventoinhas no automático. Nenhuma amostra saiu
+dela. Cada fase foi um comando só, e os sensores foram achados pelo nome ou
+pelo rótulo.
+
+A regra do plano não mudou. O que se fixou antes do primeiro número foi como
+ler cada termo dela: "cabe em 5 °C" é toda amostra, não a média; carga é uso de
+GPU a partir de 50%, repouso é até 10%; "não acorda" é `runtime_active_time`
+sem andar um milissegundo, e só vale se um `nvidia-smi` no fim mostrar que o
+instrumento enxerga um despertar.
+
+| | pergunta | resposta | o que decide |
+|---|---|---|---|
+| 1a | ler `temp2` acorda a placa? | **não**, nem atrasa o sono | — |
+| 1b | o que ele devolve com a placa `suspended`? | **zero** | — |
+| 1c | a diferença contra o `nvidia-smi` cabe em 5 °C? | no repouso sim; **na carga não** | a temperatura **fica no `nvidia-smi`** |
+| 2 | a janela impede a dGPU de dormir? | **sim** | conserto na janela, nos commits seguintes deste ramo |
+| 3 | o que `temp3` mede? | é o `SEN3` do ACPI; o que o `SEN3` mede, o firmware não diz | só este registro |
+
+### Pergunta 1 — `temp2` contra o `nvidia-smi`
+
+```
+                          amostras   EC - nvidia-smi          pior
+carga   (AION2, uso >=97%)   35      +0 a +6, media +3,9       6    <- tres amostras em +6
+repouso (uso 0%)             36      +1 a +2, media +1,9       2
+```
+
+O EC lê sempre igual ou acima. Reprovou por um grau, em três de 35 amostras, e
+a regra estava escrita antes: do `temp2` não sai código.
+
+Com a placa `suspended`: 60 leituras em 60 s — 30 só do rótulo `GPU`, 30 dos
+cinco canais do hwmon do acer — e o status ficou `suspended` em todas, com
+`runtime_active_time` parado. O `nvidia-smi` do fim acordou a placa, então o
+silêncio não era vácuo (armadilha 14). O valor lido nas 60 foi `0`. Lendo a
+1 Hz através do adormecer, ele vale a temperatura até o segundo em que a placa
+dorme e zero no seguinte — e a placa dormiu nos mesmos 21 s de quando ninguém
+lê.
+
+### Pergunta 2 — a janela e o sono da placa
+
+Um `nvidia-smi` do próprio roteiro serve de despertar em t=0:
+
+```
+janela fechada                    dorme 21,0 s depois       4 de 4
+janela aberta, placa dormindo     60 s, nao acordou         a guarda de read_gpu vale no hardware
+janela aberta, placa acordada     4 min 12 s sem dormir     limite da regra: 63 s
+   ... e a janela e fechada       dorme ~7 s depois
+```
+
+Com a janela aberta e a placa acordada, o processo da interface colheu um
+filho `nvidia-smi` em 45 de 45 conferências de 2 s, nas duas rodadas de 90 s. É
+o que o plano supunha: `read_gpu` só chama o `nvidia-smi` com a placa `active`,
+mas cada chamada renova o prazo, e ela nunca chega a `suspended`. **A janela
+não acorda a placa; não a deixa dormir.**
+
+São dois prazos, não um: 21,0 s depois de acordar de `suspended`, e 7 a 10 s
+quando ela já estava acordada havia tempo (7 ao fechar a janela, 10 ao parar o
+`coolercontrold`).
+
+### Pergunta 3 — `temp3` é o `SEN3`
+
+```
+                  jogo     repouso   so CPU (4 processos, 90 s)
+temp3 (Ext. 2)   70-71     52-54     49-51
+SEN3             70-71     52-54     49-51     identico em 172 de 172 amostras
+temp1 (CPU)      68-90     51-72     49-91
+nvidia-smi       60-69     45-46     44-47
+```
+
+Não é a CPU: ela foi a 91 °C por 90 s e ele não saiu de 51. Não é o chip da
+GPU: em repouso fica 7 a 9 °C acima. Sobe com carga de GPU e leva minutos para
+descer. É a zona térmica `SEN3`, um sensor do próprio EC
+(`\_SB_.PC00.LPCB.EC0_.SEN3`, dispositivo `INTC10A1:01`) que o firmware não
+descreve — um sensor de placa do lado da GPU, e mais do que isso não dá para
+afirmar. O rótulo `External 2` fica. De carona: `temp1` do acer é idêntico à zona `TCPU`,
+também em 172 de 172.
+
+### Quem segura a placa acordada nesta máquina
+
+A medição parou na terceira fase. Com o jogo, o Steam e a janela fechados e o
+modo máximo desligado, nenhum processo legível tinha `/dev/nvidia*` aberto — e
+a placa não dormiu em 120 s. `runtime_suspended_time` valia **zero em 6 h 15 de
+boot**. A regra para esse caso estava escrita: achar o dono antes de seguir.
+
+```
+coolercontrold rodando, nada mais    0 ms suspended em 120 s
+parado (03:13:49)                    suspended 10 s depois
+religado (03:32:30)                  active na hora, e 75 s sem dormir
+```
+
+O `coolercontrold` (CoolerControl 5.0.1, serviço de root) inicia a NVML na
+partida — `NVML found and initialized`, no journal — e registra a RTX 4050 com
+carga, potência e temperatura; a taxa de sondagem padrão dele é de um segundo.
+É o mecanismo da pergunta 2, vindo de outro programa, o dia inteiro.
+Ele não controla nada nesta máquina: o hwmon do acer não tem `pwm`.
+
+**Consequência:** hoje a dGPU não dorme com nem sem o Nexus Sense, e o conserto
+da janela só aparece se o CoolerControl deixar de vigiar a GPU. Isso é
+configuração do usuário — o dispositivo se desabilita nas configurações dele —
+e este projeto não mexe nela. Acordada e ociosa, a placa gasta 2 a 3 W pelo
+`nvidia-smi`.
+
+Mais dois que apareceram no caminho:
+
+- **`nvidia-smi dmon -d 2`, filho do `ksystemstats` do KDE**, vivo enquanto o
+  Steam esteve aberto, sem Monitor do Sistema na tela nem widget de GPU no
+  painel. Saiu sozinho 13 s depois do Steam.
+- **`kwin_wayland`** é o único cliente que o `nvidia-smi` lista, com 7 MiB, e
+  era o suspeito à vista. Inocente: com ele no lugar a placa dorme.
+
+### O que a medição refutou
+
+1. **"`temp2` serve de temperatura da GPU."** Na carga passa de 5 °C, e com a
+   placa dormindo vale zero.
+2. **"Fora do modo máximo a placa dorme."** Era a condição que o plano dava
+   como suficiente. Nesta máquina não basta: há um serviço de root na NVML.
+3. **"`nvidia-smi`: 18 ms, e acorda"** (armadilha 20). Os 18 ms são com a placa
+   já acordada — hoje, 20. Acordando, leva 2,0 s (1,97 a 2,12, cinco vezes).
+4. **"`read_gpu` nunca acorda, logo a janela não custa bateria."** Metade: não
+   acorda, e não deixa dormir.
+5. **O suspeito visível.** `kwin_wayland` aparecia na lista e era inocente; o
+   culpado não aparece em lista nenhuma (armadilha 31).
+6. **A fase de carga de CPU com a placa dormindo perdeu o objeto**, como a
+   tarefa 1.10 da etapa 1: existia para separar "último valor" de "temperatura
+   de verdade", e a resposta foi zero. A carga rodou com a placa acordada, para
+   a pergunta 3.
+
+### Três desvios do roteiro combinado
+
+- A fase de repouso veio depois da primeira tentativa de dormir: o usuário
+  fechou o jogo e o Steam antes do pedido, e a placa parada era a observação
+  que não se repetiria.
+- A janela foi aberta pelo D-Bus (`Show`, o caminho da tecla N) no mesmo
+  comando da leitura, em vez de por gesto — ação e leitura juntas, armadilha 25.
+  Fechar foi gesto do usuário, com o leitor já rodando: o instante aparece na
+  CPU do processo.
+- O `coolercontrold` ficou parado de 03:13:49 a 03:32:30, com root e
+  autorização, num `pkexec` só que o religava por bandeira ou em 45 minutos.
+
+### Como refazer (o roteiro vivia no scratchpad, que é tmpfs)
+
+```bash
+# Os tres arquivos que dizem se a placa dorme. Le-los nao a acorda.
+d=/sys/bus/pci/devices/0000:01:00.0/power      # o BDF se acha por vendor 0x10de
+cat $d/runtime_status $d/runtime_active_time $d/runtime_suspended_time
+
+# Abrir a janela sem gesto, no mesmo comando da leitura:
+busctl --user call com.nexussense.NexusSense /com/nexussense/NexusSense \
+       com.nexussense.NexusSense Show
+```
+
+- **Janela aberta ou fechada** se confere pela CPU do processo da interface, em
+  `/proc/<pid>/stat`: `utime+stime` anda 0 a 2 ticks a cada 2 s com ela
+  fechada e 11 a 32 com ela aberta. `cutime+cstime` anda 1 a 4 ticks a cada 2 s
+  quando ela chama o `nvidia-smi`, e zero quando não chama.
+- **Dono de `/dev/nvidia*`** se acha por `readlink` em `/proc/*/fd`. Processo de
+  root é ilegível, e `kwin_wayland` também: armadilha 31.
+- **Controle positivo no fim de toda fase que conclui "não acordou"**: um
+  `nvidia-smi`, e o status tem de ir a `active`.
+
+### Visto e não consertado
+
+- **O `coolercontrold` segura a dGPU acordada o dia inteiro.** Configuração do
+  usuário; ver acima.
+- **O hwmon do acer devolve `0` para a GPU dormindo**, como se fosse leitura:
+  quem lista sensores vê "0 °C". O driver repassa o que o EC diz. Trocar por
+  erro de leitura é mudança de driver, com DKMS e reinício — fora desta
+  sub-etapa.
+- **A janela de verdade custa mais do que o arnês da etapa 1 mediu.** Processo
+  real, janela aberta: 7,4% de um núcleo com a GPU dormindo e 9,5 a 10,8% com
+  ela acordada, sem contar os filhos. O arnês fora da tela tinha dado 5,3%
+  com os filhos. Não foi apurado onde vai a diferença.
+- **O caminho de abaixo de 40%** segue sem ensaio de ponta a ponta: a bateria
+  esteve em 79–80%. É da 4e.
+
+---
+
 ## A sessão de 2026-09-11/12, e onde ela parou
 
 Vinte e nove commits, `v1.1.2` → **`v1.1.9`**. Entrou por três pendências que o
