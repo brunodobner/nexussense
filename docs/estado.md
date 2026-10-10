@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2, E3 e E3b rodaram — com um jogo e a ventoinha no piso a GPU bate no limite em 7 s; veredito R3, a rede entra)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1 fechada: com um jogo e a ventoinha no piso a GPU bate no limite em 7 s; veredito R3, a rede entra — sessão 2)
 
 ---
 
@@ -16,7 +16,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 | versão | **v1.2.7** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 23 testes: 21 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
+| suíte shell | 25 testes: 23 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
 | suíte Python | 387 passam (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
@@ -59,7 +59,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2, E3 e E3b feitos: com jogo, R3 -- a rede entra; falta fechar e mesclar
+[x] Rede termica, sessao 1 -- medicao  piso em ~2000 rpm, o EC nao socorre; com jogo a GPU bate no limite em 7 s (R3)
 [ ] Rede termica, sessao 2 -- a rede   a regra mandou: E3b deu R3
 ```
 
@@ -2263,7 +2263,7 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
 
 ---
 
-## Rede térmica, sessão 1 — E2, E3 e E3b feitos
+## Rede térmica, sessão 1 — fechada, e onde a sessão 2 começa
 
 Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
 aprovado. O que existe:
@@ -2485,21 +2485,66 @@ um grau por segundo.
    automático passa dos 4400 também nesse modo, se a carga for maior que a
    do jogo.
 
-### Visto e não consertado, até aqui
+### O fechamento da sessão 1
 
-- **O jogo com o modo máximo ligado não foi medido**, e é como o usuário
-  costuma jogar. A curva do automático é outra; falta a linha de base dela —
-  sai de graça do observador passivo numa sessão de jogo com o modo ligado.
-- **O corredor de mutações completo** (eram 35, mais as 7 do E3b) não está no
-  repositório. Refazê-lo e guardá-lo em `tests/hardware/` fecha a sessão 1.
-- **O shellcheck** dos quatro arquivos novos só roda no CI, no primeiro push.
+**Sem versão nova**, como a 4a: nada do que se instala mudou. `src/`,
+`packaging/` e `driver/` estão idênticos a `master` de antes; entraram um
+roteiro que ninguém instala, os testes dele e documentos.
 
-### Onde continua
+As três camadas da seção 1 de [plano-melhorias.md](plano-melhorias.md):
 
-Fechar a sessão 1: o corredor de mutações no repositório, as três camadas de
-verificação, o merge de `termica/1-medicao` e o push — o push só com a palavra
-do usuário. Depois a sessão 2, a rede, em sessão nova. Com o usuário: a faixa
-morta do cursor.
+| camada | o que deu |
+|---|---|
+| estática | `bash -n` em todo `.sh`, links dos documentos resolvendo, raiz intacta — `test-arvore.sh` |
+| suítes contra o baseline | Python: 387, igual. Shell: de 21 para **23 passam**, 2 pulam, os mesmos dois — a diferença são os dois testes novos. Idêntica sob `LC_ALL=C` |
+| ensaio na máquina | E2, E3 e E3b, acima |
+
+E uma quarta, que esta sessão acrescentou: **43 mutações do roteiro, 42
+reprovadas e uma equivalente.** O corredor agora mora no repositório,
+`tests/hardware/mutacoes-ensaio.py`, depois de sumir duas vezes do scratchpad.
+
+O que o usuário decidiu no caminho, além do que está na seção da 4f:
+
+- **o cursor de manual segue de 0 a 100 na tela e vale 20 a 100 no
+  firmware** (`firmware = 20 + barra × 0,8`): a faixa morta some, e some o "0
+  num lado só". Entra na sessão 2;
+- **ele costuma jogar com o modo máximo ligado.** O E3b foi com ele
+  desligado, que é o que tinha linha de base.
+
+### Visto e não consertado
+
+- **O jogo com o modo máximo ligado não foi medido.** A curva do automático é
+  outra (armadilha 37); falta a linha de base dela, que sai de graça do
+  observador passivo numa sessão de jogo com o modo ligado.
+- **Onde as zonas de placa iriam parar com um jogo e a ventoinha no piso** o
+  E3b não diz: abortou aos 7 s, pela GPU.
+- **Por que o modo máximo troca a curva da ventoinha** não foi apurado.
+- **O painel de terminal do aplicativo perde a linha de comando** na partida
+  do fish. Os três ensaios rodaram por bloco.
+- **Os traços dos ensaios estão fora do repositório**, em
+  `~/.local/state/nexus-sense/`. Não é tmpfs, mas também não é o git.
+
+### Onde a sessão 2 começa
+
+Numa **sessão nova**, ramo `termica/2-rede`: a rede, no agente. O desenho está
+na seção 11 de [plano-termico.md](plano-termico.md), e o que a medição mandou
+mudar nele, no fim da seção 15.
+
+**Ponto de partida:** `master` com a sessão 1 mesclada, ainda em v1.2.7. O
+baseline esperado é 387 passam na suíte Python, sem xfail e, na shell, 23
+passam e 2 pulam — sem root e sob `LC_ALL=C`.
+
+**O que vale para ela:**
+
+- a rede só arma com o manual abaixo do que o automático faria, e isso são
+  duas porcentagens — ~53% com o modo máximo desligado, ~79% com ele ligado;
+- age em segundos: com jogo e a ventoinha no piso a GPU sobe um grau por
+  segundo;
+- disparada, escreve `0,0`, **fica em automático** e avisa **só no journal** —
+  decisões do usuário;
+- o cursor de 0 a 100 valendo 20 a 100 entra junto, com teste próprio;
+- esta sessão muda `src/`: a versão sobe antes do portão, e o portão
+  reinstala o pacote, com root.
 
 ---
 

@@ -1425,6 +1425,73 @@ quedas continua hipótese — ver [plano-termico.md](plano-termico.md), seção 
 
 ---
 
+## 37. O automático da ventoinha não tem um ponto de repouso
+
+**Sintoma.** Um roteiro escreve um valor manual em `fan_speed`, devolve `0,0`
+e confere que a rotação "voltou ao que era". Reprova uma devolução certa: a
+ventoinha voltou ao automático, mas não à rotação de antes.
+
+**O que foi medido**, em 2026-10-10, sempre em automático e em
+`balanced-performance`, sem jogo:
+
+```
+                       modo maximo desligado      modo maximo ligado
+parada, EC a ~50 C     2240 / 1990 rpm            3350 / 2890 rpm
+carga, EC a 64-73 C    --                         5000 a 6196 rpm
+jogo, EC a 73-91 C     4037 a 4464 rpm            --
+```
+
+Na mesma temperatura do EC (50 °C) a ventoinha da CPU girou de 2241 a 3558
+rpm. São pelo menos duas curvas — quem troca é o modo máximo, por um caminho
+que não foi apurado — e dentro de cada uma a rotação depende do que a máquina
+fez no minuto anterior. Depois de dois minutos e meio em manual baixo, o
+automático voltou subindo sozinho de 2246 a 3267 rpm.
+
+**Regra.** Nunca cobre "a rotação voltou a X". Cobre que ela **saiu do valor
+manual**, e escolha o manual do ensaio de modo que a saída tenha sentido
+conhecido: a 95% a ventoinha gira acima de qualquer automático em repouso, e
+devolver só pode fazê-la cair. Se o manual escolhido não se distinguir do
+automático, o ensaio diz isso e para — não passa.
+
+E `fan_speed` não serve de prova: é a memória do driver, não o firmware. Quem
+diz o que o EC está fazendo é `fan1_input` e `fan2_input`.
+
+**O que isto tem em comum com a 25.** Quem avisou foi o usuário, que ouve a
+ventoinha todo dia: *"mesmo só com você aberto ela mantém uma faixa superior
+à que você espera"*. O plano tinha medido uma curva, numa manhã, e a chamado
+de "o automático".
+
+---
+
+## 38. A camada de reserva esconde a que falhou
+
+**Sintoma.** Estraga-se de propósito a proteção principal — a função que mata
+a carga de CPU do ensaio térmico passa a não matar nada — e o teste que a
+guarda continua verde.
+
+**Causa.** Havia duas camadas, e o teste media o efeito sem saber de qual
+veio. Cada processo de carga roda debaixo de `timeout`, para morrer sozinho se
+roteiro e vigia sumirem. No teste essa folga era de 1 s, e o teste esperava
+até 3 s para ver a carga morta: sem ninguém matá-la, ela morria pelo relógio
+dentro da janela. "A fonte de calor morre com o roteiro" estava coberta pelo
+relógio, não pelo roteiro.
+
+Defesa em profundidade é o desenho certo para a máquina e o errado para o
+teste: quanto mais camadas, mais fácil uma cobrir o buraco da outra sem
+ninguém ver.
+
+**Regra.** Para provar uma camada, tire as outras do caminho — ou afaste-as no
+tempo. A folga dos casos subiu para 30 s; só o caso que mede o relógio usa a
+curta. E o jeito de achar isso não é ler o teste: é estragar a proteção e
+rodá-lo. `tests/hardware/mutacoes-ensaio.py` faz isso, uma por vez.
+
+**Um parente, do mesmo dia.** Uma mutação que passa nem sempre é teste fraco.
+Sem a recusa de "nenhum jogo aberto" na partida do E3b, a conferência seguinte
+recusa igual, com o mesmo código: o roteiro mutado faz a mesma coisa. Antes de
+endurecer o teste, veja se a mutação muda algum comportamento.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

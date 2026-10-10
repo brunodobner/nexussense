@@ -2,13 +2,14 @@
 
 **Estado: escrito em 2026-10-10, na sub-etapa 4f de
 [plano-melhorias.md](plano-melhorias.md), passado pelo grill e aprovado pelo
-usuário no mesmo dia.** O que este arquivo afirma está marcado: **lido** (do
-sysfs, do código ou do kernel, sem provocar nada) ou **medido** (observado
-acontecendo). O que cada ensaio deu, conforme for rodando, vai para
-[estado.md](estado.md).
+usuário no mesmo dia. A medição (E2, E3 e E3b) rodou também nesse dia: o
+veredito foi R3, e a rede entra.** O que este arquivo afirma está marcado:
+**lido** (do sysfs, do código ou do kernel, sem provocar nada) ou **medido**
+(observado acontecendo). O resultado de cada ensaio está na seção 6, junto do
+ensaio; o que a execução refutou, em [estado.md](estado.md).
 
 Antes de executar, ler [armadilhas.md](armadilhas.md) — em especial as 3b, 14,
-19, 20, 25, 27, 31, 33, 35 e 36 — e as seções 1 e 19 de
+19, 20, 25, 27, 31, 33, 35, 36, 37 e 38 — e as seções 1 e 19 de
 [decisoes.md](decisoes.md).
 
 ---
@@ -756,11 +757,11 @@ cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count \
 | | pergunta | resposta |
 |---|---|---|
 | 1 | até onde E3 desce | até a porcentagem mais baixa, **inclusive com a ventoinha parada**, se E2 mostrar que existe. E2 mostrou que não existe: o piso é ~2000 rpm |
-| 2 | E3b, o ensaio com jogo | decide depois de ver E3 |
-| 3 | se der R2, quer a rede? | decide com os números de E3 |
+| 2 | E3b, o ensaio com jogo | decide depois de ver E3. **Visto E3, disse sim; E3b rodou e deu R3** |
+| 3 | se der R2, quer a rede? | decide com os números de E3. **Perdeu o objeto: com jogo deu R3, e pela regra a rede entra** |
 | 4 | disparada a rede, o manual volta sozinho? | **não: fica em automático** até você escolher de novo — contra a recomendação |
 | 5 | como você fica sabendo | **só o journal** — contra a recomendação, que era uma linha na janela |
-| 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2. **E2 feito: nenhuma para; de 20% para baixo o cursor não muda nada.** A decisão está de volta com você |
+| 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2. **E2 feito: nenhuma para; de 20% para baixo o cursor não muda nada.** **Decidido pelo usuário em 2026-10-10: a barra segue de 0 a 100 na tela e vale 20 a 100 no firmware** — `firmware = 20 + barra × 0,8`. A faixa morta some, e some também o "0 num lado só" (ventoinha em automático passa a ser só pelo botão). Entra na sessão 2 |
 | 7 | potência da fonte | 135 W, lido da etiqueta |
 
 **Ainda suas** — autorização, e é o que a aprovação deste plano quer dizer:
@@ -789,11 +790,24 @@ limpo, baseline antes da primeira edição, a suíte inteira antes de cada commi
 
 | sessão | ramo | o que entra | root, gesto |
 |---|---|---|---|
-| 1 — medição | `termica/1-medicao` | o roteiro em `tests/hardware/`, com teste da lógica de aborto contra sysfs falso; E2, E3; o veredito da regra em [estado.md](estado.md) | sem root. Gesto: rodar dois blocos e não usar a máquina de pesado por ~35 min |
-| 2 — a rede | `termica/2-rede` | só se a regra mandar: a função pura, os traços como teste, o agente. Sem mudança na interface. Versão nova, portão com reinstalação | root na reinstalação |
+| 1 — medição | `termica/1-medicao` | **feita em 2026-10-10, sem versão nova.** O roteiro em `tests/hardware/`, com teste em árvore falsa e um corredor de mutações; E2, E3 e E3b; veredito R3 | sem root. O gesto foi rodar três blocos, e um jogo no último |
+| 2 — a rede | `termica/2-rede` | **a regra mandou.** A função pura, os traços como teste, o agente. Sem mudança na interface. Versão nova, portão com reinstalação | root na reinstalação |
 
-Baseline esperado ao abrir a sessão 1: 387 passam na suíte Python, sem xfail;
-shell 21 passam e 2 pulam, sem root e sob `LC_ALL=C`.
+Baseline esperado ao abrir a sessão 2: 387 passam na suíte Python, sem xfail;
+shell 23 passam e 2 pulam, sem root e sob `LC_ALL=C`.
+
+**O que a sessão 2 herda da medição**, além do desenho da seção 11:
+
+- **Agir em segundos, não em 30.** Com jogo e a ventoinha no piso, a GPU
+  sobe um grau por segundo.
+- **"Abaixo do automático" são duas porcentagens:** ~53% com o modo máximo
+  desligado, ~79% com ele ligado. O agente sabe em qual está.
+- **Falta a linha de base do jogo com o modo máximo ligado**, que é como o
+  usuário costuma jogar. Sai do observador da seção 13, numa sessão de jogo
+  dele — sem ensaio.
+- **Os traços** estão em `~/.local/state/nexus-sense/`, fora do repositório:
+  o do E2 (56 kB), o do E3 (179 kB) e o do E3b (40 kB). O que virar teste
+  entra recortado.
 
 **Fora deste plano, de propósito:** se trocar de perfil ou suspender a máquina
 desfaz o manual no firmware (o driver não saberia; erra para o lado seguro);
