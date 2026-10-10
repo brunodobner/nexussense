@@ -9,6 +9,7 @@ demais, procurando pelo conteudo de 'name'. Ver spec secao 10.1.
 """
 
 import subprocess
+import time
 from typing import NamedTuple
 
 PACKAGE_LABEL = "Package id 0"
@@ -104,11 +105,16 @@ NVIDIA_SMI_QUERY = "temperature.gpu,utilization.gpu"
 
 
 class GpuReading(NamedTuple):
-    """asleep=True significa que nao sondamos, nao que nao ha GPU."""
+    """asleep=True significa que nao sondamos, nao que nao ha GPU.
+
+    idle=True tambem e "nao sondamos", com a placa acordada e parada: os
+    dois valores sao os da ultima leitura de verdade. Ver GpuProbe.
+    """
 
     asleep: bool
     temperature: float | None
     utilization: int | None
+    idle: bool = False
 
 
 def nvidia_device(sysfs):
@@ -178,6 +184,85 @@ def read_gpu(sysfs, runner=subprocess.run, bdf=None):
         return GpuReading(asleep=False, temperature=None, utilization=None)
 
     return GpuReading(asleep=False, temperature=temperatura, utilization=utilizacao)
+
+
+# Quantas leituras seguidas com uso 0% fazem a sonda se calar, por quanto
+# tempo ela espera a placa dormir, e de quanto em quanto tempo repete o
+# teste quando outro programa a mantem acordada. Os 30 s cobrem o prazo
+# medido em 2026-10-10: 21,0 s depois de acordar, 7 a 10 s se ja estava
+# acordada. Ver docs/estado.md, etapa 4b.
+OCIOSA_APOS = 10
+PAUSA_MAXIMA = 30.0  # s
+ESPERA_ENTRE_TESTES = 300.0  # s
+
+
+class GpuProbe:
+    """read_gpu com memoria: nao acorda a placa e nao a impede de dormir.
+
+    A guarda de read_gpu cobre a primeira metade. A segunda faltava:
+    cada nvidia-smi numa placa acordada renova o prazo de suspensao, e
+    um por segundo a mantem acesa para sempre -- medido, 4 min 12 s com
+    a janela aberta contra 21 s com ela fechada.
+
+    Nao ha como perguntar quem mais segura a placa: processo de root e
+    ilegivel, e cliente NVML nao aparece em lista nenhuma (armadilha
+    31). Entao a sonda testa. Placa parada, ela se cala e olha so o
+    runtime_status, que e um arquivo. Dormiu: era so ela. Nao dormiu em
+    PAUSA_MAXIMA: outro a segura, calar-se nao muda nada, e ela volta a
+    perguntar -- sem repetir o teste a cada dez segundos.
+    """
+
+    def __init__(self, sysfs, bdf, runner=subprocess.run, clock=time.monotonic):
+        self.sysfs = sysfs
+        self.bdf = bdf
+        self.runner = runner
+        self.clock = clock
+        self._zeros = 0
+        self._ultima = None
+        self._pausa_desde = None
+        # None: pode testar assim que a placa parar. Um instante: outro
+        # programa a segurava no ultimo teste, e antes dele nao adianta.
+        self._proximo_teste = None
+
+    def read(self):
+        if gpu_asleep(self.sysfs, self.bdf):
+            self._esquece()
+            return GpuReading(asleep=True, temperature=None, utilization=None)
+
+        agora = self.clock()
+        if self._pausa_desde is not None:
+            if agora - self._pausa_desde < PAUSA_MAXIMA:
+                return self._ultima._replace(idle=True)
+            self._pausa_desde = None
+            self._zeros = 0
+            self._proximo_teste = agora + ESPERA_ENTRE_TESTES
+
+        leitura = read_gpu(self.sysfs, runner=self.runner, bdf=self.bdf)
+        if leitura is None or leitura.asleep:
+            # Dormiu entre a guarda daqui e a de read_gpu.
+            self._esquece()
+            return leitura
+
+        if leitura.utilization == 0:
+            self._zeros += 1
+        else:
+            self._zeros = 0
+            if leitura.utilization is not None:
+                # Trabalhou: quem a segurava pode ter ido embora com o
+                # trabalho. O proximo teste nao espera.
+                self._proximo_teste = None
+
+        liberado = self._proximo_teste is None or agora >= self._proximo_teste
+        if self._zeros >= OCIOSA_APOS and liberado:
+            self._pausa_desde = agora
+        self._ultima = leitura
+        return leitura
+
+    def _esquece(self):
+        self._zeros = 0
+        self._ultima = None
+        self._pausa_desde = None
+        self._proximo_teste = None
 
 
 # Como no AC_NAMES do sysfs.py: o nome varia por firmware. Nesta maquina

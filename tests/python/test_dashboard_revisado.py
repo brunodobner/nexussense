@@ -105,6 +105,58 @@ def test_gpu_adormecida_mostra_selo_e_apaga_os_valores(qtbot, tmp_path):
     assert "RTX 4050" in p.cards["gpu"].rows["modelo"].text()
 
 
+def amostra_com_gpu(leitura):
+    from nexus_sense.gui.poller import Sample
+
+    return Sample(fans=None, cpu_temp=47.0, gpu=leitura, battery=None, cpu_usage=None)
+
+
+def test_gpu_ociosa_mostra_selo_e_mantem_o_ultimo_valor(qtbot, fake_root):
+    """Enquanto a sonda se cala para a placa poder dormir, o cartao fica
+    com o ultimo valor lido e o selo diz por que ele parou de andar.
+    Escolha do usuario em 2026-10-10, contra travessao: com outro
+    programa segurando a placa a pausa volta a cada cinco minutos, e
+    apagar os numeros toda vez chamaria mais atencao que o motivo."""
+    from nexus_sense.telemetry import GpuReading
+
+    p = painel(qtbot, fake_root)
+    p.show()
+    p.apply_sample(
+        amostra_com_gpu(GpuReading(asleep=False, temperature=45.0, utilization=0, idle=True))
+    )
+
+    assert p.cards["gpu"].badge.isVisible() is True
+    assert "ociosa" in p.cards["gpu"].badge.text().lower()
+    assert p.cards["gpu"].rows["uso"].text() == "0%"
+    assert p.cards["gpu"].rows["temperatura"].text() == "45 °C"
+
+
+def test_gpu_ociosa_nao_interrompe_a_linha_do_grafico(qtbot, fake_root):
+    """A outra metade da mesma escolha: a serie segue reta, sem buraco."""
+    from nexus_sense.telemetry import GpuReading
+
+    p = painel(qtbot, fake_root)
+    p.apply_sample(
+        amostra_com_gpu(GpuReading(asleep=False, temperature=45.0, utilization=0, idle=True))
+    )
+    assert list(p.graph.gpu_samples)[-1] == 45.0
+
+
+def test_o_selo_de_ociosa_some_quando_a_sonda_volta_a_ler(qtbot, fake_root):
+    from nexus_sense.telemetry import GpuReading
+
+    p = painel(qtbot, fake_root)
+    p.show()
+    p.apply_sample(
+        amostra_com_gpu(GpuReading(asleep=False, temperature=45.0, utilization=0, idle=True))
+    )
+    p.apply_sample(
+        amostra_com_gpu(GpuReading(asleep=False, temperature=46.0, utilization=12))
+    )
+    assert p.cards["gpu"].badge.isVisible() is False
+    assert p.cards["gpu"].rows["uso"].text() == "12%"
+
+
 def test_os_tres_cartoes_de_cima_continuam_com_a_mesma_altura(qtbot, fake_root):
     p = painel(qtbot, fake_root)
     alturas = {p.cards[n].sizeHint().height() for n in ("cpu", "gpu", "ventoinhas")}

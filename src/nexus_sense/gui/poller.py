@@ -4,8 +4,8 @@ Duas regras, as duas da spec secao 10.2:
 
   - so roda com a janela visivel. Quem liga e desliga e a Window, no
     showEvent e no hideEvent;
-  - nunca acorda a dGPU. A guarda mora em telemetry.read_gpu, e este
-    modulo nao a contorna.
+  - nunca acorda a dGPU, e nao a impede de dormir. As duas guardas moram
+    em telemetry -- read_gpu e GpuProbe -- e este modulo nao as contorna.
 """
 
 from typing import NamedTuple
@@ -50,6 +50,10 @@ class Poller(QObject):
         # ligada. None quando nao ha placa.
         self._gpu_bdf = _NAO_PROCURADA
 
+        # A sonda guarda estado entre uma passada e outra: e assim que
+        # ela sabe ha quanto tempo a placa esta parada.
+        self._sonda = None
+
     @property
     def active(self):
         return self._timer.isActive()
@@ -69,9 +73,9 @@ class Poller(QObject):
         self._cpu_anterior = cpu_agora
         if self._gpu_bdf is _NAO_PROCURADA:
             self._gpu_bdf = telemetry.nvidia_device(self.sysfs)
-        gpu = None
-        if self._gpu_bdf is not None:
-            gpu = telemetry.read_gpu(self.sysfs, bdf=self._gpu_bdf)
+            if self._gpu_bdf is not None:
+                self._sonda = telemetry.GpuProbe(self.sysfs, self._gpu_bdf)
+        gpu = self._sonda.read() if self._sonda is not None else None
         return Sample(
             fans=telemetry.fan_rpm(self.sysfs),
             cpu_temp=telemetry.cpu_package_temp(self.sysfs),

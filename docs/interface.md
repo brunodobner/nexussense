@@ -191,6 +191,17 @@ título do cartão, os dois valores viram travessão, e **a linha da GPU some
 do gráfico** em vez de cair a zero — porque não sondamos, e zero seria
 mentira.
 
+Há um segundo selo, **ociosa**, desde 2026-10-10. Com a placa acordada e o
+uso em 0% por dez leituras seguidas, a janela para de perguntar ao
+`nvidia-smi` para a placa poder dormir — perguntar a cada segundo a mantinha
+acesa (medido: 4 min 12 s com a janela aberta, 21 s com ela fechada). Nesse
+intervalo, de até 30 s, o cartão **mantém o último valor lido** e a linha do
+gráfico segue reta. Se a placa dorme, o selo vira **adormecida**; se outro
+programa a segura, os valores voltam a andar. Último valor em vez de
+travessão foi escolha do usuário: com outro programa segurando a placa a
+pausa volta a cada cinco minutos, e apagar os números toda vez chamaria mais
+atenção que o motivo.
+
 Os três cartões têm **mesma quantidade de linhas, mesma ordem de campos e
 mesma altura**. Rótulo à esquerda, valor à direita. Cartão com menos
 informação preenche com travessão em vez de encolher.

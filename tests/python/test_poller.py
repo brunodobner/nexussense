@@ -1,3 +1,5 @@
+import os
+
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Signal
 
@@ -68,6 +70,57 @@ def test_com_a_gpu_dormindo_a_amostra_diz_adormecida(fake_root):
     amostra = Poller(Sysfs(fake_root)).read_now()
     assert amostra.gpu.asleep is True
     assert amostra.gpu.temperature is None
+
+
+def isca_contadora(pasta, monkeypatch, resposta="45, 0 %"):
+    """Um nvidia-smi falso na frente do PATH, que anota cada chamada.
+
+    Devolve a funcao que conta as chamadas feitas ate agora."""
+    isca = pasta / "isca-contadora"
+    isca.mkdir()
+    registro = pasta / "chamadas.log"
+    (isca / "nvidia-smi").write_text(
+        f"#!/bin/sh\necho x >> '{registro}'\necho '{resposta}'\n"
+    )
+    (isca / "nvidia-smi").chmod(0o755)
+    monkeypatch.setenv("PATH", f"{isca}{os.pathsep}{os.environ['PATH']}")
+    return lambda: len(registro.read_text().splitlines()) if registro.exists() else 0
+
+
+def test_com_a_placa_ociosa_o_poller_para_de_chamar_o_nvidia_smi(
+    fake_root, tmp_path, monkeypatch
+):
+    """A guarda de read_gpu evita acordar a placa, nao evita mante-la
+    acordada. Medido em 2026-10-10: com a janela aberta a dGPU ficou 4 min
+    12 s sem dormir, com um nvidia-smi por segundo renovando o prazo;
+    fechada, dorme em 21 s. Depois de dez leituras seguidas com uso 0% o
+    poller para de perguntar. Ver docs/estado.md, etapa 4b."""
+    chamadas = isca_contadora(tmp_path, monkeypatch)
+    p = Poller(Sysfs(fake_root))
+
+    for _ in range(40):
+        amostra = p.read_now()
+
+    assert chamadas() == 10
+    assert amostra.gpu.asleep is False
+    assert amostra.gpu.idle is True
+    assert amostra.gpu.temperature == 45.0
+
+
+def test_com_a_placa_trabalhando_o_poller_sonda_toda_passada(
+    fake_root, tmp_path, monkeypatch
+):
+    """Jogo rodando nunca e pausado: qualquer uso acima de 0% zera a
+    contagem."""
+    chamadas = isca_contadora(tmp_path, monkeypatch, resposta="68, 98 %")
+    p = Poller(Sysfs(fake_root))
+
+    for _ in range(25):
+        amostra = p.read_now()
+
+    assert chamadas() == 25
+    assert amostra.gpu.idle is False
+    assert amostra.gpu.utilization == 98
 
 
 def test_arvore_vazia_devolve_amostra_vazia(tmp_path):

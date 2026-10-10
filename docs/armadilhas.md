@@ -478,6 +478,22 @@ Se disser `suspended`, mostre "adormecida" e não chame `nvidia-smi`. O
 mesmo vale para qualquer ferramenta que fale com a GPU — `nvtop`,
 `nvidia-settings`, uma consulta NVML.
 
+**Medido de novo em 2026-10-10, com a placa dormindo de verdade:**
+
+```
+nvidia-smi, placa acordada     0,02 s
+nvidia-smi, placa dormindo     2,0 s   (1,97 a 2,12, cinco vezes) -- e acorda
+depois de acordada             21,0 s acesa antes de dormir de novo (4 de 4)
+```
+
+Os 18 ms de cima são o custo com a placa já acordada. E a guarda evita
+**acordar**, não evita **manter acordada**: sondar a cada segundo uma placa
+`active` renova o prazo, e ela nunca chega a `suspended`. Medido com a janela
+aberta: 4 min 12 s sem dormir; fechada, dorme em 7 a 21 s.
+
+Ler o hwmon do acer não acorda nem atrasa o sono — mas não serve de
+termômetro com a placa dormindo: o canal `GPU` devolve `0`.
+
 ---
 
 ## 21. Renomeação DKMS exige conferir pacote e integrações
@@ -1074,6 +1090,45 @@ leia o código procurando.
 - *Esconder não é desabilitar.* O `command -v` do bash devolve arquivo **não
   executável** quando não acha outro no `PATH`. Para simular a falta de um
   binário, tire-o do `PATH`; montar algo por cima não basta.
+
+---
+
+## 31. Quem segura a dGPU acordada pode ser alguém que você não enxerga
+
+**Sintoma.** Modo máximo desligado, jogo e Steam fechados, nenhum processo com
+`/dev/nvidia*` aberto — e a placa não dorme. Em 2026-10-10:
+`runtime_suspended_time` valia zero em 6 h 15 de boot.
+
+**Causa.** O `coolercontrold` (CoolerControl, serviço de root) inicia a NVML na
+partida e passa a vigiar a GPU; a taxa padrão dele é de um segundo. Três
+razões para ele não aparecer:
+
+- **`/proc/<pid>/fd` de processo de root é ilegível** para o usuário. A
+  varredura de donos de `/dev/nvidia*` volta vazia e parece limpa.
+- **`kwin_wayland` também é ilegível**, mesmo sendo do usuário: o binário tem
+  capability no arquivo (`cap_sys_nice=ep`, pelo `getcap`), e o kernel trata
+  processo assim como não-dumpável.
+- **O `nvidia-smi` lista quem tem contexto na placa**, não quem a consulta. O
+  `kwin_wayland` aparecia, com 7 MiB, e era inocente. O cliente NVML, que só
+  pergunta temperatura, não aparece.
+
+**Como se provou**, nas duas direções:
+
+```
+coolercontrold rodando, nada mais    0 ms suspended em 120 s
+parado                               suspended 10 s depois
+religado                             active na hora, e 75 s sem dormir
+```
+
+O indício veio do journal do serviço (`NVML found and initialized`). Outro do
+mesmo tipo, visto no mesmo dia: `nvidia-smi dmon -d 2`, filho do `ksystemstats`
+do KDE, vivo enquanto o Steam esteve aberto.
+
+**Regra.** Antes de qualquer ensaio que dependa de a placa dormir, confira que
+ela dorme — `runtime_suspended_time` tem de andar com tudo fechado. Se não
+andar, quem não está na lista não está inocentado: procure serviços que citem
+NVML no journal, pare o suspeito e meça; religue e meça de novo. E parar
+serviço de root é root: num `pkexec` só, que o religa sozinho por tempo limite.
 
 ---
 
