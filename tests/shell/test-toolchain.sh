@@ -108,10 +108,19 @@ mapfile -t KERNELS < <(
   done | sort
 )
 
-# Zero kernels nao e "tudo certo": e teste sem alvo. Codigo 3, alto.
+# Zero kernels nao e "tudo certo" -- mas tambem nao e alvo ausente: o alvo
+# e o Makefile, e os kernels sao da maquina. Num container nao ha nenhum.
+# Se os ramos sinteticos rodaram, os dois lados da deteccao ja estao
+# provados e o teste segue. Sem root E sem kernel, a deteccao por alvo nao
+# foi exercitada: o teste roda o que nao depende da maquina e sai 2, que o
+# run-all mostra como PULOU. Nunca 0 -- ver armadilhas 14 e 22.
+sem_cobertura=0
 if [ "${#KERNELS[@]}" -eq 0 ]; then
-  echo "  ERRO alvo ausente: nenhum kernel com headers e .config legivel em /lib/modules"
-  exit 3
+  if [ -n "${sinteticos[1]:-}" ]; then
+    echo "  NOTA nenhum kernel real com headers nesta maquina: valem os ramos sinteticos"
+  else
+    sem_cobertura=1
+  fi
 fi
 
 # Expectativa lida do kernel-ALVO, independente do Makefile. Nao e
@@ -126,9 +135,9 @@ toolchain_esperado() {
   fi
 }
 
-echo "Kernels reais desta maquina (${#KERNELS[@]}):"
+[ "${#KERNELS[@]}" -gt 0 ] && echo "Kernels reais desta maquina (${#KERNELS[@]}):"
 gcc_kernel=""
-for k in "${KERNELS[@]}"; do
+for k in ${KERNELS[@]+"${KERNELS[@]}"}; do
   esperado=$(toolchain_esperado "$k")
   check "$k" "$esperado"
   [ "$esperado" = GCC ] && [ -z "$gcc_kernel" ] && gcc_kernel="$k"
@@ -141,7 +150,9 @@ echo "Override externo (o DKMS passa LLVM=1 por conta propria):"
 if [ -n "${sinteticos[1]:-}" ]; then
   check "$GCC_FAKE" LLVM "LLVM=1"
 else
-  check "${gcc_kernel:-${KERNELS[0]}}" LLVM "LLVM=1"
+  # Sem kernel real, um KVER que nao existe: a deteccao nao acha config
+  # nenhuma e cai em GCC, que e onde o override aparece vencendo.
+  check "${gcc_kernel:-${KERNELS[0]:-0.0.0-kver-que-nao-existe}}" LLVM "LLVM=1"
 fi
 
 echo "KERNELRELEASE tem precedencia sobre KVER (modo DKMS):"
@@ -149,13 +160,19 @@ echo "KERNELRELEASE tem precedencia sobre KVER (modo DKMS):"
 # so ecoa as variaveis, nao abre o KDIR, e o que se mede e qual das duas
 # vence. Um kernel real no lugar tornaria o teste refem de haver dois
 # instalados ao mesmo tempo.
+alvo_dkms="${KERNELS[0]:-0.0.0-kernelrelease-sintetico}"
 saida=$(make -s toolchain-info KVER="0.0.0-kver-que-nao-existe" \
-                               KERNELRELEASE="${KERNELS[0]}" 2>&1)
-if printf '%s' "$saida" | grep -q "KVER=${KERNELS[0]}"; then
+                               KERNELRELEASE="$alvo_dkms" 2>&1)
+if printf '%s' "$saida" | grep -q "KVER=${alvo_dkms} "; then
   echo "  OK   KERNELRELEASE vence"
 else
   echo "  FALHA KERNELRELEASE ignorado: $saida"
   fail=1
+fi
+
+if [ "$sem_cobertura" -eq 1 ]; then
+  echo "  PULOU deteccao por kernel-alvo: sem root para os ramos sinteticos e sem kernel com headers"
+  [ "$fail" -eq 0 ] && exit 2 || exit 1
 fi
 
 exit $fail

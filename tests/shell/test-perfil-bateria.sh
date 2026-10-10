@@ -14,6 +14,10 @@ BASE=/sys/devices/platform/acer-wmi
 PROFILE=$(echo "$BASE"/platform-profile/platform-profile-*/profile)
 CHOICES=$(echo "$BASE"/platform-profile/platform-profile-*/choices)
 
+# Sem o dispositivo nao ha o que medir: outra maquina, ou o driver fora.
+# Com ele presente e o profile sumido, ai sim e alvo ausente.
+[ -d "$BASE" ] || { echo "PULOU: acer-wmi ausente; este teste so roda no hardware"; exit 2; }
+
 [ -f "$PROFILE" ] || { echo "ERRO: profile ausente"; exit 3; }
 [ -f "$CHOICES" ] || { echo "ERRO: choices ausente"; exit 3; }
 
