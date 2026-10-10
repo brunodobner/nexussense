@@ -13,6 +13,13 @@
 #        a ventoinha) e o aborto (um limite rebaixado encerra na primeira
 #        amostra). Nao esquenta a maquina.
 #
+# O automatico nao tem uma rotacao de repouso: medido em 2026-10-10, ele vai
+# de 2200 a 3800 rpm com a maquina parada, conforme o modo maximo e o que ela
+# fez no minuto anterior. Por isso nada aqui cobra "a rotacao voltou a X". O
+# que se cobra e a rotacao ter SAIDO do valor manual -- e os exercicios usam
+# uma porcentagem alta, para a saida ter sentido conhecido (cai) e para o
+# pior desfecho de um exercicio que falhe ser barulho, e nao calor.
+#
 # Quem devolve a ventoinha, em camadas (secao 8 do plano):
 #   1. o trap deste roteiro, em EXIT, INT, TERM e HUP;
 #   2. o vigia, em sessao propria (setsid), no ar antes da primeira escrita:
@@ -44,7 +51,8 @@ PRAZO=${ENSAIO_PRAZO:-900}               # segundos; passou disso, encerra
 PASSO_VIGIA=${ENSAIO_PASSO_VIGIA:-1}
 FOLGA_VIGIA=${ENSAIO_FOLGA_VIGIA:-5}     # o prazo do vigia vem este tanto depois
 VIGIA_MAX=${ENSAIO_VIGIA_MAX:-3}         # segundos para o vigia devolver
-TOL_RPM=${ENSAIO_TOL_RPM:-500}           # "voltou a rotacao do automatico"
+DRILL_P=${ENSAIO_DRILL_P:-95}            # porcentagem dos dois exercicios
+QUEDA_RPM=${ENSAIO_QUEDA_RPM:-500}       # "a rotacao saiu do manual": cai isto
 CONTROLE_RPM=${ENSAIO_CONTROLE_RPM:-500} # 100% tem de girar isto acima de 50%
 PORCENTAGENS=${ENSAIO_PORCENTAGENS:-100 80 60 50 40 30 20 15 10 5 1}
 JOGOS=${ENSAIO_JOGOS:-GameThread|wineserver}
@@ -63,8 +71,8 @@ LIM_SEN5=${ENSAIO_LIM_SEN5:-81000}
 LIM_NVME=${ENSAIO_LIM_NVME:-75000}
 LIM_CARGA=${ENSAIO_LIM_CARGA:-50}             # % da bateria, durante
 PARTIDA_CARGA=${ENSAIO_PARTIDA_CARGA:-60}     # % da bateria, para comecar
-PARTIDA_PACOTE=${ENSAIO_PARTIDA_PACOTE:-65000}
-PARTIDA_LOAD=${ENSAIO_PARTIDA_LOAD:-2}
+PARTIDA_PACOTE=${ENSAIO_PARTIDA_PACOTE:-70000}
+PARTIDA_LOAD=${ENSAIO_PARTIDA_LOAD:-4}
 
 FAN="$R/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"
 PERFIL="$R/sys/firmware/acpi/platform_profile"
@@ -78,8 +86,9 @@ DEVOLVIDO=0; FALHOU_DEVOLVER=0
 REPOUSO=0             # 1 no E2: vale o limite de pacote mais baixo
 N_PAC=0; MOTIVO=
 PERFIL0=; MAX0=; FIM=0
-REF1=; REF2=          # rotacao do automatico em repouso, medida no comeco
+REF1=; REF2=          # rotacao do automatico na partida: informa, nao julga
 DRILL_PID=; DRILL_VALOR=
+DRILL_RPM1=; DRILL_RPM2=   # o que a porcentagem dos exercicios gira
 
 le() { cat "$1" 2>/dev/null || echo NA; }
 eh_num() { case "$1" in ''|*[!0-9-]*) return 1 ;; esac; return 0; }
@@ -284,22 +293,25 @@ volta_ao_automatico() {     # tres tentativas de 0,0; depois 100,100
     return 1
 }
 
-rotacao_voltou() {   # espera a rotacao voltar a do automatico. $1 = amostras
-    local i r1 r2 d1 d2
-    eh_num "$REF1" && eh_num "$REF2" || return 0
+rotacao_largou() {  # a rotacao saiu do valor manual?
+    # $1 = amostras, $2 e $3 = rotacao no manual, $4 = quanto tem de mudar,
+    # $5 = queda (tem de cair) | qualquer (basta mudar)
+    local i r1=NA r2=NA d1 d2
+    eh_num "$2" && eh_num "$3" || return 0
     for ((i = 0; i < $1; i++)); do
         localiza
         r1=$(le "$F_RPM1"); r2=$(le "$F_RPM2")
         if eh_num "$r1" && eh_num "$r2"; then
-            d1=$(( r1 - REF1 )); d2=$(( r2 - REF2 ))
-            if [ "${d1#-}" -le "$TOL_RPM" ] && [ "${d2#-}" -le "$TOL_RPM" ]; then
-                echo "  rotacao de volta: $r1 / $r2 rpm (automatico: $REF1 / $REF2)"
+            d1=$(( $2 - r1 )); d2=$(( $3 - r2 ))
+            if [ "$5" = qualquer ]; then d1=${d1#-}; d2=${d2#-}; fi
+            if [ "$d1" -ge "$4" ] && [ "$d2" -ge "$4" ]; then
+                echo "  a rotacao saiu do manual: de $2 / $3 para $r1 / $r2 rpm"
                 return 0
             fi
         fi
         sleep "$PASSO"
     done
-    echo "  ATENCAO: a rotacao nao voltou: $r1 / $r2 rpm (automatico: $REF1 / $REF2)"
+    echo "  a rotacao NAO saiu do manual: era $2 / $3 e esta em $r1 / $r2 rpm"
     return 1
 }
 
@@ -314,7 +326,10 @@ devolve() {
     elif [ "$atual" = "$ULTIMO" ]; then
         if volta_ao_automatico; then
             echo "ventoinha devolvida: fan_speed = $(le "$FAN")"
-            rotacao_voltou 15
+            # So informa. Manual e automatico podem girar parecido, e ai nao
+            # ha o que ver: quem prova a volta, com folga, sao os exercicios.
+            rotacao_largou 15 "${V_RPM1:-}" "${V_RPM2:-}" 300 qualquer \
+                || echo "  (se o manual girava perto do automatico, e o esperado)"
         else
             FALHOU_DEVOLVER=1
             echo "ERRO: nao consegui escrever 0,0 em tres tentativas."
@@ -463,6 +478,9 @@ pode_comecar() {    # a condicao de partida do E2; nada foi escrito ainda
         || recusa "bateria em $V_PCT%, abaixo de $PARTIDA_CARGA%"
     acima "$V_PAC" "$PARTIDA_PACOTE" && recusa "pacote em $V_PAC, a partir de $PARTIDA_PACOTE"
     [ "$V_JOGO" = 0 ] || recusa "jogo aberto ($V_JOGO processo(s) casando com $JOGOS)"
+    # O modo maximo troca a curva do automatico; a linha de base e os limites
+    # do plano sao os do modo desligado.
+    [ "$V_MAX" = true ] && recusa "modo maximo ligado; o ensaio e com ele desligado"
     awk -v l="$V_LOAD" -v m="$PARTIDA_LOAD" 'BEGIN { exit !(l + 0 < m + 0) }' \
         || recusa "load1 em $V_LOAD, a partir de $PARTIDA_LOAD"
     return "$nao"
@@ -505,30 +523,34 @@ espera_fan() {   # $1 = valor esperado, $2 = decimos de segundo -> ms ate la
     return 1
 }
 
-exercicio_vigia() {
-    local ms rpm1 rpm2 d1 d2
+exercicio_vigia() {    # 0 passou, 1 falhou, 2 o manual nao se distingue do automatico
+    local ms rpm1 rpm2 v="$DRILL_P,$DRILL_P"
     echo
-    echo "EXERCICIO 1 -- o vigia: o roteiro leva kill -9 com a ventoinha em 60,60"
-    DRILL_VALOR="60,60"
-    ENSAIO_SEGURA=60 ENSAIO_FASE=vigia ENSAIO_SAIDA=$SAIDA "$EU" _segura &
+    echo "EXERCICIO 1 -- o vigia: o roteiro leva kill -9 com a ventoinha em $v"
+    DRILL_VALOR=$v
+    ENSAIO_SEGURA=$DRILL_P ENSAIO_FASE=vigia ENSAIO_SAIDA=$SAIDA "$EU" _segura &
     DRILL_PID=$!
     disown "$DRILL_PID"
-    if ! espera_fan "60,60" 100 > /dev/null; then
-        echo "  FALHA: o alvo nao chegou a escrever 60,60"; return 1
+    if ! espera_fan "$v" 100 > /dev/null; then
+        echo "  FALHA: o alvo nao chegou a escrever $v"; return 1
     fi
     sleep "$(awk -v p="$PASSO" 'BEGIN { print p * 10 }')"
     localiza; rpm1=$(le "$F_RPM1"); rpm2=$(le "$F_RPM2")
-    echo "  em 60,60: $rpm1 / $rpm2 rpm"
-    if eh_num "$rpm1" && eh_num "$rpm2"; then
-        d1=$(( rpm1 - REF1 )); d2=$(( rpm2 - REF2 ))
-        if [ "${d1#-}" -le "$TOL_RPM" ] && [ "${d2#-}" -le "$TOL_RPM" ]; then
-            echo "  nota: 60% gira quase igual ao automatico em repouso; a volta da"
-            echo "        rotacao nao distingue nada aqui, e a prova e so o fan_speed."
-        fi
+    echo "  em $v: $rpm1 / $rpm2 rpm   (automatico, na partida: $REF1 / $REF2)"
+    # Sem distancia entre o manual e o automatico nao ha volta para ver: ou
+    # o manual nao muda a rotacao, ou a maquina nao esta em repouso e o
+    # automatico ja gira alto. Dizer isso, em vez de passar por vacuo.
+    if ! eh_num "$rpm1" || ! eh_num "$rpm2" \
+       || [ $(( rpm1 - REF1 )) -lt $(( QUEDA_RPM * 2 )) ] \
+       || [ $(( rpm2 - REF2 )) -lt $(( QUEDA_RPM * 2 )) ]; then
+        echo "  o manual a $DRILL_P% nao se distingue do automatico: menos de $(( QUEDA_RPM * 2 )) rpm acima"
+        kill -TERM "$DRILL_PID" 2>/dev/null
+        espera_fan "0,0" 50 > /dev/null
+        return 2
     fi
     # Sem isto o exercicio passaria por vacuo: um alvo que ja tivesse saido
     # por conta propria deixa 0,0 no lugar, e o "vigia devolveu" seria dele.
-    if ! kill -0 "$DRILL_PID" 2>/dev/null || [ "$(le "$FAN")" != "60,60" ]; then
+    if ! kill -0 "$DRILL_PID" 2>/dev/null || [ "$(le "$FAN")" != "$v" ]; then
         echo "  FALHA: o alvo saiu antes do kill -9 (fan_speed = '$(le "$FAN")')"; return 1
     fi
     kill -KILL "$DRILL_PID" 2>/dev/null
@@ -541,27 +563,30 @@ exercicio_vigia() {
     if [ "$ms" -gt $(( VIGIA_MAX * 1000 )) ]; then
         echo "  FALHA: o vigia levou mais de $VIGIA_MAX s"; return 1
     fi
-    rotacao_voltou 30 || return 1
+    # fan_speed e a memoria do driver. Quem diz que o EC largou o manual e a
+    # rotacao -- e ela tem de cair, nao de chegar a um numero combinado.
+    rotacao_largou 30 "$rpm1" "$rpm2" "$QUEDA_RPM" queda || return 1
+    DRILL_RPM1=$rpm1; DRILL_RPM2=$rpm2
     echo "  OK"
 }
 
 exercicio_aborto() {
-    local lim rc
+    local lim rc v="$DRILL_P,$DRILL_P"
     echo
     echo "EXERCICIO 2 -- o aborto: limite da CPU pelo EC rebaixado para 5 C abaixo da leitura"
     amostra aborto
     lim=$(( V_ECCPU - 5000 ))
-    DRILL_VALOR="60,60"
-    ENSAIO_LIM_EC_CPU=$lim ENSAIO_SEGURA=60 ENSAIO_FASE=aborto ENSAIO_SAIDA=$SAIDA "$EU" _segura
+    DRILL_VALOR=$v
+    ENSAIO_LIM_EC_CPU=$lim ENSAIO_SEGURA=$DRILL_P ENSAIO_FASE=aborto ENSAIO_SAIDA=$SAIDA "$EU" _segura
     rc=$?
-    DRILL_VALOR=
     if [ "$rc" -ne "$COD_LIMITE" ]; then
         echo "  FALHA: o alvo saiu com $rc, e o codigo de aborto e $COD_LIMITE"; return 1
     fi
     if [ "$(le "$FAN")" != "0,0" ]; then
         echo "  FALHA: depois do aborto fan_speed e '$(le "$FAN")'"; return 1
     fi
-    rotacao_voltou 30 || return 1
+    DRILL_VALOR=
+    rotacao_largou 30 "$DRILL_RPM1" "$DRILL_RPM2" "$QUEDA_RPM" queda || return 1
     echo "  OK"
 }
 
@@ -591,18 +616,25 @@ modo_e2() {
     trap 'exit 129' HUP
 
     echo
-    echo "referencia: o automatico em repouso"
+    echo "o automatico, na partida (so informa: ele nao tem repouso fixo)"
     coleta auto-antes 0 "$LEITURAS" || termina $?
     REF1=$(mediana "${C1[@]}"); REF2=$(mediana "${C2[@]}")
     echo "  $REF1 / $REF2 rpm"
 
-    exercicio_vigia || { MOTIVO="o exercicio do vigia falhou"; termina "$COD_EXERCICIO"; }
+    exercicio_vigia; rc=$?
+    if [ "$rc" -eq 2 ]; then
+        MOTIVO="o manual a $DRILL_P% nao se distingue do automatico: ou o manual nao muda a rotacao, ou a maquina nao esta em repouso"
+        termina "$COD_CONTROLE"
+    elif [ "$rc" -ne 0 ]; then
+        MOTIVO="o exercicio do vigia falhou"; termina "$COD_EXERCICIO"
+    fi
     exercicio_aborto || { MOTIVO="o exercicio do aborto falhou"; termina "$COD_EXERCICIO"; }
 
     echo
     echo "O MAPA -- cada porcentagem: $ASSENTA amostras para assentar, $LEITURAS que contam"
     prepara
-    printf '%-6s %-22s %-22s %s\n' "%" "CPU rpm (min med max)" "GPU rpm (min med max)" "pacote" | tee "$resumo"
+    echo "perfil $PERFIL0, modo maximo ${MAX0:-?}, automatico na partida $REF1 / $REF2 rpm" > "$resumo"
+    printf '%-6s %-22s %-22s %s\n' "%" "CPU rpm (min med max)" "GPU rpm (min med max)" "pacote" | tee -a "$resumo"
     for p in $PORCENTAGENS; do
         if ! escreve "$p,$p"; then MOTIVO="a escrita de $p,$p foi recusada"; termina "$COD_CONDICAO"; fi
         coleta "p=$p" "$ASSENTA" "$LEITURAS"; rc=$?

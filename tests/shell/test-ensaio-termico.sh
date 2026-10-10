@@ -104,8 +104,17 @@ monta() {    # $1 = raiz da arvore
 
 FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 
-ec_falso() { # $1 = arvore, $2 = normal | surdo. A rotacao segue o fan_speed.
-    local f h v c g antes=
+# O "EC": faz a rotacao seguir o fan_speed. $1 = arvore, $2 = o temperamento:
+#   normal  automatico em 2300/2000; manual gira 600 + 50 por ponto
+#   surdo   ignora o manual: a rotacao nao sai do automatico
+#   alto    depois de um manual, o automatico volta em 3700/3300 e nao nos
+#           2300 de antes -- e o que a maquina de verdade faz: o automatico
+#           nao tem um repouso fixo (medido em 2026-10-10, de 2200 a 3800 rpm)
+#   teto    de 50% para cima gira tudo igual
+#   gruda   obedece ao manual e nao larga: fan_speed volta a 0,0 e a rotacao
+#           fica onde o manual a deixou
+ec_falso() {
+    local f h v c g antes= manual=0 r1 r2
     f=$(FAN_DE "$1"); h="$1/sys/class/hwmon/hwmon7"
     while [ -d "$h" ]; do
         v=
@@ -115,11 +124,19 @@ ec_falso() { # $1 = arvore, $2 = normal | surdo. A rotacao segue o fan_speed.
             *) v=$antes ;;       # pego no meio de uma escrita: fica o de antes
         esac
         if [ "$v" != "$antes" ]; then
-            if [ "$2" = surdo ] || [ "$v" = "0,0" ]; then
-                poe "$h/fan1_input" 2300; poe "$h/fan2_input" 2000
+            if [ "$2" = surdo ]; then
+                r1=2300; r2=2000
+            elif [ "$v" = "0,0" ]; then
+                r1=2300; r2=2000
+                [ "$2" = alto ] && [ "$manual" = 1 ] && { r1=3700; r2=3300; }
+                [ "$2" = gruda ] && [ "$manual" = 1 ] && r1=
             else
-                poe "$h/fan1_input" $((600 + c * 50)); poe "$h/fan2_input" $((500 + g * 45))
+                manual=1
+                [ "$2" = teto ] && [ "$c" -ge 50 ] && c=95
+                [ "$2" = teto ] && [ "$g" -ge 50 ] && g=95
+                r1=$((600 + c * 50)); r2=$((500 + g * 45))
             fi
+            if [ -n "$r1" ]; then poe "$h/fan1_input" "$r1"; poe "$h/fan2_input" "$r2"; fi
             antes=$v
         fi
         sleep 0.02
@@ -345,9 +362,12 @@ recusa() {   # $1 = caso, $2 = descricao, $3 = arquivo na arvore, $4 = valor, $5
 recusa manual  "ventoinha em manual"   sys/devices/platform/acer-wmi/nitro_sense/fan_speed "30,30" "30,30"
 recusa cabo    "fora da tomada"        sys/class/power_supply/ACAD/online 0 "0,0"
 recusa carga   "bateria abaixo de 60%" sys/class/power_supply/BAT1/charge_now 2000000 "0,0"
-recusa pacote  "pacote quente"         sys/class/hwmon/hwmon11/temp4_input 66000 "0,0"
+recusa pacote  "pacote quente"         sys/class/hwmon/hwmon11/temp4_input 71000 "0,0"
 recusa jogo    "jogo aberto"           processos wineserver "0,0"
-recusa ocupada "maquina ocupada"       proc/loadavg "3.50 1.00 0.50 1/100 1" "0,0"
+recusa ocupada "maquina ocupada"       proc/loadavg "5.50 1.00 0.50 1/100 1" "0,0"
+# O modo maximo troca a curva do automatico (docs/plano-termico.md, secao 2):
+# a linha de base e os limites sao os do modo desligado.
+recusa maximo  "modo maximo ligado"    config.toml "maximum_mode = true" "0,0"
 
 nova partida-sem-sensor
 rm -f "$D/sys/class/thermal/thermal_zone2/temp"
@@ -377,10 +397,37 @@ grep -qE '^100 +5600 5600 5600 ' "$D/e2.resumo.txt" && grep -qE '^1 +650 650 650
     && ok "nenhum diretorio de trabalho sobrou" \
     || falha "sobrou em run/: $(ls -A "$D/run" | tr '\n' ' ')"
 
-# Um EC que nao obedece: a rotacao nao segue a escrita, e o plano para ali.
+# O automatico nao tem um repouso fixo: na maquina ele volta do manual numa
+# rotacao que nao e a de antes. O E2 nao pode reprovar por isso -- quem julga
+# a volta e a rotacao ter SAIDO do valor manual, e nao ter chegado a um
+# numero combinado.
+nova e2-alto alto
+roda "$D" env ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
+confere "automatico que volta mais alto do que estava: o E2 vai ate o fim" "$?" 0 "0,0"
+
+# O contrario, que e o defeito que a conferencia da rotacao existe para
+# pegar: fan_speed diz 0,0 e a ventoinha continua onde o manual a deixou.
+nova e2-gruda gruda
+roda "$D" env ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
+confere "fan_speed em 0,0 com a rotacao presa no manual: o exercicio reprova" "$?" 14 "0,0"
+
+# Um EC que nao obedece: a rotacao nao sai do automatico. O exercicio nao
+# teria como ver a volta, e diz isso em vez de passar por vacuo.
 nova e2-surdo surdo
 roda "$D" env ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
-confere "rotacao que nao acompanha a escrita: controle positivo reprova" "$?" 13 "0,0"
+confere "manual que nao muda a rotacao: o E2 para no controle positivo" "$?" 13 "0,0"
+grep -q 'nao se distingue' "$D/saida.txt" \
+    && ok "e diz que o manual nao se distingue do automatico" \
+    || falha "faltou dizer que o manual nao se distingue do automatico"
+
+# Um EC que obedece ate certo ponto: de 50% para cima gira igual. O
+# exercicio passa, e quem reprova e o controle positivo do mapa.
+nova e2-teto teto
+roda "$D" env ENSAIO_PORCENTAGENS="100 50 10" "$S" e2 "$D/e2.tsv"
+confere "100% girando igual a 50%: o controle positivo do mapa reprova" "$?" 13 "0,0"
+grep -q 'menos de' "$D/saida.txt" \
+    && ok "e diz a diferenca que faltou" \
+    || falha "faltou dizer a diferenca entre 100% e 50%"
 
 # Um vigia lento demais: o exercicio tem de reprovar, e nao passar calado.
 nova e2-vigia-lento

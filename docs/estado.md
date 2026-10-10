@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (melhorias, sub-etapa 4f: o plano térmico está escrito, passou pelo grill e foi aprovado; a medição começa por E2)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1: o roteiro de E2 está pronto e provado em árvore falsa; nenhuma escrita na ventoinha ainda)
 
 ---
 
@@ -59,7 +59,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2 e E3 do plano, aprovado em 2026-10-10
+[ ] Rede termica, sessao 1 -- medicao  roteiro de E2 pronto e provado; E2 e E3 por rodar
 [ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
 ```
 
@@ -2260,6 +2260,87 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
   plano);
 - depois de qualquer reinício que o plano não previu, ler `fan_speed` antes de
   tudo: desligamento ordenado grava o manual baixo, e ele volta na partida.
+
+---
+
+## Rede térmica, sessão 1 — o roteiro pronto, E2 ainda por rodar
+
+Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
+aprovado. **Nenhuma escrita em `fan_speed` aconteceu ainda.** O que existe:
+
+| | |
+|---|---|
+| `tests/hardware/ensaio-termico.sh` | o roteiro de E2: os dois exercícios e o mapa. Escreve na máquina de verdade; não faz parte da suíte |
+| `tests/shell/test-ensaio-termico.sh` | a mesma lógica contra uma árvore plantada, com um EC de mentira e os índices embaralhados: 51 conferências |
+| suítes | 387 na Python; shell 22 passam e 2 pulam, idêntica sob `LC_ALL=C` |
+
+**O roteiro foi escrito antes do teste, e o teste passou de primeira** — o
+contrário do que a seção 1 de [plano-melhorias.md](plano-melhorias.md) manda.
+O que prova que o teste morde são 23 mutações, uma proteção estragada por
+vez, numa cópia: 23 reprovações. O que veio depois já entrou na ordem certa.
+
+### O que o usuário viu antes de o E2 rodar
+
+Com o comando pronto, ele interrompeu: a ventoinha fica numa faixa mais alta
+do que o plano supunha, mesmo com a máquina quase parada. O traço do
+observador confirmou, e o roteiro teria reprovado na máquina no primeiro
+exercício.
+
+```
+                       modo maximo desligado      modo maximo ligado
+parada, EC a ~50 C     2240 / 1990 rpm            3350 / 2890 rpm
+carga, EC a 64-73 C    --                         5000 a 6196 rpm
+jogo, EC a 73-91 C     4037 a 4464 rpm            --
+```
+
+O automático não tem repouso fixo: são pelo menos duas curvas, e quem troca
+de uma para a outra é o modo máximo — mesmo perfil térmico, GPU na mesma
+temperatura. O plano tinha medido uma só, a do modo desligado, e a chamado de
+"o automático".
+
+O que mudou no roteiro, cada item com teste que falhou primeiro:
+
+- **a volta se prova pela rotação ter saído do manual**, e não por ter
+  chegado à rotação da partida. Os exercícios escrevem `95,95` em vez de
+  `60,60`: a volta tem sentido conhecido (cai), e um exercício que falhe deixa
+  barulho, não calor;
+- **se a 95% a rotação não se distingue do automático, o exercício diz** — e
+  o E2 para no controle positivo, em vez de passar por vácuo;
+- **a condição de partida afrouxou onde não media nada** (`load1` abaixo de 4,
+  pacote abaixo de 70 °C: o aplicativo desta conversa sozinho passava dos
+  limites antigos) **e apertou onde media**: modo máximo desligado.
+
+### O que a execução refutou
+
+1. **"O automático vai de ~2200 em repouso a ~4400 quente"** — a seção 2 do
+   plano, uma hora depois de escrita. Vale para o modo máximo desligado. Com
+   ele ligado: 3350 parada, 6196 sob carga.
+2. **"A rotação tem de voltar à do automático"** — o plano e o roteiro. O
+   automático não volta para onde estava.
+3. **"Sem carga: `load1` abaixo de 2"** — a condição de E2. Com o aplicativo
+   do Claude aberto e mais nada, `load1` andou de 0,6 a 2,1.
+4. **"O teste do prazo passa"** — passava, e reprovava sob carga: com prazo de
+   1 s, contado em segundos inteiros, o roteiro vencia o próprio prazo antes
+   de o teste ver a escrita. Apareceu rodando as mutações quatro por vez.
+
+### Visto e não consertado
+
+- **Por que o modo máximo troca a curva da ventoinha** não foi apurado. O
+  suspeito é o pedido de PowerMizer que o agente segura; o `nvidia-powerd`
+  está no ar. Importa para a rede: "abaixo do que o automático faria" passa a
+  ter duas respostas (seção 11 do plano).
+- **A linha de base e os limites de aborto são do modo desligado.** Um jogo
+  com o modo máximo ligado não foi medido: a ventoinha gira mais, e o envelope
+  deve ser outro.
+- **O shellcheck não roda nesta máquina**: os dois arquivos novos só passam
+  por ele no CI, no primeiro push.
+- **A sessão do Claude reiniciou no meio** e levou o observador passivo junto;
+  ele foi religado. O traço da manhã ficou no scratchpad antigo.
+
+### Onde continua
+
+Por E2, quando o usuário mandar: um bloco no terminal, ~7 min, modo máximo
+desligado, sem jogo. Depois E3, combinado no chat antes do comando.
 
 ---
 

@@ -105,11 +105,43 @@ Quatro consequências, e todas mudam o desenho:
 2. **Os limites declarados das zonas `SEN*` não são limites.** `SEN4` foi a
    89 °C, nove acima do `critical` dela. O que serve de régua é este envelope:
    o que o EC, com a curva dele, deixa acontecer.
-3. **O automático vai de ~2200 / ~1950 rpm em repouso a ~4400 / ~4000 rpm
-   quente, e nunca para.** Não se sabe se 4400 é o teto: o ensaio E2 mede
-   quanto dão 100%.
+3. **O automático nunca para** — e, com o modo máximo desligado, foi de
+   ~2200 / ~1950 rpm em repouso a ~4400 / ~4000 rpm quente.
 4. **A máquina esfria depressa em automático.** Três minutos depois do jogo,
    toda zona de placa estava abaixo de 60 °C.
+
+### O automático não tem um repouso fixo
+
+A consequência 3 valeu por uma hora. O usuário avisou que a ventoinha fica
+numa faixa mais alta do que este plano supunha, mesmo com a máquina quase
+parada — e o mesmo observador, que seguiu no ar, confirma. **Medido das 09:08
+às 10:12**, sem jogo, sempre em automático e em `balanced-performance`:
+
+```
+                       modo maximo desligado      modo maximo ligado
+parada, EC a ~50 C     2240 / 1990 rpm            3350 / 2890 rpm
+uso leve, EC a ~55 C   2700 / 2500 rpm            3650 / 3330 rpm
+carga, EC a 64-73 C    --                         5000 a 6196 rpm
+jogo, EC a 73-91 C     4037 a 4464 rpm            --
+```
+
+Na mesma temperatura do EC a ventoinha da CPU girou de 2241 a 3558 rpm
+(50 °C), e de 2715 a 4707 (60 °C). São pelo menos duas curvas, e o que troca
+de uma para a outra é o modo máximo: mesmo perfil térmico, GPU na mesma
+temperatura (48 a 50 °C). O que o modo liga que o EC enxerga não foi apurado
+— o pedido de PowerMizer que o agente segura é o suspeito, e o
+`nvidia-powerd` está no ar.
+
+Três coisas mudam com isso:
+
+- **4400 rpm não é o teto.** Com o modo máximo ligado o automático foi a
+  6196 rpm, a 68 °C. O "automático quente" da linha de base é o do modo
+  desligado.
+- **Nenhum ensaio pode cobrar "a rotação voltou a X".** O automático volta do
+  manual onde quiser. A primeira versão do roteiro de E2 cobrava isso, e teria
+  reprovado na máquina no primeiro exercício.
+- **"Abaixo do que o automático faria" tem duas respostas**, uma por modo. A
+  pergunta P3 e o gatilho da rede (seção 11) dependem disso.
 
 ---
 
@@ -143,7 +175,7 @@ Lido, nada medido:
 |---|---|---|---|
 | P1 | com o manual baixo e a máquina quente, o EC toma a ventoinha de volta? | E3 | P2 |
 | P2 | quanto gira cada porcentagem? Há piso? Há porcentagem que para a ventoinha? | E2 | — |
-| P3 | qual porcentagem equivale ao automático quente (~4400 / ~4000 rpm)? | E0 + E2 | P2 |
+| P3 | qual porcentagem equivale ao automático quente? São duas respostas: ~4400 / ~4000 rpm com o modo máximo desligado, e pelo menos 6196 com ele ligado | E0 + E2 | P2 |
 | P4 | se o EC obedece, em quanto tempo e por qual sensor a coisa passa do envelope? | E3 | P1 |
 | P5 | que limiar e que tempo de sustentação a rede usaria? | os traços de E0 e E3, sem ensaio novo | P1, P4 |
 | P6 | por que a bateria descarrega com o cabo ligado? | o observador passivo, e E3 de carona | — |
@@ -165,6 +197,11 @@ Lido, nada medido:
 - **A bateria se lê por `charge_now`, não por `status`** (armadilha 36).
 - **O roteiro só começa com `fan_speed` em `0,0`.** Assim "devolver" tem um
   sentido só: automático. Se você estiver em manual, ele se recusa a começar.
+- **"Devolvida" se prova pela rotação ter saído do valor manual**, nunca por
+  ter chegado a um número: o automático não tem repouso fixo (seção 2).
+- **O modo máximo fica como estava do começo ao fim** de cada ensaio, e é
+  gravado: ele troca a curva do automático. E2 e E3 rodam com ele
+  **desligado**, que é a condição da linha de base e dos limites da seção 7.
 - **O limite de aborto é o da seção 7**, igual para todos, e está escrito antes
   de qualquer medição.
 - **O roteiro mora no repositório**, não no scratchpad:
@@ -205,7 +242,7 @@ os dois com root. Controle positivo: o AML decompilado tem de conter o método
 | | |
 |---|---|
 | pergunta | P2 e P3 |
-| condição | sem jogo, sem carga (`load1` abaixo de 2), pacote abaixo de 65 °C, na tomada, bateria a partir de 60%, `fan_speed` em `0,0` |
+| condição | sem jogo, `load1` abaixo de 4, pacote abaixo de 70 °C, na tomada, bateria a partir de 60%, `fan_speed` em `0,0`, modo máximo desligado. A primeira versão pedia `load1` abaixo de 2 e pacote abaixo de 65 °C: com o aplicativo desta conversa aberto a máquina passa disso sem estar ocupada |
 | o que faz | para cada porcentagem em 100, 80, 60, 50, 40, 30, 20, 15, 10, 5, 1: escreve `p,p`, espera 20 s, lê as duas rotações cinco vezes. Depois `0,0`, e lê a rotação do automático em repouso |
 | controle positivo | a rotação a 100% tem de ficar pelo menos 500 rpm acima da de 50%, e `fan_speed` lido tem de ser o escrito. Se a rotação não acompanha a escrita, o modo manual não é o que se supõe e o plano para aqui |
 | limite de aborto | os da seção 7, mais um próprio: pacote a 85 °C ou mais por três amostras. Em repouso isso não devia acontecer; se acontecer com a ventoinha baixa, é achado — a porcentagem não segura nem o repouso |
@@ -214,9 +251,9 @@ os dois com root. Controle positivo: o AML decompilado tem de conter o método
 
 Dois exercícios entram aqui, antes de qualquer calor:
 
-- **O vigia.** Com `60,60` escrito, o roteiro principal leva um `kill -9`. O
-  vigia tem de devolver `0,0` em até 3 s, e a rotação tem de voltar à do
-  automático.
+- **O vigia.** Com `95,95` escrito, o roteiro principal leva um `kill -9`. O
+  vigia tem de devolver `0,0` em até 3 s, e a rotação tem de **cair pelo menos
+  500 rpm** em relação ao que girava a 95%.
 - **O aborto.** O roteiro roda com o limite da CPU pelo EC rebaixado para 5 °C
   abaixo da leitura corrente. Tem de abortar na primeira amostra, devolver
   `0,0` e sair com o código de aborto. (O limite rebaixado é o do EC e não o
@@ -224,6 +261,20 @@ Dois exercícios entram aqui, antes de qualquer calor:
 
 Nenhum dos dois é teste por vácuo de si mesmo: os dois conferem o efeito
 (`fan_speed` e rotação), não o código de saída sozinho (armadilha 11).
+
+**Por que 95%, e por que "cair" em vez de "voltar".** `fan_speed` é a memória
+do driver; quem diz que o EC largou o manual é a rotação. A primeira versão
+escrevia `60,60` e cobrava a rotação de volta a ±500 rpm da medida na partida
+— e o automático não volta para onde estava (seção 2). A alternativa não
+precisa saber onde o automático vai parar:
+
+- a 95% a ventoinha gira bem acima de qualquer automático em repouso, então a
+  volta tem sentido conhecido: **cai**;
+- se a 95% ela não girar pelo menos 1000 rpm acima do automático da partida,
+  o exercício não tem como ver volta nenhuma e **diz isso**, em vez de passar:
+  ou o manual não muda a rotação, ou a máquina não está em repouso;
+- e se um exercício falhar de verdade, a máquina fica com a ventoinha alta —
+  barulho, não calor.
 
 ### E3 — manual baixo com carga de CPU (escreve em `fan_speed` e **esquenta**)
 
@@ -356,7 +407,11 @@ função pura, como `decide`: recebe setpoint, rotações e temperaturas, devolv
 o que escrever. Testável sem hardware e sem relógio.
 
 **Quando arma.** Só com o setpoint em manual **e abaixo do que o automático
-faria quente** — a porcentagem de P3, que E2 mede. Em automático, em máximo,
+faria quente** — a porcentagem de P3, que E2 mede. **Em aberto desde a seção
+2:** o automático quente gira ~4400 rpm com o modo máximo desligado e mais de
+6000 com ele ligado, então P3 são duas porcentagens. O agente sabe em qual
+modo está (é ele quem o mantém); o desenho escolhe entre usar a de cada modo
+ou só a mais alta, com o mapa de E2 na mão. Em automático, em máximo,
 ou em manual a 90%, a rede não lê temperatura nenhuma: o custo no caso comum é
 uma leitura de `fan_speed`, que não chama o firmware. Armada, lê o pacote pelo
 `coretemp` (sem WMI) e a GPU pelo `temp2` do acer (uma chamada WMI por
