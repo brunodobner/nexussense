@@ -203,6 +203,85 @@ else
   echo "  OK   o instalador nao pergunta pelo powerprofilesctl"
 fi
 
+# --- os headers que faltam sao instalados mesmo com make e dkms presentes
+# install_build_deps so rodava quando faltava uma das duas ferramentas. Com
+# elas no lugar e um kernel sem headers, check_kernel_headers avisava e a
+# instalacao seguia sem construir para ele. A 3.5 consertou QUAIS headers
+# pedir; isto e o QUANDO.
+H="$T/modulos"
+kernel() {  # $1=versao  $2=vmlinuz sim|nao  $3=build sim|nao|pendurado
+  mkdir -p "$H/$1"
+  [ "$2" = sim ] && : > "$H/$1/vmlinuz"
+  case "$3" in
+    sim)       mkdir "$H/$1/build" ;;
+    pendurado) ln -s "/usr/src/linux-headers-$1" "$H/$1/build" ;;  # o do Debian, sem o pacote
+  esac
+}
+kernel 7.0.1-completo       sim sim
+kernel 6.9.9-resto          nao nao
+kernel 7.0.0-so-headers     nao sim
+
+duble make 'exit 0'
+duble dkms 'exit 0'
+
+roda "kernels_missing_headers '$H'"
+if [ ! -s "$T/saida" ]; then
+  echo "  OK   kernel bootavel com headers, resto e so-headers: nada falta"
+else
+  echo "  FALHA acusou falta onde nao ha: $(tr '\n' ' ' < "$T/saida")"; fail=1
+fi
+espera "... e com make e dkms no lugar, nao ha o que instalar" 1 "build_deps_missing '$H'"
+
+kernel 7.0.2-sem-headers    sim nao
+kernel 6.1.0-debian         sim pendurado
+roda "kernels_missing_headers '$H'"
+obtido=$(tr '\n' ' ' < "$T/saida")
+if [ "$obtido" = "6.1.0-debian 7.0.2-sem-headers " ]; then
+  echo "  OK   kernels bootaveis sem headers: $obtido"
+else
+  echo "  FALHA kernels sem headers errados: '$obtido'"; fail=1
+fi
+espera "... e isso basta para instalar, com make e dkms no lugar" 0 "build_deps_missing '$H'"
+
+rm -rf "$H/7.0.2-sem-headers" "$H/6.1.0-debian"
+sem dkms
+espera "sem dkms: ha o que instalar" 0 "build_deps_missing '$H'"
+duble dkms 'exit 0'
+sem make
+espera "sem make: ha o que instalar" 0 "build_deps_missing '$H'"
+duble make 'exit 0'
+
+# A fiacao, executada: install_drivers com as ferramentas no lugar e um
+# kernel sem headers tem de chamar install_build_deps. Tres travas param a
+# funcao antes de ela tocar em qualquer coisa: check_kernel_headers devolve
+# 1, driver_version devolve vazio, e o PATH so tem dublês.
+cat > "$T/fiacao.sh" << EOL
+source '$S'
+pause()                { :; }
+install_build_deps()   { echo install_build_deps >> '$T/passos'; return 1; }
+check_kernel_headers() { echo check_kernel_headers >> '$T/passos'; return 1; }
+driver_version()       { :; }
+kernels_missing_headers() { [ "\$FALTA" = sim ] && echo 7.0.2-sem-headers; return 0; }
+install_drivers < /dev/null > /dev/null 2>&1
+EOL
+fiacao() {  # $1=FALTA  -> os passos que install_drivers deu
+  : > "$T/passos"
+  FALTA="$1" PATH="$BIN" "$BIN/bash" "$T/fiacao.sh"
+  tr '\n' ' ' < "$T/passos"
+}
+passos=$(fiacao sim)
+if [ "$passos" = "install_build_deps " ]; then
+  echo "  OK   install_drivers instala os headers que faltam"
+else
+  echo "  FALHA com headers faltando, install_drivers fez: '${passos}'"; fail=1
+fi
+passos=$(fiacao nao)
+if [ "$passos" = "check_kernel_headers " ]; then
+  echo "  OK   ... e nao chama o gerenciador de pacotes quando nada falta"
+else
+  echo "  FALHA sem nada faltando, install_drivers fez: '${passos}'"; fail=1
+fi
+
 # nvidia-settings saiu: o PowerMizer fala com a NVML direto desde
 # 2026-09-07 e nada mais no codigo chama o binario.
 if printf '%s' "$runtime" | grep -v '^\s*#' | grep -q 'nvidia-settings'; then

@@ -458,6 +458,27 @@ arch_header_packages() {
   done | sort -u
 }
 
+# Kernels BOOTAVEIS sem headers, um por linha.
+#
+# "-d" segue o link: no Debian o build/ vem com o kernel e aponta para um
+# diretorio que so existe depois de instalar os headers. vmlinuz separa o
+# kernel que da boot do resto que uma remocao deixa em /lib/modules.
+kernels_missing_headers() {
+  local raiz="${1:-/lib/modules}" d
+  for d in "$raiz"/*/; do
+    [ -e "${d}vmlinuz" ] || continue
+    [ -d "${d}build" ] || basename "$d"
+  done
+}
+
+# Ha o que instalar antes de construir? Faltar make ou dkms era o unico
+# criterio, e com os dois no lugar ninguem instalava os headers de um
+# kernel novo: check_kernel_headers avisava e a instalacao seguia sem ele.
+build_deps_missing() {
+  ! command -v make &> /dev/null || ! command -v dkms &> /dev/null ||
+    [ -n "$(kernels_missing_headers "$@")" ]
+}
+
 # Install build dependencies based on distribution.
 # Kernel headers are required for any module build; DKMS is required for
 # the module to survive kernel upgrades. Neither base-devel nor
@@ -799,8 +820,8 @@ install_drivers() {
     return 1
   fi
 
-  if ! command -v make &> /dev/null || ! command -v dkms &> /dev/null; then
-    echo -e "${YELLOW}Installing build tools...${NC}"
+  if build_deps_missing; then
+    echo -e "${YELLOW}Installing build tools and kernel headers...${NC}"
     install_build_deps || { pause; return 1; }
   fi
 
