@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2 rodou — há piso em ~2000 rpm e a ventoinha não para; falta E3)
+**Última atualização:** 2026-10-10 (rede térmica, sessão 1: E2 e E3 rodaram — piso em ~2000 rpm, o EC não toma a ventoinha de volta, veredito R2; E3b e a rede esperam o usuário)
 
 ---
 
@@ -59,7 +59,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4d -- instalador v1.2.6: seis sobras; a desinstalacao executada num namespace
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
-[ ] Rede termica, sessao 1 -- medicao  E2 feito: piso em ~2000 rpm; roteiro do E3 pronto, falta rodar
+[ ] Rede termica, sessao 1 -- medicao  E2 e E3 feitos: piso em ~2000 rpm, o EC nao retoma, R2; falta decidir E3b
 [ ] Rede termica, sessao 2 -- a rede   so se a regra do plano mandar
 ```
 
@@ -2263,7 +2263,7 @@ suíte Python, sem xfail e, na shell, 21 passam e 2 pulam — sem root e sob
 
 ---
 
-## Rede térmica, sessão 1 — E2 feito, E3 por fazer
+## Rede térmica, sessão 1 — E2 e E3 feitos
 
 Ramo `termica/1-medicao`, em 2026-10-10, na mesma conversa em que o plano foi
 aprovado. O que existe:
@@ -2413,11 +2413,43 @@ Três coisas que só apareceram executando:
    aparece nos dois estágios e também na frase do veredito R2. O teste
    reprovava um roteiro certo.
 
+### E3 rodou: o EC não toma a ventoinha de volta, e nada estoura — R2
+
+Rodado pelo usuário em 2026-10-10, de 18:53:54 a 19:12:34, por um bloco no
+terminal, depois de um reinício da máquina. Modo máximo desligado, na tomada,
+79%, sem jogo: 1012 amostras, nenhuma fora da condição. Carga só de CPU.
+
+```
+                         automatico     manual 30%     manual 1% (o piso)
+ventoinha, rpm           4455 / 4030    2623 / 2504    2056 / 1715
+o EC tomou de volta?     --             nao            nao
+pacote, maximo           93 C           93             94
+SEN2 (limite 81)         62             68             74
+SEN4 (limite 91)         54             61             68
+frequencia, ult. minuto  3634 MHz       3286 (-10%)    2965 (-18%)
+```
+
+- **O EC obedece ao manual até o fim**: dez minutos com o pacote a 91–94 °C e
+  a rotação parada em ~2050 rpm. O controle positivo vale — em automático, na
+  mesma carga, ela foi de 2338 a 4482.
+- **Com carga só de CPU nada passa do envelope**, e as zonas de placa param de
+  subir no sexto minuto. Quem segura é o TCC.
+- **O custo é desempenho**: 18% de frequência a menos no piso.
+- **Veredito do roteiro: R2.** A decisão é do usuário, com os números.
+- A fonte de calor morreu com cada estágio, a ventoinha voltou a `0,0`, nada
+  sobrou em `/run/user`. `charge_now` não se mexeu: CPU sozinha não puxa da
+  bateria.
+- O traço está em `~/.local/state/nexus-sense/ensaio-e3-20261010-185354.tsv`.
+
+**O que E3 não responde:** o jogo. Em automático, com jogo, `SEN4` foi a 89 °C
+com a ventoinha a 4400 rpm. A 2050 rpm, com os mesmos 60 W de GPU, não se
+sabe — é E3b, que o usuário decide agora que viu E3.
+
 ### Onde continua
 
-Por E3, combinado no chat antes do comando, porque esquenta a máquina: um
-bloco no terminal, ~25 min, modo máximo desligado, sem jogo. Com o usuário, a
-decisão que E2 devolveu: o que fazer com a faixa morta do cursor.
+Três decisões do usuário: E3b (cinco minutos de jogo com o manual no piso,
+que pede um modo novo no roteiro, com teste antes); a rede no caso R2; e a
+faixa morta do cursor.
 
 ---
 

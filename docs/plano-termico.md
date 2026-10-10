@@ -355,6 +355,54 @@ automático sai de E2 — e os 300 s do automático e do degrau eram folga, não
 medição. **O que não encolhe são os 600 s do mais baixo**: com três minutos,
 "o EC não tomou a ventoinha" seria silêncio de zona lenta.
 
+#### O resultado de E3 — medido em 2026-10-10
+
+Rodado pelo usuário, de 18:53:54 a 19:12:34. Perfil `balanced-performance`,
+modo máximo desligado, na tomada, 79%, sem jogo: 1012 amostras, nenhuma fora
+da condição. Carga de 8 processos em laço — **só CPU; a GPU não trabalha.**
+
+```
+                         automatico     manual 30%     manual 1% (o piso)
+carga                    120 s          180 s          600 s
+ventoinha, rpm           4455 / 4030    2623 / 2504    2056 / 1715
+o EC tomou de volta?     --             nao            nao
+pacote, maximo           93 C           93             94
+CPU pelo EC, maximo      91             91             91
+GPU pelo EC, maximo      55             62             69
+SEN2  (limite 81)        62             68             74
+SEN3  (limite 77)        47             52             57
+SEN4  (limite 91)        54             61             68
+SEN5  (limite 81)        52             57             63
+no ultimo minuto:
+  frequencia media       3634 MHz       3286  (-10%)   2965  (-18%)
+  tempo em throttle      81%            75%            81%
+descida ate 60 C         14 s           45 s           52 s
+```
+
+O estágio do piso, minuto a minuto: as zonas de placa sobem nos cinco
+primeiros e **param** — `SEN2` em 73–74 °C do sexto ao décimo, `SEN4` em
+67–68. NVMe no máximo a 51 °C, `crit_alarm` em zero, `charge_now` parado do
+começo ao fim.
+
+O que isso responde:
+
+- **P1 — o EC não toma a ventoinha de volta.** Dez minutos com o pacote a
+  91–94 °C e a rotação não saiu de ~2050 / ~1715 rpm. O controle positivo
+  vale: em automático, na mesma carga, ela subiu de 2338 a 4482. Se houver
+  rede, ela é de software.
+- **P4 — com carga só de CPU, nada passa do envelope.** A máquina chega a um
+  patamar com folga: 7 °C abaixo do limite em `SEN2`, 23 em `SEN4`. Quem
+  segura é o TCC, cortando frequência.
+- **O custo é desempenho:** 18% de frequência a menos no piso, 10% a 30%. O
+  tempo em throttle é parecido nos três — o contador diz que se corta, não
+  quanto; quem mede a perda é a frequência.
+- **Veredito do roteiro: R2.** E com o alcance que a regra já dizia: dez
+  minutos de CPU a pleno, nenhum de GPU.
+
+**O que E3 não responde** é o caso que motivou a 4f: um jogo. Em automático,
+com jogo, `SEN4` foi a 89 °C e a GPU a 81 (seção 2) — com a ventoinha a 4400
+rpm. A 2050, com os mesmos 60 W de GPU, não se sabe. É a pergunta de E3b.
+
 ### E3b — manual com um jogo (condicional; o gesto é seu)
 
 Só roda se as três coisas valerem: E3 não viu o EC tomar a ventoinha, o
@@ -555,6 +603,10 @@ inferência: 0,3 A por 25 min são 3,5% desta bateria, e ela perdeu três pontos
 | H1 | o consumo passa do que a fonte entrega, e a bateria completa (o evento `0x9`, "battery boost", existe e chega ao driver) | `charge_now` caindo **só** sob carga alta, e subindo assim que ela cai | **a favor, três de três**: as duas quedas antigas foram jogando, e a de hoje também. 55 W de CPU, 60 a 75 W de GPU, tela e placa encostam nos 135 W |
 | H2 | fonte ou conector entregando menos do que devia | queda sem relação com a carga; talvez `ACAD/online` piscando | nada a favor: `ACAD` em 1 nas 635 |
 | H3 | o firmware segura a carga de propósito em algum estado | queda em repouso, com padrão que se repete | nada a favor: em repouso a corrente foi zero, no teto |
+
+**Mais um dado, do E3:** quinze minutos de CPU a pleno, com a GPU parada, e
+`charge_now` não saiu de 2 799 000. CPU sozinha não puxa da bateria; é a soma
+com a GPU que encosta na fonte.
 
 **O que falta.** A queda de hoje foi de 0,12 ponto por minuto; a da 4e foi de
 0,42. A causa está apontada, a taxa não: falta ver uma carga mais pesada dar
