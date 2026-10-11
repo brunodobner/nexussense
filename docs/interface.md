@@ -253,6 +253,16 @@ que o driver ignora.
 Entrar em manual **não escreve sozinho**. Quem manda na ventoinha é quem
 move o cursor.
 
+**O cursor vai de 0 a 100 na tela e vale 20 a 100 no firmware**
+(`firmware = 20 + barra × 0,8`, em `model.fan_bar_to_firmware`). De 20% para
+baixo a ventoinha gira o mesmo — ~2000 / ~1665 rpm, medido em 2026-10-10 — e
+o cursor antigo oferecia essa faixa como se ela mudasse alguma coisa. Com a
+escala nova somem a faixa morta e o "0 num lado só", que deixava aquela
+ventoinha em automático: automático é só pelo botão. Na leitura, um valor do
+piso para baixo aparece como 0, e o cartão do Painel mostra o mesmo número do
+cursor. A repintura só mexe no cursor se a posição dele não valer o que está
+gravado — a barra tem 101 posições para 81 degraus.
+
 Um clique no trilho leva o marcador diretamente ao ponto clicado. O avanço
 por páginas do `QSlider` padrão foi removido porque parecia uma animação
 lenta e obrigava vários cliques para chegar ao valor desejado.

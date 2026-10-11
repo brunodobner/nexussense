@@ -146,3 +146,48 @@ def test_booleanos_viram_um_e_zero():
     assert bool_value(False) == "0"
     assert parse_bool("1") is True
     assert parse_bool("0\n") is False
+
+
+# ------------------------------------------------ o cursor de manual
+#
+# De 20% para baixo a ventoinha gira o mesmo -- ~2000 / ~1665 rpm, medido
+# em 2026-10-10 (docs/plano-termico.md, secao 6). O cursor segue de 0 a
+# 100 na tela e vale 20 a 100 no firmware: a faixa morta some.
+
+from nexus_sense.model import FAN_FLOOR, fan_bar_to_firmware, fan_firmware_to_bar
+
+
+@pytest.mark.parametrize(
+    "barra, firmware", [(0, 20), (1, 21), (25, 40), (50, 60), (75, 80), (100, 100)]
+)
+def test_a_barra_de_0_a_100_vale_20_a_100_no_firmware(barra, firmware):
+    assert fan_bar_to_firmware(barra) == firmware
+
+
+def test_nenhuma_posicao_da_barra_cai_na_faixa_morta():
+    valores = [fan_bar_to_firmware(barra) for barra in range(101)]
+    assert min(valores) == FAN_FLOOR == 20
+    assert max(valores) == 100
+    assert valores == sorted(valores)
+    # E nenhum degrau do firmware fica sem posicao na barra.
+    assert set(valores) == set(range(20, 101))
+
+
+@pytest.mark.parametrize("firmware", [0, 1, 5, 19, 20])
+def test_na_leitura_valor_ate_o_piso_mostra_zero(firmware):
+    """Zero e automatico e 1 a 20 e o piso: na barra, tudo isso e o
+    comeco dela."""
+    assert fan_firmware_to_bar(firmware) == 0
+
+
+@pytest.mark.parametrize("firmware, barra", [(21, 1), (40, 25), (60, 50), (80, 75), (100, 100)])
+def test_na_leitura_o_firmware_volta_para_a_barra(firmware, barra):
+    assert fan_firmware_to_bar(firmware) == barra
+
+
+def test_o_que_se_le_e_o_que_se_escreveria():
+    """A barra tem 101 posicoes e o firmware 81 degraus: duas posicoes
+    podem valer o mesmo degrau, mas ler um degrau e escreve-lo de volta
+    nunca o muda."""
+    for firmware in range(20, 101):
+        assert fan_bar_to_firmware(fan_firmware_to_bar(firmware)) == firmware

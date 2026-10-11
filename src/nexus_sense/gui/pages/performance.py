@@ -240,8 +240,10 @@ class PerformancePage(QWidget):
         self._fan_timer.start()
 
     def _escreve_cursores(self):
+        # A barra vale do piso do firmware a 100: ver model.FAN_FLOOR.
         self._escreve_ventoinha(
-            self.fan_sliders["cpu"].value(), self.fan_sliders["gpu"].value()
+            model.fan_bar_to_firmware(self.fan_sliders["cpu"].value()),
+            model.fan_bar_to_firmware(self.fan_sliders["gpu"].value()),
         )
 
     def _cursor_em_uso(self):
@@ -287,8 +289,16 @@ class PerformancePage(QWidget):
             self._aplicando = True
             try:
                 for chave, valor in zip(("cpu", "gpu"), state.fan_speed):
-                    self.fan_sliders[chave].setValue(valor)
-                    self.fan_values[chave].setText(f"{valor}%")
+                    cursor = self.fan_sliders[chave]
+                    barra = model.fan_firmware_to_bar(valor)
+                    # Duas posicoes da barra podem valer o mesmo degrau
+                    # do firmware. Se a que esta la ja vale o que foi
+                    # lido, fica: senao o cursor pularia sozinho.
+                    if model.fan_bar_to_firmware(
+                        cursor.value()
+                    ) != model.fan_bar_to_firmware(barra):
+                        cursor.setValue(barra)
+                    self.fan_values[chave].setText(f"{cursor.value()}%")
             finally:
                 self._aplicando = False
 
