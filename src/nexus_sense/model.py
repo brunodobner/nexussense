@@ -112,6 +112,33 @@ def parse_fan_speed(raw):
         raise ValueError(f"velocidade de ventoinha ilegivel: {raw!r}") from erro
 
 
+# De 20% para baixo o firmware segura a ventoinha no mesmo piso, ~2000 /
+# ~1665 rpm: medido em 2026-10-10, de 20% a 1% (docs/plano-termico.md,
+# secao 6). O cursor da tela segue de 0 a 100 e vale FAN_FLOOR a 100
+# aqui. Somem duas coisas: a faixa em que mexer no cursor nao mudava
+# nada, e o zero num lado so, que era aquela ventoinha em automatico --
+# automatico passa a ser so pelo botao.
+FAN_FLOOR = 20
+
+
+def fan_bar_to_firmware(bar):
+    """Da posicao do cursor, 0 a 100, para o valor de fan_speed."""
+    return FAN_FLOOR + (2 * bar * (100 - FAN_FLOOR) + 100) // 200
+
+
+def fan_firmware_to_bar(value):
+    """De fan_speed para a posicao do cursor. Do piso para baixo, zero.
+
+    A barra tem 101 posicoes e o firmware 81 degraus: a volta devolve
+    uma posicao que vale o degrau lido, nao necessariamente a que o
+    usuario soltou. Quem repinta confere isso antes de mexer no cursor.
+    """
+    if value <= FAN_FLOOR:
+        return 0
+    faixa = 100 - FAN_FLOOR
+    return (2 * (value - FAN_FLOOR) * 100 + faixa) // (2 * faixa)
+
+
 def usb_charging_value(level):
     """O nivel de bateria abaixo do qual a carga USB para de fornecer."""
     if level not in USB_LEVELS:

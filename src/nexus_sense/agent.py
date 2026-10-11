@@ -8,6 +8,9 @@ num estado que ela recusaria assumir se pedido. Ver spec secao 2.9.
 
 `decide` e pura de proposito: recebe o estado, devolve o que escrever.
 Todo o comportamento do agente e testavel sem hardware e sem relogio.
+
+A mesma passada carrega a rede da ventoinha manual, que tem a funcao pura
+dela em fan_guard.py: o agente le, ela decide, o agente escreve.
 """
 
 import dataclasses
@@ -15,10 +18,11 @@ import logging
 import threading
 from typing import NamedTuple
 
+from . import fan_guard, telemetry
 from .config import Config, load, save
 from .device import Controls, WriteError
 from .maximum import MaximumMode, THERMAL_PROFILE
-from .model import available, nearest
+from .model import available, nearest, parse_fan_speed
 from .powermizer import PowerMizer, PowerMizerError
 
 
@@ -120,7 +124,8 @@ class Agent:
         # Ultimo perfil de tomada conhecido. Espelha o arquivo quando ele
         # e gravavel, e o substitui quando nao e.
         self._saved_memoria = None
-        self._maximum = MaximumMode(Controls(sysfs), config_path, gpu=PowerMizer())
+        self._controls = Controls(sysfs)
+        self._maximum = MaximumMode(self._controls, config_path, gpu=PowerMizer())
         self._gpu_confirmed = False
         # Devolucao que o firmware recusou: (perfil a devolver, perfil que
         # estava em vigor na recusa). Ver _retoma_pendente.
@@ -131,6 +136,10 @@ class Agent:
         # As falhas do modo maximo ja avisadas. Repetir a mesma linha a
         # cada passada enterra no journal o momento em que ela comecou.
         self._falhas_maximo = ()
+        # A rede da ventoinha: quantas passadas seguidas ela viu o manual
+        # baixo, a GPU quente e a rotacao lenta. Ver _guarda_ventoinha.
+        self._rede_seguidas = 0
+        self._rede_recusa_avisada = False
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -249,6 +258,7 @@ class Agent:
                 self.log.warning("não foi possível gravar a configuração: %s", erro)
 
         self._reconcile_maximum(decisao.config, now_on_ac, perfil)
+        self._guarda_ventoinha(decisao.config.maximum_mode and now_on_ac is True)
 
         return decisao
 
@@ -315,6 +325,67 @@ class Agent:
         if not active and self._gpu_confirmed:
             self.log.info("pedido PowerMizer liberado na bateria")
         self._gpu_confirmed = confirmed
+
+    def _read_fan_speed(self):
+        sense = self.sysfs.sense_dir()
+        if sense is None:
+            return None
+        try:
+            return parse_fan_speed(self.sysfs.read(sense / "fan_speed"))
+        except (OSError, ValueError):
+            return None
+
+    def _guarda_ventoinha(self, maximo_ativo):
+        """A rede da ventoinha manual: devolve o automatico, e so isso.
+
+        A ordem das leituras e o custo. fan_speed o driver responde de
+        memoria; se ele nao diz manual baixo, a passada acaba ali. A GPU
+        pelo EC e uma chamada ao firmware, e so com ela quente vem a
+        rotacao, que sao mais duas. Nunca o nvidia-smi (armadilha 20).
+
+        `maximo_ativo` e pedido E na tomada, como em _reconcile_maximum:
+        e o modo que troca a curva do automatico.
+        """
+        setpoint = self._read_fan_speed()
+        if not fan_guard.armada(setpoint, maximo_ativo):
+            self._rede_seguidas = 0
+            self._rede_recusa_avisada = False
+            return
+
+        gpu = telemetry.acer_gpu_temp(self.sysfs)
+        rpm = telemetry.fan_rpm(self.sysfs) if fan_guard.quente(gpu) else None
+        veredito = fan_guard.decide(
+            self._rede_seguidas, setpoint, maximo_ativo, gpu, rpm
+        )
+        self._rede_seguidas = veredito.seguidas
+        if not veredito.dispara:
+            return
+
+        try:
+            self._controls.set_fan_speed(0, 0)
+        except WriteError as erro:
+            # A conta fica onde esta: a proxima passada tenta de novo.
+            if not self._rede_recusa_avisada:
+                self.log.warning(
+                    "rede térmica: não conseguiu devolver a ventoinha ao "
+                    "automático, com a GPU a %d °C: %s",
+                    gpu,
+                    erro,
+                )
+            self._rede_recusa_avisada = True
+            return
+
+        # Nada daqui e guardado: o manual so volta pela mao de quem o
+        # escolheu. A linha e o unico aviso -- decisao do usuario.
+        self._rede_seguidas = 0
+        self._rede_recusa_avisada = False
+        self.log.warning(
+            "rede térmica: ventoinha em manual a %d,%d (%d / %d rpm) com a "
+            "GPU a %d °C; devolvida ao automático",
+            *setpoint,
+            *rpm,
+            gpu,
+        )
 
     def _avisa_falhas(self, falhas):
         """Uma linha quando a falha aparece, outra quando todas somem."""

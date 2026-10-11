@@ -117,8 +117,15 @@ def build_tree(
     escreve(h_acer / "name", "acer")
     escreve(h_acer / "fan1_input", fans[0])
     escreve(h_acer / "fan2_input", fans[1])
+    # Os rotulos sao os do driver, lidos na maquina: quem quer o canal da
+    # GPU o acha por eles, nao pelo numero.
+    rotulos = ("CPU", "GPU", "External 2")
     for i, t in enumerate(acer_temps, start=1):
         escreve(h_acer / f"temp{i}_input", t)
+        if i <= len(rotulos):
+            escreve(h_acer / f"temp{i}_label", rotulos[i - 1])
+    escreve(h_acer / "fan1_label", "CPU")
+    escreve(h_acer / "fan2_label", "GPU")
 
     # /sys/class/hwmon: links por indice, na ordem embaralhada
     classe = root / "sys/class/hwmon"

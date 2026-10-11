@@ -174,7 +174,7 @@ Medido neste ANV15-52, não presumido:
 | controle | estado |
 |---|---|
 | perfis térmicos | ✅ `low-power quiet balanced balanced-performance` |
-| velocidade das ventoinhas | ✅ |
+| velocidade das ventoinhas | ✅ com piso: de 20% para baixo o firmware gira o mesmo, ~2000 rpm, e não devolve o automático sozinho — quem devolve, com um jogo aberto, é o agente ([docs/plano-termico.md](docs/plano-termico.md)) |
 | limitador de bateria | ✅ |
 | calibração de bateria | ✅ |
 | timeout do backlight | ✅ |

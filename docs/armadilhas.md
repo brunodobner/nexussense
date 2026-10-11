@@ -333,6 +333,31 @@ st=$?                    # antes de qualquer outra coisa
 O `tests/run-all.sh` faz isso e distingue quatro desfechos: passou (0),
 pulou por falta de root (2), alvo ausente (3) e falhou (demais).
 
+### 13b. O status de um pipeline é o do último comando
+
+Parente próximo, de 2026-10-10. Para ver só o fim da saída, a suíte ia por
+um `tail` — e o `&&` seguinte decidia pelo `tail`, que sempre dá certo:
+
+```bash
+python3 -m pytest -q 2>&1 | tail -2 && ./tests/run-all.sh && git commit ...   # ERRADO
+```
+
+Um teste reprovou, a linha `1 failed` apareceu na tela, e o commit entrou
+assim mesmo. Foi visto na hora e emendado, mas só porque a linha estava na
+saída: o encadeamento não segurou nada.
+
+Guarde a saída num arquivo e o status numa variável, e encadeie pelo status:
+
+```bash
+python3 -m pytest -q > "$S/py.txt" 2>&1; p=$?
+./tests/run-all.sh > "$S/sh.txt" 2>&1; s=$?
+tail -1 "$S/py.txt"
+[ "$p" -eq 0 ] && [ "$s" -eq 0 ] && git commit ...
+```
+
+`set -o pipefail` resolveria no bash; o shell das ferramentas aqui é o zsh, e
+a variável é `pipestatus`, em minúsculas — `${PIPESTATUS[0]}` sai vazio.
+
 ---
 
 ## 14. Teste que não acha o alvo passa por vácuo
@@ -1456,6 +1481,19 @@ automático, o ensaio diz isso e para — não passa.
 E `fan_speed` não serve de prova: é a memória do driver, não o firmware. Quem
 diz o que o EC está fazendo é `fan1_input` e `fan2_input`.
 
+**"Quem troca é o modo máximo" também valeu por um dia.** Em 2026-10-11 o
+modo foi desligado com um jogo aberto e a ventoinha seguiu na curva alta —
+6550 rpm — por oito minutos. O PowerMizer já estava liberado. O que seguia
+ligado era o perfil de energia do sistema, em `performance`; passado a
+`balanced`, ela caiu a ~4500 rpm em 90 s. O modo máximo liga esse perfil, e
+desligá-lo não o desligou. Antes de dizer em que curva o automático está,
+leia o perfil de energia, e não só o `maximum_mode`:
+
+```bash
+busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+    net.hadess.PowerProfiles ActiveProfile
+```
+
 **O que isto tem em comum com a 25.** Quem avisou foi o usuário, que ouve a
 ventoinha todo dia: *"mesmo só com você aberto ela mantém uma faixa superior
 à que você espera"*. O plano tinha medido uma curva, numa manhã, e a chamado
@@ -1489,6 +1527,44 @@ rodá-lo. `tests/hardware/mutacoes-ensaio.py` faz isso, uma por vez.
 Sem a recusa de "nenhum jogo aberto" na partida do E3b, a conferência seguinte
 recusa igual, com o mesmo código: o roteiro mutado faz a mesma coisa. Antes de
 endurecer o teste, veja se a mutação muda algum comportamento.
+
+---
+
+## 39. O nome do arquivo não é a condição
+
+**Sintoma.** Um traço chamado "jogo, modo máximo desligado" vira entrada de
+um teste que cobra "em automático a rede não dispara" — e dentro dele há duas
+amostras com a ventoinha em `1,1`, a GPU a 85 °C, e meia hora com o modo
+máximo ligado.
+
+**Causa.** O observador passivo é um laço que grava até o prazo acabar. O
+nome do arquivo diz como a máquina estava **quando ele foi ligado**. O da
+noite de 2026-10-10 foi ligado às 19:31 e gravou por três horas, e dentro
+dele estão:
+
+```
+19:38 a 19:43   mutacoes do ensaio esquentando a maquina: ventoinha a 5600 rpm
+19:46:51 e :56  o E3b: fan_speed em 1,1, GPU pelo EC a 80 e a 85
+21:26:03        o modo maximo ligado, e a ventoinha a 6600 rpm dali em diante
+22:02:59        o fim do jogo
+```
+
+E os dois observadores da sessão anterior seguiam vivos na seguinte, anexando
+linhas aos arquivos que ela ia recortar: processo lançado por uma sessão não
+morre com ela.
+
+**Regra.** A condição de um traço se confere **linha a linha**, pelas colunas
+— `fan_speed`, `maximo`, `jogo`, `acad`, perfil — e o recorte se faz por
+época, não por faixa de horas nem pelo arquivo inteiro.
+`tests/hardware/recorta-tracos.py` faz as duas coisas e recusa a janela que
+tiver uma linha fora do que promete. É a regra do ensaio — "a condição se
+mede a cada amostra" — valendo também para quem lê o traço depois.
+
+E antes de ligar um observador, veja quem já está no ar:
+
+```bash
+ps -eo pid,lstart,args | grep '[o]bservador.sh'
+```
 
 ---
 

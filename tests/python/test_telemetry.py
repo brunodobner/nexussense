@@ -2,6 +2,7 @@ import pytest
 
 from nexus_sense.sysfs import Sysfs
 from nexus_sense.telemetry import (
+    acer_gpu_temp,
     acer_hwmon,
     acer_temperatures,
     cpu_package_temp,
@@ -64,3 +65,57 @@ def test_acha_o_pacote_pelo_rotulo_e_nao_pelo_numero(tmp_path):
     (core / "temp2_label").write_text("Package id 0\n")
     (core / "temp2_input").write_text("52000\n")
     assert cpu_package_temp(Sysfs(tmp_path)) == pytest.approx(52.0)
+
+
+# ------------------------------------------- o canal GPU do acer, pelo rotulo
+
+ACER = "sys/devices/platform/acer-wmi/hwmon/hwmon5"
+
+
+def test_a_gpu_pelo_ec_vem_em_celsius_inteiros(tmp_path):
+    build_tree(tmp_path, acer_temps=(61000, 79000, 45000))
+    assert acer_gpu_temp(Sysfs(tmp_path)) == 79
+
+
+def test_acha_o_canal_da_gpu_pelo_rotulo_e_nao_pelo_numero(tmp_path):
+    """Hoje e o temp2. A garantia e o rotulo dizer GPU."""
+    build_tree(tmp_path, acer_temps=(61000, 79000, 45000))
+    acer = tmp_path / ACER
+    (acer / "temp2_label").write_text("External 2\n")
+    (acer / "temp3_label").write_text("GPU\n")
+    assert acer_gpu_temp(Sysfs(tmp_path)) == 45
+
+
+def test_com_a_placa_dormindo_o_canal_da_gpu_le_zero(tmp_path):
+    """Zero e o que o EC responde, e nao falta de leitura: quem chama
+    distingue os dois."""
+    build_tree(tmp_path, acer_temps=(61000, 0, 45000))
+    assert acer_gpu_temp(Sysfs(tmp_path)) == 0
+
+
+def test_sem_canal_rotulado_gpu_nao_ha_leitura(tmp_path):
+    build_tree(tmp_path)
+    (tmp_path / ACER / "temp2_label").write_text("Outro\n")
+    assert acer_gpu_temp(Sysfs(tmp_path)) is None
+
+
+def test_sem_o_sensor_do_acer_nao_ha_leitura(tmp_path):
+    assert acer_gpu_temp(Sysfs(tmp_path)) is None
+
+
+def test_leitura_da_gpu_que_falha_nao_levanta(tmp_path):
+    build_tree(tmp_path)
+    (tmp_path / ACER / "temp2_input").write_text("lixo\n")
+    assert acer_gpu_temp(Sysfs(tmp_path)) is None
+
+
+def test_ler_a_gpu_pelo_ec_nao_le_os_outros_canais(tmp_path):
+    """Cada temp*_input do acer e uma chamada ao firmware. O rotulo sai da
+    memoria do driver; o valor, nao."""
+    build_tree(tmp_path)
+    s = Sysfs(tmp_path)
+    lidos = []
+    original = s.read
+    s.read = lambda caminho: (lidos.append(caminho.name), original(caminho))[1]
+    acer_gpu_temp(s)
+    assert [nome for nome in lidos if nome.endswith("_input")] == ["temp2_input"]

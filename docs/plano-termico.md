@@ -3,7 +3,9 @@
 **Estado: escrito em 2026-10-10, na sub-etapa 4f de
 [plano-melhorias.md](plano-melhorias.md), passado pelo grill e aprovado pelo
 usuário no mesmo dia. A medição (E2, E3 e E3b) rodou também nesse dia: o
-veredito foi R3, e a rede entra.** O que este arquivo afirma está marcado:
+veredito foi R3, e a rede entra. Entrou na sessão 2, em 2026-10-10/11
+(v1.2.8): o que foi feito está no fim da seção 11.** O que este arquivo
+afirma está marcado:
 **lido** (do sysfs, do código ou do kernel, sem provocar nada) ou **medido**
 (observado acontecendo). O resultado de cada ensaio está na seção 6, junto do
 ensaio; o que a execução refutou, em [estado.md](estado.md).
@@ -491,6 +493,13 @@ se quer medir.
 Os números das zonas `SEN*` saem da captura passiva e **congelam na
 aprovação**: depois dela, nenhuma medição os move.
 
+**Nota de 2026-10-10, sessão 2 — os limites não mudaram.** "O automático foi
+a 81" veio de 26 minutos de jogo. Em 95 minutos, com o modo máximo desligado,
+a GPU pelo EC foi a **84** em automático (p95 em 82). O limite de 85 está a
+um grau do que o automático faz sozinho, e a quem escreve um manual baixo
+nessa hora sobram segundos: o modo `rede` do roteiro só escreve o piso com a
+GPU a seis graus ou mais do limite.
+
 ---
 
 ## 8. Quem devolve a ventoinha
@@ -619,6 +628,107 @@ ventoinha, só o que o driver lembra; por isso confere a rotação antes de agir
 | forçar o máximo | `100,100` em vez de `0,0` | mais barulho que o necessário; o automático já sobe |
 | no driver | trabalho periódico no kernel | robusto sem sessão, mas é política dentro do kernel, DKMS e reinício para cada ajuste de limiar |
 
+### O que foi feito — sessão 2, 2026-10-10 (v1.2.8)
+
+O desenho acima era de antes de medir. O que entrou, e onde difere:
+
+**Onde mora.** `src/nexus_sense/fan_guard.py`, puro: `armada` diz se vale a
+pena olhar temperatura, `decide` diz se é hora de escrever `0,0`. Quem lê e
+quem escreve é o agente, em `_guarda_ventoinha`, no fim de cada passada.
+
+**Quando arma.** Por ventoinha: o setpoint dela é manual (não é zero) e está
+abaixo do que o automático com jogo gira no modo corrente. Basta uma.
+
+```
+                      manual equivalente      rotação do automático com jogo
+                      CPU / GPU               CPU / GPU
+modo máximo desligado    53% / 50%            4414 / 4003 rpm
+modo máximo ligado       81% / 82%            6318 / 5984 rpm
+```
+
+"Modo corrente" é o que o agente já chamava de ativo: pedido **e** na tomada.
+Suspenso na bateria, vale a linha de cima.
+
+**Quando dispara.** Armada, com a GPU pelo EC a **76 °C ou mais**, com a
+rotação da ventoinha armada **abaixo da do automático** daquele modo, em
+**duas passadas seguidas** — o agente passa a cada 2 s, então age de 2 a 4 s
+depois de a condição aparecer. Três medidas cercam os 76:
+
+```
+69 C   o máximo da GPU pelo EC no E3: dez minutos no piso, oito núcleos a
+       pleno, GPU parada. É calor do dissipador vizinho
+75 C   o máximo em 35 min de jogo em automático com o modo máximo ligado:
+       um manual que gire como esse automático não dispara
+79 C   de onde a GPU partiu no E3b, seis segundos antes dos 85 do aborto
+```
+
+E duas passadas, não uma: uma só pegaria o cursor de passagem por um valor
+baixo no meio de um arrasto, e a rotação ainda caindo depois de uma escrita.
+
+**O que saiu do desenho provisório, e por quê:**
+
+- **O pacote da CPU não entra.** O provisório disparava também com a média
+  do pacote a 85 °C. Com carga só de CPU o E3 deu R2 — nada passa do
+  envelope, o custo é frequência — e a regra da seção 10 deixa esse caso com
+  o usuário, que não chegou a decidir: o E3b deu R3 antes. A rede que a
+  regra mandou fazer é a do jogo. No traço do E3 ela não dispara nenhuma
+  vez, e isso é teste.
+- **Os 30 s de sustentação viraram duas passadas.** A GPU sobe um grau por
+  segundo.
+- **O critério dos traços** ficou o desta sessão: em automático e em manual a
+  partir do equivalente, nenhuma vez; no E3b, antes do aborto. No traço ela
+  dispara 2 a 3 s depois da escrita do manual, 2 a 3 s antes do aborto.
+
+**O que custa.** Medido na máquina: ler `fan_speed` leva 5 a 15 µs — o driver
+responde de memória; `battery_limiter` e `usb_charging`, que chamam o
+firmware, levam 4,3 e 6,2 ms. Sem armar, a rede é essa leitura. Armada, lê o
+canal `GPU` do `hwmon` do acer (79 µs), achado pelo rótulo; só com ele quente
+lê as duas rotações (95 µs cada). Nunca o `nvidia-smi`.
+
+**O que ela diz.** Uma linha, no journal do agente:
+
+```
+WARNING rede térmica: ventoinha em manual a 20,20 (2075 / 1727 rpm) com a GPU a 81 °C; devolvida ao automático
+```
+
+**Como se prova.** Os traços de E2, E3, E3b e das duas sessões de jogo em
+automático entram recortados em `tests/python/tracos/`, e passam pela função
+passada a passada (`test_fan_guard_tracos.py`). Quem prova os testes é
+`tests/hardware/mutacoes-rede.py`: um número ou uma guarda estragados por
+vez. Na máquina, o modo `rede` de `tests/hardware/ensaio-termico.sh`: dois
+controles e o piso, com os limites da seção 7 vigiando.
+
+**O que ela não faz**, além do que a seção já dizia:
+
+- não age com calor que é só de CPU (o caso R2, acima);
+- não conhece outro perfil: os dois equivalentes foram medidos em
+  `balanced-performance`, na tomada;
+- não chega antes de tudo: age em 2 a 4 s. Com o modo máximo desligado o
+  automático já deixa a GPU pelo EC em 80 a 84 °C com um jogo; um manual no
+  piso escolhido nessa hora pode tocar os 85 antes de ela agir. Não é dano —
+  é o limite de aborto dos ensaios, e a GPU tem alvo próprio em 87.
+
+**O portão, na máquina** — 2026-10-10/11, com o jogo de sempre, pelo modo
+`rede` do roteiro. Os números estão em [estado.md](estado.md):
+
+- sem a rede (v1.2.7), piso com o modo máximo ligado: a GPU pelo EC foi de 73
+  a 85 °C em 22 s, e o roteiro abortou. A rodada tinha de reprovar;
+- com a rede, modo ligado: devolveu o automático em 10,9 s — 3 s depois de a
+  GPU cruzar 76 —, e ela não passou de 80;
+- com a rede, modo desligado: devolveu em 3,6 s, partindo de 78 °C;
+- em automático, e em manual a 90% (modo ligado) e a 60% (desligado), não
+  agiu; depois de agir, não devolveu o manual.
+
+**O que o portão mostrou que este desenho não sabia:** "modo máximo
+desligado" não garante a curva baixa. Com o modo desligado e o perfil de
+energia do sistema ainda em `performance`, o automático seguiu a 6550 rpm por
+oito minutos, e caiu a ~4500 em 90 s quando o perfil foi a `balanced`. O
+PowerMizer, suspeito da sessão 1, já estava liberado. A tabela acima é por
+modo; nesse estado ela arma de menos — 53% em vez de 81% — e a rede deixa em
+paz um manual que está abaixo do automático real. Erra para o lado de não
+mexer. Perguntar ao `power-profiles-daemon` em vez de ler o modo é o conserto
+provável, e pede medir primeiro: foi um experimento, numa noite.
+
 ---
 
 ## 12. A bateria que descarrega com o cabo ligado
@@ -679,7 +789,10 @@ cabo.
 
 ## 13. O observador passivo — como refazer
 
-Vivia no scratchpad. Só leitura, sem root, não chama o `nvidia-smi`.
+Vivia no scratchpad. Só leitura, sem root, não chama o `nvidia-smi`. **Desde
+a sessão 2 mora no repositório**, já gravando `charge_now`:
+`tests/hardware/observador.sh <arquivo.tsv> [intervalo_s] [duracao_s]`. A
+versão abaixo é a da medição de 2026-10-10, e fica como registro.
 
 ```bash
 #!/bin/bash
@@ -813,7 +926,7 @@ limpo, baseline antes da primeira edição, a suíte inteira antes de cada commi
 | sessão | ramo | o que entra | root, gesto |
 |---|---|---|---|
 | 1 — medição | `termica/1-medicao` | **feita em 2026-10-10, sem versão nova.** O roteiro em `tests/hardware/`, com teste em árvore falsa e um corredor de mutações; E2, E3 e E3b; veredito R3 | sem root. O gesto foi rodar três blocos, e um jogo no último |
-| 2 — a rede | `termica/2-rede` | **a regra mandou.** A função pura, os traços como teste, o agente. Sem mudança na interface. Versão nova, portão com reinstalação | root na reinstalação |
+| 2 — a rede | `termica/2-rede` | **feita em 2026-10-10/11, v1.2.8.** A função pura (`fan_guard.py`), os traços como teste, o agente; o cursor de manual valendo 20 a 100, e Manual que não volta a Automático sozinho na tela; o modo `rede` do roteiro, para o portão | root em duas reinstalações do pacote. O gesto foi um jogo aberto, quatro blocos, e o cursor |
 
 Baseline esperado ao abrir a sessão 2: 387 passam na suíte Python, sem xfail;
 shell 23 passam e 2 pulam, sem root e sob `LC_ALL=C`.

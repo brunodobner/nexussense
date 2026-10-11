@@ -3,11 +3,11 @@
 
 tests/hardware/ensaio-termico.sh escreve na ventoinha de verdade e esquenta a
 maquina de proposito. O que o impede de fazer besteira esta provado em arvore
-de mentira, por tests/shell/test-ensaio-termico.sh e -e3.sh. Este roteiro
+de mentira, por tests/shell/test-ensaio-termico.sh, -e3.sh e -rede.sh. Este roteiro
 prova os testes: copia o ensaio, estraga UMA protecao, roda o teste que a
 guarda, e cobra que ele reprove.
 
-Nao faz parte da suite -- leva uns doze minutos e ocupa cinco nucleos. Rode
+Nao faz parte da suite -- leva uns quinze minutos e ocupa cinco nucleos. Rode
 depois de mexer no ensaio ou nos testes dele, e nunca durante um ensaio na
 maquina: a carga esquenta a maquina que esta sendo medida.
 
@@ -31,6 +31,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 ENSAIO = REPO / "tests/hardware/ensaio-termico.sh"
 E2 = "test-ensaio-termico.sh"
 E3 = "test-ensaio-termico-e3.sh"
+REDE = "test-ensaio-termico-rede.sh"
 APOIO = "lib-arvore-termica.sh"
 
 # O trecho da retomada existe igual no E3 e no E3b; o comentario o ancora no E3.
@@ -166,12 +167,52 @@ MUT = [
     ("E3b: a descida roda com a ventoinha em manual", E3,
      '$mr2 rpm"\n    fi\n    if ! escreve "0,0"; then MOTIVO="a escrita de 0,0 foi recusada"; termina "$COD_CONDICAO"; fi\n\n    thr=NA',
      '$mr2 rpm"\n    fi\n\n    thr=NA'),
+    # ---- a prova da rede: a outra mao e o que se espera, e so no piso
+    ("rede: comeca sem jogo aberto", REDE,
+     '    [ "$V_JOGO" = 0 ] && recusa "a prova pede um jogo aberto',
+     '    false && recusa "a prova pede um jogo aberto'),
+    ("rede: comeca com um limite ja estourado em automatico", REDE,
+     '        echo "  RECUSA: antes de escrever qualquer coisa, $MOTIVO"; exit "$COD_RECUSA"', '        :'),
+    ("rede: o jogo pode estar fechado", REDE,
+     'p1="" p2="" g0 mg=0 saiu\n    COM_JOGO=1; REPOUSO=0', 'p1="" p2="" g0 mg=0 saiu\n    COM_JOGO=0; REPOUSO=0'),
+    ("rede: com o modo maximo, o controle fica abaixo do equivalente", REDE,
+     '    [ "$MAX0" = true ] && pa=$REDE_P_ACIMA_MAX\n', ''),
+    ("rede: limite em automatico conta como aborto", REDE,
+     'e a prova nao conta"\n            termina "$COD_CONDICAO"',
+     'e a prova nao conta"\n            termina "$COD_LIMITE"'),
+    ("rede: fan_speed de volta a 0,0 no controle nao e acusado", REDE,
+     '        if [ "$V_FAN" = "0,0" ]; then\n            ULTIMO="0,0"\n            falha_rede "no controle',
+     '        if false; then\n            ULTIMO="0,0"\n            falha_rede "no controle'),
+    ("rede: o piso fora do piso", REDE,
+     'REDE_P_PISO=${ENSAIO_REDE_P_PISO:-20}', 'REDE_P_PISO=${ENSAIO_REDE_P_PISO:-60}'),
+    ("rede: o piso e escrito sem folga do limite", REDE,
+     '    if acima "$g0" $(( LIM_EC_GPU - REDE_FOLGA + 1 )); then', '    if false; then'),
+    ("rede: a folga do piso exige um grau a mais", REDE,
+     '    if acima "$g0" $(( LIM_EC_GPU - REDE_FOLGA + 1 )); then',
+     '    if acima "$g0" $(( LIM_EC_GPU - REDE_FOLGA )); then'),
+    ("rede: no piso a rede agir conta como outra mao", REDE,
+     '        if [ "$V_FAN" = "0,0" ]; then\n            [ -n "$ms" ] || ms=',
+     '        if false; then\n            [ -n "$ms" ] || ms='),
+    ("rede: limite no piso nao encerra", REDE,
+     '        [ "$rc" -ne 0 ] && break\n        p1=$V_RPM1; p2=$V_RPM2', '        p1=$V_RPM1; p2=$V_RPM2'),
+    ("rede: sem a rede agir, a prova segue como se tivesse agido", REDE,
+     '    if [ "$agiu" != 1 ]; then\n        # Outro valor em fan_speed',
+     '    if false; then\n        # Outro valor em fan_speed'),
+    ("rede: a rotacao que nao sai do piso passa", REDE,
+     '    [ "$rc" -eq 0 ] || falha_rede "fan_speed voltou a 0,0, mas a rotacao nao saiu do manual"\n', ''),
+    ("rede: o manual de volta depois de a rede agir nao e acusado", REDE,
+     '        if [ "$V_FAN" = "$pp,$pp" ]; then\n            # E o manual desta prova',
+     '        if false; then\n            # E o manual desta prova'),
+    ("rede: o manual de volta e acusado, e fica no piso", REDE,
+     '    [ -n "$REDE_VALOR" ] && [ "$(le "$FAN")" = "$REDE_VALOR" ] && ULTIMO=$REDE_VALOR\n', ''),
 ]
 
 # Mutacoes que nao mudam o que o roteiro faz, e por isso nao tem como
 # reprovar. Ficam na lista para alguem que as releia nao as "descobrir".
 EQUIVALENTES = {
     "E3b: comeca sem jogo aberto":
+        "sem a recusa, a conferencia seguinte (verifica) recusa igual, com o mesmo codigo",
+    "rede: comeca sem jogo aberto":
         "sem a recusa, a conferencia seguinte (verifica) recusa igual, com o mesmo codigo",
 }
 

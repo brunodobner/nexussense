@@ -104,7 +104,9 @@ def test_setpoint_manual_aparece_como_manual(qtbot, tmp_path):
     (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("70,80\n")
     p = painel(qtbot, raiz)
     texto = p.cards["ventoinhas"].rows["modo"].text()
-    assert "70" in texto and "80" in texto
+    # Na escala da barra da tela Desempenho, que vale 20 a 100 no
+    # firmware: os dois lugares mostram o mesmo numero.
+    assert texto == "manual — 63% / 75%"
 
 
 def test_o_cabecalho_traz_o_perfil_com_o_nome_em_portugues(qtbot, tmp_path):

@@ -185,7 +185,9 @@ class DashboardPage(QWidget):
         elif state.fan_speed == (0, 0):
             self.cards["ventoinhas"].set_value("modo", "automático")
         else:
-            cpu, gpu = state.fan_speed
+            # Na escala do cursor da tela Desempenho, nao na do firmware:
+            # os dois lugares tem de mostrar o mesmo numero.
+            cpu, gpu = (model.fan_firmware_to_bar(v) for v in state.fan_speed)
             self.cards["ventoinhas"].set_value("modo", f"manual — {cpu}% / {gpu}%")
 
         self.cards["bateria"].set_value(
