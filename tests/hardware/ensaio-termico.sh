@@ -9,6 +9,7 @@
 # Uso:   tests/hardware/ensaio-termico.sh e2 [saida.tsv]
 #        tests/hardware/ensaio-termico.sh e3 [saida.tsv]
 #        tests/hardware/ensaio-termico.sh e3b [saida.tsv]
+#        tests/hardware/ensaio-termico.sh rede [saida.tsv]
 #
 #   e2   o mapa de porcentagem para rotacao, em repouso. Antes dele, dois
 #        exercicios: o vigia (o roteiro leva kill -9 e outro processo devolve
@@ -26,6 +27,15 @@
 #        do comeco ao fim, e quem o abre e voce. Dois minutos em automatico,
 #        para a referencia; cinco com o manual no piso; dois de volta ao
 #        automatico. O roteiro nao liga carga nenhuma.
+#
+#   rede a prova da rede do agente (secao 11 do plano), tambem com um jogo
+#        aberto, e no modo maximo em que a maquina estiver. Dois controles --
+#        um minuto em automatico, um minuto em manual ACIMA do que o
+#        automatico faria -- em que fan_speed nao pode mudar. Depois o manual
+#        no piso, onde fan_speed TEM de voltar a 0,0 por outra mao: a do
+#        agente. O roteiro fica de vigia, com os mesmos limites, e so devolve
+#        a ventoinha ele mesmo se a rede nao agir. E o unico modo em que a
+#        outra mao e o que se espera.
 #
 # O automatico nao tem uma rotacao de repouso: medido em 2026-10-10, ele vai
 # de 2200 a 3800 rpm com a maquina parada, conforme o modo maximo e o que ela
@@ -52,10 +62,12 @@
 #   13  controle positivo falhou: a rotacao nao acompanha a escrita
 #   14  um dos dois exercicios falhou
 #   15  nao conseguiu devolver 0,0 e deixou a ventoinha em 100,100
+#   16  a prova da rede falhou: ela nao agiu no piso, agiu num controle,
+#       devolveu o manual, ou a rotacao nao saiu do manual
 set -u
 
 COD_ALVO=3; COD_LIMITE=10; COD_CONDICAO=11; COD_RECUSA=12
-COD_CONTROLE=13; COD_EXERCICIO=14; COD_DEVOLUCAO=15
+COD_CONTROLE=13; COD_EXERCICIO=14; COD_DEVOLUCAO=15; COD_REDE=16
 
 EU=$(readlink -f "$0")
 R=${ENSAIO_RAIZ:-}                       # vazio na maquina; um tmpdir no teste
@@ -113,6 +125,23 @@ PARTIDA_FOLGA_SEN=${ENSAIO_PARTIDA_FOLGA_SEN:-15000}   # cada SEN* isto abaixo d
 E3B_PRE=${ENSAIO_E3B_PRE:-120}           # com jogo, em automatico: a referencia
 E3B_CARGA=${ENSAIO_E3B_CARGA:-300}       # com jogo, manual no piso
 E3B_DESCIDA=${ENSAIO_E3B_DESCIDA:-120}   # de volta ao automatico, o jogo ainda aberto
+
+# A prova da rede, tambem em amostras. As porcentagens: o automatico com
+# jogo equivale a ~53% de manual com o modo maximo desligado e a ~81% com ele
+# ligado (secao 6 do plano); o controle "acima" fica com folga dos dois. O
+# piso e 20%, o comeco da barra da tela Desempenho: gira o mesmo que 1%.
+REDE_AUTO=${ENSAIO_REDE_AUTO:-60}        # com jogo, em automatico
+REDE_ACIMA=${ENSAIO_REDE_ACIMA:-60}      # com jogo, manual acima do equivalente
+REDE_PISO=${ENSAIO_REDE_PISO:-30}        # quanto se espera a rede, no piso
+REDE_DEPOIS=${ENSAIO_REDE_DEPOIS:-30}    # em automatico, depois de ela agir
+REDE_P_PISO=${ENSAIO_REDE_P_PISO:-20}
+REDE_P_ACIMA=${ENSAIO_REDE_P_ACIMA:-60}
+REDE_P_ACIMA_MAX=${ENSAIO_REDE_P_ACIMA_MAX:-90}
+# O piso so e escrito com a GPU pelo EC a esta distancia do limite. A rede
+# leva de 2 a 4 s para agir, e no piso a GPU sobe um grau por segundo: mais
+# perto que isso, quem chegaria primeiro e o aborto -- e a prova mediria o
+# ponto de partida, nao a rede. O E3b partiu de 79 C, a seis do limite.
+REDE_FOLGA=${ENSAIO_REDE_FOLGA:-6000}
 
 FAN="$R/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"
 PERFIL="$R/sys/firmware/acpi/platform_profile"
@@ -1088,11 +1117,178 @@ modo_e3b() {
     exit 0
 }
 
+# ------------------------------------------------------------------- rede
+# A prova da rede do agente. No resto do roteiro, fan_speed mudar por outra
+# mao encerra a medicao; aqui, no piso, e o que se espera -- e nos dois
+# controles e o que nao pode acontecer.
+
+falha_rede() {   # $1 = o que deu errado. O trap de EXIT devolve a ventoinha.
+    MOTIVO=$1
+    echo "veredito: FALHOU -- $MOTIVO" | tee -a "$RESUMO"
+    termina "$COD_REDE"
+}
+
+modo_rede() {
+    local pa=$REDE_P_ACIMA pp=$REDE_P_PISO nao=0 rc=0 i t0 t0ms dur_ms fatia
+    local a1=() a2=() ms="" agiu=0 p1="" p2="" g0 mg=0 saiu
+    COM_JOGO=1; REPOUSO=0
+    SAIDA=${1:-${XDG_STATE_HOME:-$HOME/.local/state}/nexus-sense/ensaio-rede-$(date +%Y%m%d-%H%M%S).tsv}
+    mkdir -p "$(dirname "$SAIDA")" || exit 1
+    # shellcheck disable=SC2059  # o cabecalho e o formato, de proposito
+    printf "$CABECALHO" > "$SAIDA"
+    RESUMO="${SAIDA%.tsv}.resumo.txt"
+
+    echo "REDE -- a prova da rede do agente, com um jogo aberto. O JOGO E A CARGA."
+    echo "saida: $SAIDA"
+    amostra partida; registra
+    exige_alvos || exit "$COD_ALVO"
+    mostra_condicao
+    recusa() { echo "  RECUSA: $1"; nao=1; }
+    [ "$V_FAN" = "0,0" ] || recusa "fan_speed e '$V_FAN'; a prova so comeca em 0,0 (automatico)"
+    [ "$V_ACAD" = 1 ] || recusa "fora da tomada"
+    eh_num "$V_PCT" && [ "$V_PCT" -ge "$PARTIDA_CARGA" ] \
+        || recusa "bateria em $V_PCT%, abaixo de $PARTIDA_CARGA%"
+    [ "$V_JOGO" = 0 ] && recusa "a prova pede um jogo aberto (nenhum processo casando com $JOGOS)"
+    [ "$nao" = 0 ] || exit "$COD_RECUSA"
+    # O modo maximo fica como estiver, e nao pode mudar no meio: ele troca a
+    # curva do automatico, e com ela o que conta como "acima".
+    PERFIL0=$V_PERFIL; MAX0=$V_MAX
+    [ "$MAX0" = true ] && pa=$REDE_P_ACIMA_MAX
+    verifica; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "  RECUSA: antes de escrever qualquer coisa, $MOTIVO"; exit "$COD_RECUSA"
+    fi
+    echo "perfil $PERFIL0, modo maximo ${MAX0:-?}; com jogo ($V_JOGO processo(s))" > "$RESUMO"
+
+    prepara
+
+    # ---- controle: o automatico, com o jogo
+    dur_ms=$(tempo_ms "$REDE_AUTO")
+    echo
+    echo "CONTROLE, EM AUTOMATICO -- $(( dur_ms / 1000 )) s"
+    t0=$EPOCHSECONDS; t0ms=$(agora_ms)
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        amostra "r:auto"; registra
+        verifica; rc=$?
+        if [ "$rc" -eq "$COD_LIMITE" ]; then
+            MOTIVO="ainda em automatico, $MOTIVO: o limite estoura sem o manual, e a prova nao conta"
+            termina "$COD_CONDICAO"
+        fi
+        [ "$rc" -ne 0 ] && termina "$rc"
+        a1+=("$V_RPM1"); a2+=("$V_RPM2")
+    done
+    echo "controle, em automatico: $(( EPOCHSECONDS - t0 )) s; fan_speed nao saiu de 0,0; rotacao $(mediana "${a1[@]}") / $(mediana "${a2[@]}") rpm, GPU pelo EC $V_ECGPU" \
+        | tee -a "$RESUMO"
+
+    # ---- controle: manual acima do que o automatico faria
+    dur_ms=$(tempo_ms "$REDE_ACIMA")
+    echo
+    echo "CONTROLE, MANUAL A $pa% -- $(( dur_ms / 1000 )) s"
+    if ! escreve "$pa,$pa"; then MOTIVO="a escrita de $pa,$pa foi recusada"; termina "$COD_CONDICAO"; fi
+    t0=$EPOCHSECONDS; t0ms=$(agora_ms)
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        amostra "r:acima"; registra
+        if [ "$V_FAN" = "0,0" ]; then
+            ULTIMO="0,0"
+            falha_rede "no controle, com o manual a $pa%, fan_speed voltou a 0,0 aos $(( EPOCHSECONDS - t0 )) s: a rede agiu onde nao devia, ou alguem escolheu Automatico"
+        fi
+        verifica; rc=$?
+        [ "$rc" -ne 0 ] && termina "$rc"
+    done
+    echo "controle, manual a $pa%: $(( EPOCHSECONDS - t0 )) s; fan_speed nao saiu de $pa,$pa; rotacao $V_RPM1 / $V_RPM2 rpm, GPU pelo EC $V_ECGPU" \
+        | tee -a "$RESUMO"
+
+    # ---- o piso: aqui a outra mao e a rede
+    dur_ms=$(tempo_ms "$REDE_PISO")
+    fatia=$(awk -v p="$PASSO" 'BEGIN { print p / 10 }')
+    echo
+    echo "NO PISO, MANUAL A $pp% -- espera a rede por ate $(( dur_ms / 1000 )) s"
+    g0=$V_ECGPU
+    if acima "$g0" $(( LIM_EC_GPU - REDE_FOLGA + 1 )); then
+        MOTIVO="antes do piso a GPU pelo EC ja esta em $g0, a menos de $REDE_FOLGA do limite ($LIM_EC_GPU): o aborto viria antes de a rede ter tempo, e a prova nao conta"
+        termina "$COD_CONDICAO"
+    fi
+    if ! escreve "$pp,$pp"; then MOTIVO="a escrita de $pp,$pp foi recusada"; termina "$COD_CONDICAO"; fi
+    t0=$EPOCHSECONDS; t0ms=$(agora_ms); rc=0
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        # Entre duas amostras, so fan_speed: o driver o responde de memoria, e
+        # e ele que da o instante em que a rede agiu.
+        for ((i = 0; i < 10; i++)); do
+            if [ "$(le "$FAN")" = "0,0" ]; then ms=$(( $(agora_ms) - t0ms )); break; fi
+            sleep "$fatia"
+        done
+        amostra "r:piso"; registra
+        maior mg "$V_ECGPU"
+        if [ "$V_FAN" = "0,0" ]; then
+            [ -n "$ms" ] || ms=$(( $(agora_ms) - t0ms ))
+            agiu=1; ULTIMO="0,0"
+            break
+        fi
+        ms=
+        verifica; rc=$?
+        [ "$rc" -ne 0 ] && break
+        p1=$V_RPM1; p2=$V_RPM2
+    done
+
+    if [ "$agiu" != 1 ]; then
+        # Outro valor em fan_speed, o jogo fechou, bateria, prazo: nao conta.
+        [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
+        if [ "$rc" -eq "$COD_LIMITE" ]; then
+            echo "no piso, manual a $pp%: a rede NAO agiu antes do limite: $MOTIVO, aos $(( EPOCHSECONDS - t0 )) s" \
+                | tee -a "$RESUMO"
+            echo "veredito: FALHOU -- o limite veio antes da rede" | tee -a "$RESUMO"
+            termina "$COD_LIMITE"
+        fi
+        echo "no piso, manual a $pp%: a rede NAO agiu em $(( EPOCHSECONDS - t0 )) s; GPU pelo EC de $g0 a no maximo $mg; rotacao $V_RPM1 / $V_RPM2 rpm" \
+            | tee -a "$RESUMO"
+        # Quem devolve a ventoinha daqui e o trap de EXIT, como em todo aborto.
+        falha_rede "a rede nao agiu no prazo do piso, e nenhum limite estourou"
+    fi
+
+    echo "no piso, manual a $pp%: a rede devolveu o automatico em $ms ms; GPU pelo EC de $g0 a $V_ECGPU; rotacao no piso ${p1:-?} / ${p2:-?} rpm" \
+        | tee -a "$RESUMO"
+    if ! eh_num "$p1" || ! eh_num "$p2"; then
+        falha_rede "fan_speed voltou a 0,0 antes da primeira amostra no piso: nao ha rotacao de referencia"
+    fi
+    # fan_speed e a memoria do driver. Quem diz que o EC largou o manual e a
+    # rotacao -- e ela tem de sair do piso, nao de chegar a um numero.
+    saiu=$(rotacao_largou 15 "$p1" "$p2" "$QUEDA_RPM" qualquer); rc=$?
+    echo "$saiu" | tee -a "$RESUMO"
+    [ "$rc" -eq 0 ] || falha_rede "fan_speed voltou a 0,0, mas a rotacao nao saiu do manual"
+
+    # ---- depois: a rede nao devolve o manual
+    dur_ms=$(tempo_ms "$REDE_DEPOIS")
+    t0=$EPOCHSECONDS; t0ms=$(agora_ms)
+    while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
+        sleep "$PASSO"
+        amostra "r:depois"; registra
+        if [ "$V_FAN" = "$pp,$pp" ]; then
+            # E o manual desta prova, de volta: quem o devolve e o roteiro.
+            ULTIMO=$V_FAN
+            falha_rede "depois de a rede agir, fan_speed voltou a $V_FAN aos $(( EPOCHSECONDS - t0 )) s"
+        fi
+        verifica; rc=$?
+        N_PAC=0
+        # O limite que quase estourou ainda esta la, esfriando, com a
+        # ventoinha ja em automatico: nao ha mais o que devolver.
+        [ "$rc" -eq "$COD_CONDICAO" ] && termina "$rc"
+    done
+    echo "depois: $(( EPOCHSECONDS - t0 )) s em automatico; fan_speed nao saiu de 0,0; rotacao $V_RPM1 / $V_RPM2 rpm, GPU pelo EC $V_ECGPU" \
+        | tee -a "$RESUMO"
+    echo "veredito: PASSOU -- a rede agiu no piso antes de qualquer limite, e nao agiu nos dois controles" \
+        | tee -a "$RESUMO"
+    echo "Prova terminada. Resumo em $RESUMO"
+    exit 0
+}
+
 case "${1:-}" in
     --vigia)  modo_vigia "$2" "$3" "$4" ;;
     _segura)  modo_segura ;;
     e2)       modo_e2 "${2:-}" ;;
     e3)       modo_e3 "${2:-}" ;;
     e3b)      modo_e3b "${2:-}" ;;
-    *)        sed -n '2,54p' "$0"; exit 2 ;;
+    rede)     modo_rede "${2:-}" ;;
+    *)        sed -n '2,66p' "$0"; exit 2 ;;
 esac
