@@ -780,6 +780,21 @@ pede ensaio próprio: o observador, gravando `charge_now`, deixado no ar numa
 sessão de jogo com o modo máximo. E3 mede de carona o caso da CPU a pleno sem
 GPU.
 
+**Medido em 2026-10-10/11, de carona no portão da sessão 2** — o observador
+gravando `charge_now`, o mesmo jogo, cabo ligado o tempo todo:
+
+```
+modo maximo ligado       23:24 a 23:58   2 800 000 -> 2 523 000 uAh   -7,9 pontos em 33 min   0,24 ponto por min
+modo maximo desligado    23:58 a 01:28   2 522 000 -> 2 798 000 uAh   +7,8 pontos em 90 min   recarregou, jogando
+```
+
+É a carga mais pesada que faltava, e deu a queda maior: o dobro da manhã
+(0,12), mais da metade da pior já vista (0,42). E com o modo desligado — e,
+das 00:08 em diante, o perfil de energia em `balanced` — a bateria **subiu**
+com o jogo aberto. A favor de H1, quatro de quatro. O que separa os dez
+primeiros minutos sem o modo (perfil ainda em `performance`) do resto não foi
+olhado.
+
 **O que isso muda no uso.** Jogar na tomada gasta bateria, devagar. Uma sessão
 longa pode levar a carga abaixo de ~40%, e aí o firmware se diz fora da tomada
 (armadilha 27): é por esse caminho que a máquina chega lá sem ninguém tirar o

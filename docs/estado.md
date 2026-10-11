@@ -2705,6 +2705,10 @@ minuto em automático, um em manual acima do equivalente, depois o piso
   ar`, `bandeja: sni`). A segunda foi para entregar o conserto do Manual, que
   o próprio portão achou.
 
+De carona, para a seção 12 do plano: com o modo máximo ligado e o jogo, a
+bateria cedeu 7,9 pontos em 33 minutos com o cabo ligado (0,24 por minuto);
+com o modo desligado, recarregou com o jogo aberto.
+
 ### O que o portão refutou
 
 1. **"Modo máximo desligado quer dizer a curva baixa da ventoinha."** O
