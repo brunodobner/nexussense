@@ -3,7 +3,9 @@
 **Estado: escrito em 2026-10-10, na sub-etapa 4f de
 [plano-melhorias.md](plano-melhorias.md), passado pelo grill e aprovado pelo
 usuário no mesmo dia. A medição (E2, E3 e E3b) rodou também nesse dia: o
-veredito foi R3, e a rede entra.** O que este arquivo afirma está marcado:
+veredito foi R3, e a rede entra. Entrou na sessão 2, em 2026-10-10/11
+(v1.2.8): o que foi feito está no fim da seção 11.** O que este arquivo
+afirma está marcado:
 **lido** (do sysfs, do código ou do kernel, sem provocar nada) ou **medido**
 (observado acontecendo). O resultado de cada ensaio está na seção 6, junto do
 ensaio; o que a execução refutou, em [estado.md](estado.md).
@@ -706,6 +708,27 @@ controles e o piso, com os limites da seção 7 vigiando.
   piso escolhido nessa hora pode tocar os 85 antes de ela agir. Não é dano —
   é o limite de aborto dos ensaios, e a GPU tem alvo próprio em 87.
 
+**O portão, na máquina** — 2026-10-10/11, com o jogo de sempre, pelo modo
+`rede` do roteiro. Os números estão em [estado.md](estado.md):
+
+- sem a rede (v1.2.7), piso com o modo máximo ligado: a GPU pelo EC foi de 73
+  a 85 °C em 22 s, e o roteiro abortou. A rodada tinha de reprovar;
+- com a rede, modo ligado: devolveu o automático em 10,9 s — 3 s depois de a
+  GPU cruzar 76 —, e ela não passou de 80;
+- com a rede, modo desligado: devolveu em 3,6 s, partindo de 78 °C;
+- em automático, e em manual a 90% (modo ligado) e a 60% (desligado), não
+  agiu; depois de agir, não devolveu o manual.
+
+**O que o portão mostrou que este desenho não sabia:** "modo máximo
+desligado" não garante a curva baixa. Com o modo desligado e o perfil de
+energia do sistema ainda em `performance`, o automático seguiu a 6550 rpm por
+oito minutos, e caiu a ~4500 em 90 s quando o perfil foi a `balanced`. O
+PowerMizer, suspeito da sessão 1, já estava liberado. A tabela acima é por
+modo; nesse estado ela arma de menos — 53% em vez de 81% — e a rede deixa em
+paz um manual que está abaixo do automático real. Erra para o lado de não
+mexer. Perguntar ao `power-profiles-daemon` em vez de ler o modo é o conserto
+provável, e pede medir primeiro: foi um experimento, numa noite.
+
 ---
 
 ## 12. A bateria que descarrega com o cabo ligado
@@ -903,7 +926,7 @@ limpo, baseline antes da primeira edição, a suíte inteira antes de cada commi
 | sessão | ramo | o que entra | root, gesto |
 |---|---|---|---|
 | 1 — medição | `termica/1-medicao` | **feita em 2026-10-10, sem versão nova.** O roteiro em `tests/hardware/`, com teste em árvore falsa e um corredor de mutações; E2, E3 e E3b; veredito R3 | sem root. O gesto foi rodar três blocos, e um jogo no último |
-| 2 — a rede | `termica/2-rede` | **a regra mandou.** A função pura, os traços como teste, o agente. Sem mudança na interface. Versão nova, portão com reinstalação | root na reinstalação |
+| 2 — a rede | `termica/2-rede` | **feita em 2026-10-10/11, v1.2.8.** A função pura (`fan_guard.py`), os traços como teste, o agente; o cursor de manual valendo 20 a 100, e Manual que não volta a Automático sozinho na tela; o modo `rede` do roteiro, para o portão | root em duas reinstalações do pacote. O gesto foi um jogo aberto, quatro blocos, e o cursor |
 
 Baseline esperado ao abrir a sessão 2: 387 passam na suíte Python, sem xfail;
 shell 23 passam e 2 pulam, sem root e sob `LC_ALL=C`.

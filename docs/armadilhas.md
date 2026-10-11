@@ -1481,6 +1481,19 @@ automático, o ensaio diz isso e para — não passa.
 E `fan_speed` não serve de prova: é a memória do driver, não o firmware. Quem
 diz o que o EC está fazendo é `fan1_input` e `fan2_input`.
 
+**"Quem troca é o modo máximo" também valeu por um dia.** Em 2026-10-11 o
+modo foi desligado com um jogo aberto e a ventoinha seguiu na curva alta —
+6550 rpm — por oito minutos. O PowerMizer já estava liberado. O que seguia
+ligado era o perfil de energia do sistema, em `performance`; passado a
+`balanced`, ela caiu a ~4500 rpm em 90 s. O modo máximo liga esse perfil, e
+desligá-lo não o desligou. Antes de dizer em que curva o automático está,
+leia o perfil de energia, e não só o `maximum_mode`:
+
+```bash
+busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+    net.hadess.PowerProfiles ActiveProfile
+```
+
 **O que isto tem em comum com a 25.** Quem avisou foi o usuário, que ouve a
 ventoinha todo dia: *"mesmo só com você aberto ela mantém uma faixa superior
 à que você espera"*. O plano tinha medido uma curva, numa manhã, e a chamado
