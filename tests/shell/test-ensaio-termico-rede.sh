@@ -26,13 +26,15 @@ S="$RAIZ/tests/hardware/ensaio-termico.sh"
 # shellcheck source=tests/shell/lib-arvore-termica.sh
 source "$RAIZ/tests/shell/lib-arvore-termica.sh"
 
-# Os tempos, encolhidos: a 0,05 s por amostra cada controle dura um segundo
-# de relogio, e o piso espera a rede por ate 2 s. Cada fase dura tempo de
-# relogio, e uma amostra custa o passo mais a leitura: num segundo cabem
-# umas seis.
+# Os tempos, encolhidos: a 0,05 s por amostra os controles duram um e dois
+# segundos de relogio, o piso espera a rede por ate 3 s e o "depois" dura 2.
+# Cada fase dura tempo de relogio, e uma amostra custa o passo mais a
+# leitura: parada, a maquina faz umas seis por segundo; com um jogo aberto,
+# duas ou tres. As contas abaixo cabem nos dois casos -- com folga curta este
+# teste reprovou um roteiro certo, em 2026-10-11, com a maquina ocupada.
 caso() {     # $1 = nome, $2 = temperamento do EC -> arvore em $D, comando em P
     nova "$1" "${2:-normal}"
-    P=(env ENSAIO_REDE_AUTO=20 ENSAIO_REDE_ACIMA=20 ENSAIO_REDE_PISO=40 ENSAIO_REDE_DEPOIS=10
+    P=(env ENSAIO_REDE_AUTO=20 ENSAIO_REDE_ACIMA=40 ENSAIO_REDE_PISO=60 ENSAIO_REDE_DEPOIS=40
        "$S" rede "$D/rede.tsv")
 }
 
@@ -47,8 +49,8 @@ abre_jogo() {    # e espera o EC de mentira esquentar: pacote e SEN4 no patamar
 }
 
 # A rede de mentira. $1 = arvore, $2 = o fan_speed que a faz agir, $3 = quanto
-# espera antes de escrever 0,0, $4 = devolve: reescreve o manual logo depois,
-# que e o que a rede de verdade nunca pode fazer.
+# espera antes de escrever 0,0, $4 = devolve: reescreve o manual $5 segundos
+# depois, que e o que a rede de verdade nunca pode fazer.
 rede_falsa() {
     local f v
     f=$(FAN_DE "$1")
@@ -58,7 +60,7 @@ rede_falsa() {
         if [ "$v" = "$2" ]; then
             sleep "$3"
             poe "$f" "0,0"
-            if [ "${4:-}" = devolve ]; then sleep 0.2; poe "$f" "$2"; fi
+            if [ "${4:-}" = devolve ]; then sleep "$5"; poe "$f" "$2"; fi
             return 0
         fi
         sleep 0.02
@@ -101,14 +103,14 @@ confere "com um sensor ja no limite em automatico recusa comecar" "$?" 12 "0,0"
 echo "--- a rede age no piso"
 caso rede-age
 abre_jogo
-com_rede "20,20" 0.3
+com_rede "20,20" 1
 roda "$D" "${P[@]}"
 confere "a rede age no piso: termina com 0 e a ventoinha em automatico" "$?" 0 "0,0"
 if tem_fases "prova completa" r:auto r:acima r:piso r:depois; then
     awk -F'\t' '$3 == "r:auto" && ($4 != "0,0" || $5 != "0,0") { r = 1 } END { exit r }' "$D/rede.tsv" \
         && ok "o primeiro controle roda em automatico" \
         || falha "o primeiro controle escreveu na ventoinha"
-    awk -F'\t' '$3 == "r:acima" && $4 == "60,60" && $5 == "60,60" { n++ } END { exit !(n >= 4) }' "$D/rede.tsv" \
+    awk -F'\t' '$3 == "r:acima" && $4 == "60,60" && $5 == "60,60" { n++ } END { exit !(n >= 3) }' "$D/rede.tsv" \
         && ok "o segundo controle roda em manual a 60%, acima do equivalente do modo desligado" \
         || falha "o segundo controle nao rodou a 60%"
     awk -F'\t' '$3 == "r:piso" && $4 == "20,20" && $5 == "20,20" { n++ } END { exit !(n >= 2) }' "$D/rede.tsv" \
@@ -130,10 +132,10 @@ grep -q 'modo maximo false' "$D/rede.resumo.txt" \
 caso rede-age-maximo
 abre_jogo
 poe "$D/config.toml" "maximum_mode = true"
-com_rede "20,20" 0.3
+com_rede "20,20" 1
 roda "$D" "${P[@]}"
 confere "com o modo maximo ligado a prova roda, e termina com 0" "$?" 0 "0,0"
-awk -F'\t' '$3 == "r:acima" && $4 == "90,90" && $5 == "90,90" { n++ } END { exit !(n >= 4) }' "$D/rede.tsv" \
+awk -F'\t' '$3 == "r:acima" && $4 == "90,90" && $5 == "90,90" { n++ } END { exit !(n >= 3) }' "$D/rede.tsv" \
     && ok "com o modo maximo ligado, o controle acima do equivalente e a 90%" \
     || falha "com o modo maximo ligado, o controle nao rodou a 90%"
 grep -q 'modo maximo true' "$D/rede.resumo.txt" \
@@ -189,7 +191,7 @@ tem_fases "controle falhado" r:acima \
 
 caso rede-limite-no-automatico
 abre_jogo
-P=(env ENSAIO_REDE_AUTO=80 ENSAIO_REDE_ACIMA=10 ENSAIO_REDE_PISO=40 ENSAIO_REDE_DEPOIS=10 "$S" rede "$D/rede.tsv")
+P=(env ENSAIO_REDE_AUTO=120 ENSAIO_REDE_ACIMA=10 ENSAIO_REDE_PISO=40 ENSAIO_REDE_DEPOIS=10 "$S" rede "$D/rede.tsv")
 lanca "$D" "${P[@]}"
 for ((i = 0; i < 100; i++)); do
     cut -f3 "$D/rede.tsv" 2> /dev/null | grep -qxF r:auto && break
@@ -204,7 +206,7 @@ confere "limite que estoura ainda em automatico: a prova nao conta, sai com 11" 
 # chega a ser escrito.
 caso rede-sem-folga
 abre_jogo
-com_rede "20,20" 0.3
+com_rede "20,20" 1
 lanca "$D" "${P[@]}"
 if espera_fan "$D" "60,60" 100; then
     poe "$D/sys/class/hwmon/hwmon7/temp2_input" 80000
@@ -221,7 +223,7 @@ fi
 caso rede-com-folga
 abre_jogo
 poe "$D/sys/class/hwmon/hwmon7/temp2_input" 79000
-com_rede "20,20" 0.3
+com_rede "20,20" 1
 roda "$D" "${P[@]}"
 confere "GPU a seis graus do limite antes do piso: a prova roda" "$?" 0 "0,0"
 
@@ -229,16 +231,26 @@ confere "GPU a seis graus do limite antes do piso: a prova roda" "$?" 0 "0,0"
 echo "--- a rotacao, e nao so fan_speed"
 caso rede-gruda gruda
 abre_jogo
-com_rede "20,20" 0.3
+com_rede "20,20" 1
 roda "$D" "${P[@]}"
 confere "fan_speed volta a 0,0 e a rotacao fica no piso: sai com 16" "$?" 16 "0,0"
 resumo_diz "o resumo diz que a rotacao nao saiu do manual" 'a rotacao NAO saiu do manual'
+
+# O manual volta ENQUANTO o roteiro ainda confere a rotacao: fan_speed diz o
+# piso, o jogo esta aberto, e a rede -- que acabou de errar -- nao e quem vai
+# socorrer. Sair com 16 nao basta: o roteiro e o vigia, e tem de devolver.
+# Apareceu como oscilacao deste teste, com a maquina ocupada.
+caso rede-gruda-e-devolve gruda
+abre_jogo
+com_rede "20,20" 1 devolve 0.2
+roda "$D" "${P[@]}"
+confere "o manual volta durante a conferencia da rotacao: sai com 16, e o roteiro devolve" "$?" 16 "0,0"
 
 # ─── 6. depois de agir, a rede nao devolve o manual ─────────────────
 echo "--- depois de agir"
 caso rede-devolve-o-manual
 abre_jogo
-com_rede "20,20" 0.3 devolve
+com_rede "20,20" 1 devolve 0.8
 roda "$D" "${P[@]}"
 confere "o manual do piso reaparece depois de a rede agir: sai com 16, e o roteiro devolve" "$?" 16 "0,0"
 resumo_diz "o resumo diz que o manual voltou" 'depois de a rede agir, fan_speed voltou a 20,20'

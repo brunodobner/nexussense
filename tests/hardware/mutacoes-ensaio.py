@@ -203,6 +203,8 @@ MUT = [
     ("rede: o manual de volta depois de a rede agir nao e acusado", REDE,
      '        if [ "$V_FAN" = "$pp,$pp" ]; then\n            # E o manual desta prova',
      '        if false; then\n            # E o manual desta prova'),
+    ("rede: o manual de volta e acusado, e fica no piso", REDE,
+     '    [ -n "$REDE_VALOR" ] && [ "$(le "$FAN")" = "$REDE_VALOR" ] && ULTIMO=$REDE_VALOR\n', ''),
 ]
 
 # Mutacoes que nao mudam o que o roteiro faz, e por isso nao tem como

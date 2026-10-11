@@ -1122,8 +1122,14 @@ modo_e3b() {
 # mao encerra a medicao; aqui, no piso, e o que se espera -- e nos dois
 # controles e o que nao pode acontecer.
 
+REDE_VALOR=      # o piso que a prova escreveu, depois de escrito
+
 falha_rede() {   # $1 = o que deu errado. O trap de EXIT devolve a ventoinha.
     MOTIVO=$1
+    # Depois de a rede agir o roteiro espera 0,0. Se o piso desta prova
+    # reapareceu em fan_speed -- uma rede que devolve o manual -- ele nao e
+    # "outra mao" a respeitar: e o que se veio vigiar, com um jogo aberto.
+    [ -n "$REDE_VALOR" ] && [ "$(le "$FAN")" = "$REDE_VALOR" ] && ULTIMO=$REDE_VALOR
     echo "veredito: FALHOU -- $MOTIVO" | tee -a "$RESUMO"
     termina "$COD_REDE"
 }
@@ -1211,6 +1217,7 @@ modo_rede() {
         termina "$COD_CONDICAO"
     fi
     if ! escreve "$pp,$pp"; then MOTIVO="a escrita de $pp,$pp foi recusada"; termina "$COD_CONDICAO"; fi
+    REDE_VALOR="$pp,$pp"
     t0=$EPOCHSECONDS; t0ms=$(agora_ms); rc=0
     while [ $(( $(agora_ms) - t0ms )) -lt "$dur_ms" ]; do
         # Entre duas amostras, so fan_speed: o driver o responde de memoria, e
@@ -1265,8 +1272,7 @@ modo_rede() {
         sleep "$PASSO"
         amostra "r:depois"; registra
         if [ "$V_FAN" = "$pp,$pp" ]; then
-            # E o manual desta prova, de volta: quem o devolve e o roteiro.
-            ULTIMO=$V_FAN
+            # E o manual desta prova, de volta: falha_rede manda devolve-lo.
             falha_rede "depois de a rede agir, fan_speed voltou a $V_FAN aos $(( EPOCHSECONDS - t0 )) s"
         fi
         verifica; rc=$?
