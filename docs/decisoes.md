@@ -615,3 +615,49 @@ fork perde a razão de ser e a decisão deve ser revista. E as **correções de
 bug** deste driver — armadilhas 15, 24, 3 e 3b, que são defeitos do upstream e
 valem para qualquer Acer — continuam sendo contribuições defensáveis, se algum
 dia houver vontade. Nada impede mandar só elas.
+
+---
+
+## 22. Não há CI
+
+**De 2026-10-09 a 2026-10-11 houve.** A decisão D7 do plano de melhorias pôs
+dois fluxos no GitHub Actions: as suítes e o shellcheck a cada push, num
+container Arch, e o módulo compilado contra o kernel do Arch toda segunda.
+
+**Decidido pelo usuário em 2026-10-11: desligar de vez.** O motivo é dele, e
+é de escala: o projeto é de uma máquina e de uma pessoa, cada push custava
+dez minutos de espera e onze de Actions da conta, e na noite da v1.2.9 foram
+quatro rodadas — a última por uma linha de documento. Perguntado pelo efeito,
+entre cancelar só aquela rodada, rodar só a pedido, desligar ou deixar, ele
+escolheu desligar.
+
+**O que se perdeu, sabendo:**
+
+- **o shellcheck.** Ele não está instalado nesta máquina, e era o CI quem o
+  rodava: foi lá que apareceram os três erros antigos do `setup.sh` e os
+  quatro avisos do apoio dos testes do ensaio. Quem escrever shell novo e
+  quiser a conferência instala o pacote e roda à mão:
+
+  ```bash
+  shellcheck -S warning $(find . -name '*.sh' -not -path './.git/*')
+  ```
+
+- **a suíte numa máquina que não é esta.** O container não tinha Nitro, nem
+  driver, nem sessão gráfica: pegava o teste que só passa por causa do
+  ambiente de quem o roda (armadilha 30). As iscas do `conftest.py` e os
+  códigos de pulo continuam; o que saiu foi a máquina limpa que os cobrava.
+- **o aviso antecipado de API do kernel.** O módulo era compilado contra os
+  headers do Arch antes de o kernel novo chegar aqui. Quem avisa agora é só o
+  gancho do pacman, depois da atualização (armadilha 26).
+
+**O que guarda a decisão.** `tests/shell/test-arvore.sh` reprova se
+`.github/workflows` voltar a existir: um fluxo que reapareça sem decisão
+volta a gastar os minutos da conta a cada push.
+
+**Como trazer de volta, se um dia for o caso.** Os dois fluxos e o teste que
+os guardava (`tests/shell/test-ci.sh`) estão no histórico, inteiros, no
+commit `d122db6`:
+
+```bash
+git show d122db6:.github/workflows/ci.yml
+```
