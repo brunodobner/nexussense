@@ -133,6 +133,27 @@ temperatura (48 a 50 °C). O que o modo liga que o EC enxerga não foi apurado
 — o pedido de PowerMizer que o agente segura é o suspeito, e o
 `nvidia-powerd` está no ar.
 
+**O jogo com o modo máximo ligado**, que é como o usuário costuma jogar, foi
+medido no mesmo dia, das 21:26:43 às 21:52:28, pelo mesmo observador: 300
+amostras, todas em automático, com o jogo aberto e o cabo ligado.
+
+```
+                         jogo, modo maximo       jogo, modo maximo
+                         DESLIGADO (manha)       LIGADO (noite)
+ventoinha, rpm           4414 / 4003             6318 / 5984   (ate 6594 / 6213)
+pacote, media e maximo   84 / 96 C               80 / 93
+GPU pelo EC              78 / 81                 71 / 75
+SEN2                     76 / 79                 71 / 75
+SEN4                     86 / 89                 79 / 83
+tempo em throttle        18,0%                   8,9%
+frequencia media         2931 MHz                3291 MHz
+bateria                  -0,12 ponto por min     -0,15 ponto por min
+```
+
+Com o modo ligado a máquina joga **mais fria e mais rápida**, porque a
+ventoinha gira 1900 rpm a mais. Na virada, com o jogo aberto, ela foi de 4455
+a 6594 rpm em menos de trinta segundos.
+
 Três coisas mudam com isso:
 
 - **4400 rpm não é o teto.** Com o modo máximo ligado o automático foi a
@@ -321,6 +342,7 @@ O que isso responde:
                               modo maximo desligado     modo maximo ligado
   automatico parado           2240 / 1990 = 25% / 23%   3350 / 2890 = 39% / 35%
   automatico quente           4400 / 4000 = 53% / 50%   6196 / 5689 = 79% / 77%
+  automatico com jogo         4414 / 4003 = 53% / 50%   6318 / 5984 = 81% / 82%
   ```
 
 - **100% gira 7539 rpm, e o automático nunca passou de 6196.** O EC não usa a
@@ -801,10 +823,10 @@ shell 23 passam e 2 pulam, sem root e sob `LC_ALL=C`.
 - **Agir em segundos, não em 30.** Com jogo e a ventoinha no piso, a GPU
   sobe um grau por segundo.
 - **"Abaixo do automático" são duas porcentagens:** ~53% com o modo máximo
-  desligado, ~79% com ele ligado. O agente sabe em qual está.
-- **Falta a linha de base do jogo com o modo máximo ligado**, que é como o
-  usuário costuma jogar. Sai do observador da seção 13, numa sessão de jogo
-  dele — sem ensaio.
+  desligado, ~81% com ele ligado. O agente sabe em qual está.
+- **A linha de base do jogo com o modo máximo ligado já existe** (seção 2):
+  ventoinha a 6318 / 5984 rpm, que é ~81% de manual. O traço é
+  `passivo-20261010-maximo.tsv`.
 - **Os traços** estão em `~/.local/state/nexus-sense/`, fora do repositório:
   o do E2 (56 kB), o do E3 (179 kB) e o do E3b (40 kB). O que virar teste
   entra recortado.

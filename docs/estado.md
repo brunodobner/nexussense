@@ -2514,9 +2514,13 @@ O que o usuário decidiu no caminho, além do que está na seção da 4f:
 
 ### Visto e não consertado
 
-- **O jogo com o modo máximo ligado não foi medido.** A curva do automático é
-  outra (armadilha 37); falta a linha de base dela, que sai de graça do
-  observador passivo numa sessão de jogo com o modo ligado.
+- **O jogo com o modo máximo ligado foi medido depois do merge**, das 21:26
+  às 21:52 do mesmo dia, pelo observador passivo: ventoinha a 6318 / 5984
+  rpm, contra 4414 / 4003 com o modo desligado; GPU pelo EC a 71 °C em vez de
+  78; throttle em 8,9% do tempo em vez de 18%. Com o modo ligado a máquina
+  joga mais fria e mais rápida. A tabela está na seção 2 do plano. **O E3b
+  com o modo ligado não foi feito**: a ventoinha no piso, com esse modo, fica
+  ainda mais longe do que o automático faria.
 - **Onde as zonas de placa iriam parar com um jogo e a ventoinha no piso** o
   E3b não diz: abortou aos 7 s, pela GPU.
 - **Por que o modo máximo troca a curva da ventoinha** não foi apurado.
@@ -2540,7 +2544,7 @@ passam e 2 pulam — sem root e sob `LC_ALL=C`.
 **O que vale para ela:**
 
 - a rede só arma com o manual abaixo do que o automático faria, e isso são
-  duas porcentagens — ~53% com o modo máximo desligado, ~79% com ele ligado;
+  duas porcentagens — ~53% com o modo máximo desligado, ~81% com ele ligado;
 - age em segundos: com jogo e a ventoinha no piso a GPU sobe um grau por
   segundo;
 - disparada, escreve `0,0`, **fica em automático** e avisa **só no journal** —
