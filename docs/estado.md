@@ -2823,6 +2823,10 @@ vigia de leitura no ar, o usuário clicou em Manual a partir do Automático:
 
 O caminho a partir do Máximo não foi feito à mão; está nos testes.
 
+**O CI da v1.2.9**, no push de `baf6fef`: verde. Shellcheck, e pytest e a
+suíte shell como usuário e como root, em 9 min. O push que traz esta linha
+dispara mais uma rodada, sobre uma árvore que só difere dela neste arquivo.
+
 **E a rede disparou sozinha, no uso, sem roteiro nenhum.** Às 01:52, enquanto
 o usuário conferia o Manual da v1.2.8 com o jogo aberto, ele levou os
 cursores ao mínimo pela janela, e o journal tem a linha:
