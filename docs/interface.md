@@ -250,8 +250,18 @@ Três modos, e não um cursor solto: **Automático**, **Máximo** e
 números não querem dizer nada, e mostrá-los convidaria a mexer num valor
 que o driver ignora.
 
-Entrar em manual **não escreve sozinho**. Quem manda na ventoinha é quem
-move o cursor.
+**Os três botões escrevem na hora.** Manual aplica o que os cursores
+mostram: vindo do automático eles estão no começo da barra, e a ventoinha vai
+ao piso no clique. Até a v1.2.8 entrar em manual só revelava os cursores, e
+nada era escrito até um deles mudar de valor — regra que fazia sentido quando
+o cursor em 0 queria dizer automático. Com a barra valendo 20 a 100 a tela
+passou a mostrar Manual, cursores no mínimo, e a ventoinha em automático;
+para baixá-la era preciso subir e descer o cursor. Decisão do usuário, em
+2026-10-11, depois de ver isso na máquina.
+
+A tela fica em Manual enquanto o firmware disser o par que ela escreveu —
+inclusive `100,100`, que é o mesmo par do botão Máximo. Se outra mão
+escrever (a rede do agente, a bandeja), ela mostra o que o firmware diz.
 
 **O cursor vai de 0 a 100 na tela e vale 20 a 100 no firmware**
 (`firmware = 20 + barra × 0,8`, em `model.fan_bar_to_firmware`). De 20% para
