@@ -2822,7 +2822,9 @@ vigia de leitura no ar, o usuário clicou em Manual a partir do Automático:
 02:08:49.116   fan_speed 20,20 -> 0,0     o clique em Automatico; a rotacao ja estava em 2071 / 1718
 ```
 
-O caminho a partir do Máximo não foi feito à mão; está nos testes.
+O caminho a partir do Máximo foi conferido pelo usuário depois, à mão: entrou
+em Manual vindo do Máximo e os cursores apareceram no fim da barra, e
+ficaram.
 
 **O CI da v1.2.9**, no push de `baf6fef`: verde. Shellcheck, e pytest e a
 suíte shell como usuário e como root, em 9 min. O push que traz esta linha
