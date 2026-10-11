@@ -913,6 +913,7 @@ cat /sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_count \
 | 5 | como você fica sabendo | **só o journal** — contra a recomendação, que era uma linha na janela |
 | 6 | piso no cursor, se houver porcentagem que para a ventoinha | decide depois de ver E2. **E2 feito: nenhuma para; de 20% para baixo o cursor não muda nada.** **Decidido pelo usuário em 2026-10-10: a barra segue de 0 a 100 na tela e vale 20 a 100 no firmware** — `firmware = 20 + barra × 0,8`. A faixa morta some, e some também o "0 num lado só" (ventoinha em automático passa a ser só pelo botão). Entra na sessão 2 |
 | 7 | potência da fonte | 135 W, lido da etiqueta |
+| 8 | ao clicar em Manual, o que a ventoinha faz | **aplica na hora o que os cursores mostram** — decidido em 2026-10-11, depois do portão da sessão 2. Com os cursores no começo da barra, vai ao piso no clique; a rede cobre o caso do jogo aberto. Entrou na v1.2.9 |
 
 **Ainda suas** — autorização, e é o que a aprovação deste plano quer dizer:
 

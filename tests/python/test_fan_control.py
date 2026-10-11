@@ -99,14 +99,19 @@ def test_escolher_maximo_escreve_cem_cem(qtbot, fake_root):
     assert (fake_root / SENSE / "fan_speed").read_text().strip() == "100,100"
 
 
-def test_entrar_em_manual_nao_escreve_sozinho(qtbot, fake_root):
-    """So mostrar os controles nao pode mexer na ventoinha: quem escreve
-    e o usuario, ao mover o cursor ou confirmar."""
+def test_entrar_em_manual_aplica_na_hora_o_que_os_cursores_mostram(qtbot, fake_root):
+    """Ate 2026-10-11 entrar em manual so mostrava os cursores, e nada era
+    escrito ate um deles mudar de valor. Com a barra valendo 20 a 100 isso
+    virou mentira na tela: Manual marcado, cursores no minimo, e a
+    ventoinha em automatico -- para baixa-la era preciso subir e descer o
+    cursor. Decisao do usuario: o clique aplica o que os cursores mostram."""
     p = pagina(qtbot, fake_root)
     escritas = []
-    p.controls.sysfs.write = lambda caminho, valor: escritas.append(valor)
+    escreve = p.controls.sysfs.write
+    p.controls.sysfs.write = lambda caminho, valor: (escritas.append(valor), escreve(caminho, valor))
     p.fan_buttons["manual"].click()
-    assert escritas == []
+    assert escritas == ["20,20"]
+    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "20,20"
 
 
 def test_mover_o_cursor_escreve_o_par(qtbot, fake_root):
@@ -160,15 +165,16 @@ def test_escolher_automatico_cancela_a_escrita_pendente_do_cursor(qtbot, fake_ro
     assert (fake_root / SENSE / "fan_speed").read_text().strip() == "0,0"
 
 
-# ------------------------------------- escolher Manual sem mexer no cursor
+# ---------------------------------- escolher Manual, e a tela que repinta
 #
-# Entrar em manual nao escreve. A janela repinta pelo firmware a cada
-# passada da bandeja, e ele ainda diz 0,0: a escolha tem de sobreviver a
-# isso ate o primeiro cursor se mexer. Visto pelo usuario em 2026-10-11:
-# "tentei colocar no manual e o app forcou 2x modo automatico".
+# A janela repinta pelo firmware a cada passada da bandeja. Visto pelo
+# usuario em 2026-10-11: "tentei colocar no manual e o app forcou 2x modo
+# automatico" -- entrar em manual nao escrevia, o firmware seguia em 0,0, e
+# a repintura remarcava Automatico. Hoje o clique escreve, e a tela fica em
+# Manual enquanto o firmware disser o que ela escreveu.
 
 
-def test_escolher_manual_sobrevive_a_repintura_antes_de_mexer_no_cursor(qtbot, fake_root):
+def test_escolher_manual_sobrevive_a_repintura(qtbot, fake_root):
     p = pagina(qtbot, fake_root)
     p.fan_buttons["manual"].click()
 
@@ -178,14 +184,63 @@ def test_escolher_manual_sobrevive_a_repintura_antes_de_mexer_no_cursor(qtbot, f
     assert p.fan_manual_box.isVisible() is True
     assert p.fan_buttons["manual"].isChecked() is True
     assert p.fan_buttons["auto"].isChecked() is False
-    # E continua sem escrever: quem manda na ventoinha e o cursor.
-    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "0,0"
+    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "20,20"
 
 
-def test_depois_de_escrever_a_tela_volta_a_seguir_o_firmware(qtbot, fake_root):
-    """A escolha pendente acaba na primeira escrita. Dali em diante, se o
-    firmware voltar a 0,0 por outra mao -- a rede do agente, a bandeja --
-    a tela mostra Automatico."""
+def test_manual_a_partir_do_maximo_fica_em_manual(qtbot, tmp_path):
+    """Em maximo os cursores estao em 100, e o clique escreve 100,100 -- o
+    mesmo par que o firmware ja dizia. Sem lembrar que foi a tela que o
+    escreveu, a repintura leria "maximo" e esconderia os cursores."""
+    raiz = build_tree(tmp_path / "t")
+    (raiz / SENSE / "fan_speed").write_text("100,100\n")
+    p = pagina(qtbot, raiz)
+    assert p.fan_buttons["max"].isChecked() is True
+
+    p.fan_buttons["manual"].click()
+    p.apply_state(read_state(Sysfs(raiz)))
+
+    assert (raiz / SENSE / "fan_speed").read_text().strip() == "100,100"
+    assert p.fan_buttons["manual"].isChecked() is True
+    assert p.fan_manual_box.isVisible() is True
+    assert p.fan_sliders["cpu"].value() == 100
+
+
+def test_arrastar_os_dois_cursores_a_100_nao_tira_a_tela_do_manual(qtbot, fake_root):
+    p = pagina(qtbot, fake_root)
+    p.fan_buttons["manual"].click()
+    p.fan_sliders["cpu"].setValue(100)
+    p.fan_sliders["gpu"].setValue(100)
+    alvo = fake_root / SENSE / "fan_speed"
+    qtbot.waitUntil(lambda: alvo.read_text().strip() == "100,100", timeout=2000)
+
+    p.apply_state(read_state(Sysfs(fake_root)))
+
+    assert p.fan_buttons["manual"].isChecked() is True
+    assert p.fan_manual_box.isVisible() is True
+
+
+def test_escrita_recusada_ao_entrar_em_manual_deixa_a_tela_com_o_firmware(qtbot, fake_root):
+    """O clique nao conseguiu escrever: a ventoinha segue em automatico, e a
+    tela nao pode dizer outra coisa."""
+    p = pagina(qtbot, fake_root)
+
+    def recusa(caminho, valor):
+        raise OSError(errno.EACCES, "Permission denied")
+
+    p.controls.sysfs.write = recusa
+    p.fan_buttons["manual"].click()
+    assert "grupo" in p.message_label.text()
+
+    p.apply_state(read_state(Sysfs(fake_root)))
+
+    assert p.fan_buttons["auto"].isChecked() is True
+    assert p.fan_manual_box.isVisible() is False
+
+
+def test_se_outra_mao_devolve_o_automatico_a_tela_mostra_automatico(qtbot, fake_root):
+    """A tela so segura o Manual enquanto o firmware disser o que ela
+    escreveu. Se ele voltar a 0,0 por outra mao -- a rede do agente, a
+    bandeja -- ela mostra Automatico."""
     p = pagina(qtbot, fake_root)
     p.fan_buttons["manual"].click()
     p.fan_sliders["cpu"].setValue(50)
@@ -199,18 +254,19 @@ def test_depois_de_escrever_a_tela_volta_a_seguir_o_firmware(qtbot, fake_root):
     assert p.fan_manual_box.isVisible() is False
 
 
-def test_escolher_automatico_desfaz_a_escolha_pendente(qtbot, fake_root):
+def test_escolher_automatico_depois_de_manual_fica_em_automatico(qtbot, fake_root):
     p = pagina(qtbot, fake_root)
     p.fan_buttons["manual"].click()
     p.fan_buttons["auto"].click()
     p.apply_state(read_state(Sysfs(fake_root)))
     assert p.fan_buttons["auto"].isChecked() is True
     assert p.fan_manual_box.isVisible() is False
+    assert (fake_root / SENSE / "fan_speed").read_text().strip() == "0,0"
 
 
-def test_a_escolha_pendente_nao_esconde_um_maximo_vindo_de_fora(qtbot, fake_root):
-    """Manual escolhido e nenhum cursor mexido; a bandeja poe a ventoinha
-    no maximo. O firmware saiu do automatico: a tela mostra o que ele diz."""
+def test_um_maximo_vindo_de_fora_aparece_como_maximo(qtbot, fake_root):
+    """Manual escolhido, no minimo; a bandeja poe a ventoinha no maximo. O
+    par nao e o que a tela escreveu: ela mostra o que o firmware diz."""
     p = pagina(qtbot, fake_root)
     p.fan_buttons["manual"].click()
     (fake_root / SENSE / "fan_speed").write_text("100,100\n")
