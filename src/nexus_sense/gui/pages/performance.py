@@ -144,6 +144,11 @@ class PerformancePage(QWidget):
         self.buttons = {}
         # Guarda contra o setValue que emite valueChanged ao repintar.
         self._aplicando = False
+        # Manual escolhido e nenhum cursor mexido ainda. Entrar em manual
+        # nao escreve, entao o firmware segue dizendo 0,0 -- e sem isto a
+        # repintura seguinte, que vem a cada passada da bandeja, remarcava
+        # Automatico e escondia os cursores.
+        self._manual_pendente = False
         self._fan_timer = QTimer(self)
         self._fan_timer.setSingleShot(True)
         self._fan_timer.setInterval(ATRASO_CURSOR_MS)
@@ -225,6 +230,7 @@ class PerformancePage(QWidget):
         # Quem acabou de arrastar e clicou em Automatico quer automatico:
         # a escrita pendente do cursor nao pode chegar depois e desfazer.
         self._fan_timer.stop()
+        self._manual_pendente = modo == "manual"
         self._marca_modo(modo)
         if modo == "manual":
             self.fan_manual_box.setVisible(True)
@@ -240,6 +246,9 @@ class PerformancePage(QWidget):
         self._fan_timer.start()
 
     def _escreve_cursores(self):
+        # A escolha virou escrita: daqui em diante a tela segue o firmware,
+        # inclusive se a rede do agente devolver o automatico.
+        self._manual_pendente = False
         # A barra vale do piso do firmware a 100: ver model.FAN_FLOOR.
         self._escreve_ventoinha(
             model.fan_bar_to_firmware(self.fan_sliders["cpu"].value()),
@@ -281,6 +290,11 @@ class PerformancePage(QWidget):
             return
 
         modo = fan_mode(state.fan_speed)
+        if self._manual_pendente and modo == "auto":
+            modo = "manual"
+        else:
+            # O firmware saiu do automatico por outra mao, ou nao ha leitura.
+            self._manual_pendente = False
         self._marca_modo(modo)
         self.fan_manual_box.setVisible(modo == "manual")
         if state.fan_speed is not None:
