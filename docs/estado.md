@@ -2555,6 +2555,132 @@ passam e 2 pulam — sem root e sob `LC_ALL=C`.
 
 ---
 
+## Rede térmica, sessão 2 — a rede no agente
+
+Ramo `termica/2-rede`, em 2026-10-10, numa sessão nova. **v1.2.7 → v1.2.8.**
+O que existe:
+
+| | |
+|---|---|
+| `src/nexus_sense/fan_guard.py` | a rede, como função pura: `armada` e `decide` |
+| `agent.py`, `_guarda_ventoinha` | o que o agente faz em volta dela, no fim de cada passada |
+| `telemetry.acer_gpu_temp` | a GPU pelo EC, do canal que o driver rotula `GPU` |
+| `model.fan_bar_to_firmware`, `fan_firmware_to_bar` | o cursor de 0 a 100 na tela, 20 a 100 no firmware |
+| `tests/python/tracos/` | os cinco traços da medição, recortados por `tests/hardware/recorta-tracos.py` |
+| `tests/hardware/ensaio-termico.sh rede` | a prova na máquina: dois controles e o piso, com os limites da seção 7 |
+| `tests/hardware/observador.sh` | o observador passivo, que vivia no scratchpad |
+| `tests/hardware/mutacoes-rede.py` | o corredor de mutações da rede |
+
+O desenho que entrou, e onde ele difere do provisório, está no fim da seção
+11 de [plano-termico.md](plano-termico.md).
+
+### Os limiares, tirados dos traços
+
+A rede só arma com o manual abaixo do equivalente do modo corrente (53% /
+50% com o modo máximo desligado, 81% / 82% com ele ligado) e dispara com a
+GPU pelo EC a **76 °C ou mais**, a rotação abaixo da do automático, em **duas
+passadas seguidas** de 2 s.
+
+```
+                                         GPU pelo EC, C
+                                         p5   media   p95   maximo
+E3, piso, so CPU, 10 min                 --    --     --     69
+jogo em automatico, modo maximo ligado   59   71,3    74     75      422 amostras
+jogo em automatico, modo desligado       74   79,6    82     84     1113 amostras
+E3b, manual no piso                      79 80 81 82 84 85  -> aborto aos 7 s
+```
+
+- **Acima de 69**: com carga só de CPU a rede não dispara. É o caso R2 da
+  regra, que ficou com o usuário e ele não decidiu.
+- **Acima de 75**: com o modo máximo ligado, um manual que gire como o
+  automático não dispara — a GPU nem chega lá.
+- **Abaixo de 79**: no traço do E3b a rede dispara 2 a 3 s depois da escrita
+  do manual, 2 a 3 s antes do aborto, nas duas fases possíveis do relógio do
+  agente.
+- Com o modo desligado, o automático com jogo passa de 76 °C em 94% das
+  amostras. Ali quem cala a rede é **não estar armada**, e há teste dizendo
+  isso: o mesmo traço, com a ventoinha no piso, dispara.
+
+### O que a execução refutou
+
+1. **"O passivo da noite é o jogo com o modo máximo desligado."** O arquivo
+   foi ligado assim às 19:31 e gravou três horas: dentro dele estão o E3b
+   (duas amostras em `1,1`), cinco minutos das minhas mutações, a virada para
+   o modo máximo às 21:26 e o fim do jogo. A janela que vale é das 19:50 às
+   21:25 — armadilha 39.
+2. **"Em automático, com jogo, a GPU pelo EC vai a 81"** — a seção 7 do
+   plano, de uma linha de base de 26 minutos. Em 95 minutos foi a **84**. O
+   limite de aborto, 85, está a um grau do que o automático faz sozinho.
+3. **"Cada leitura do grupo sense custa uma chamada WMI"** — a premissa de
+   `test_leituras_wmi.py`, que cobrava que o agente não lesse nenhum dos
+   cinco. `fan_speed` não custa: 5 a 15 µs por leitura, contra 4,3 ms de
+   `battery_limiter` e 6,2 de `usb_charging`. O teste passou a dizer isso, e
+   a cobrar que é o único.
+4. **"30 s de calor sustentado, pacote ou GPU"** — o desenho provisório da
+   seção 11. Ficaram duas passadas, e só a GPU.
+5. **"O canal da GPU do acer é uma chamada WMI cara."** 79 µs; cada rotação,
+   95. O que custa milissegundos são os atributos do grupo sense.
+
+### Sete coisas que só apareceram executando
+
+1. **Um commit entrou com um teste vermelho.** A suíte ia por um `tail`, e o
+   `&&` decidia pelo `tail`. Visto na saída, na hora, e emendado antes de
+   seguir — armadilha 13b. Dali em diante a suíte roda por um roteiro que
+   guarda o status de cada uma.
+2. **Os dois observadores da sessão 1 seguiam vivos**, anexando linhas aos
+   traços que esta sessão ia recortar. O recorte passou a ser por época.
+3. **O modo novo do ensaio quebrou duas âncoras do corredor de mutações**: o
+   trecho copiado do E3b passou a existir duas vezes no roteiro, e a mutação
+   diria "o trecho aparece 2 vezes".
+4. **Listar as mutações achou uma camada escondendo outra**: no fim do prazo
+   do piso o modo `rede` escrevia `0,0` e saía — e o `trap` de saída
+   escreveria igual. Sem a linha, o roteiro faz o mesmo; ela saiu (armadilha
+   38).
+5. **O piso não pode partir de qualquer temperatura.** A rede leva de 2 a 4 s
+   e no piso a GPU sobe um grau por segundo; com o modo desligado o
+   automático já a deixa em 80 a 84 °C. Partindo dali, o aborto aos 85 chega
+   antes da rede, e a prova mediria o ponto de partida. O modo `rede` só
+   escreve o piso com a GPU a seis graus ou mais do limite — de onde o E3b
+   partiu; senão a prova não conta.
+6. **Entrar em manual e mexer num cursor só põe o outro no piso.** Antes o
+   outro ficava em zero, que era automático; com a barra valendo 20 a 100,
+   zero é 20%. É o que a decisão do cursor pede, e a rede cobre.
+7. **Uma mutação do modo `rede` escapou: "o limite no piso não encerra".**
+   Sem a parada, o roteiro saía com o mesmo código 10 — só que depois de
+   ficar no piso, acima do limite, até o prazo acabar. O teste olhava o
+   código e o estado final, não **quando**. Passou a cobrar que o piso
+   encerra na amostra em que o limite aparece. É a armadilha 38 de novo: o
+   prazo cobria o buraco do limite.
+
+### As mutações
+
+| corredor | o que estraga | resultado |
+|---|---|---|
+| `tests/hardware/mutacoes-ensaio.py` | as proteções do roteiro de ensaio, 14 delas do modo `rede` | 57: **55 reprovadas, 2 equivalentes** (as duas "começa sem jogo aberto": a conferência seguinte recusa igual) |
+| `tests/hardware/mutacoes-rede.py` | o limiar, as passadas, o armar, a rotação, o que o agente lê e escreve | **27 de 27 reprovadas** |
+
+### Visto e não consertado
+
+- **Com calor só de CPU a rede não age.** Manual no piso e uma compilação
+  pesada: o pacote vai a 93 °C e a frequência cai 18%, como no E3. Decisão do
+  usuário, ainda não tomada; se for sim, é um limiar de pacote a mais em
+  `fan_guard.decide`, e o traço do E3 já está no repositório para fixá-lo.
+- **Os dois equivalentes são de `balanced-performance`, na tomada.** Noutro
+  perfil, e na bateria, vale o do modo desligado — sem medição.
+- **A rede age em 2 a 4 s, e de 82 °C para cima isso pode não bastar** para
+  chegar antes dos 85 do aborto. Não é dano. Passar o agente a 1 s enquanto
+  armado encurtaria para 1 a 3 s; não entrou.
+- **Zero num lado só ainda existe no firmware**: quem escrever `0,60` à mão
+  deixa a ventoinha da CPU em automático. A tela mostra 0 e segue em manual.
+- **Se o firmware larga o manual sozinho** (troca de perfil, suspensão) sem o
+  driver saber, a rede vê a rotação alta e não age — o lado seguro. Não foi
+  medido.
+- **O shellcheck não roda nesta máquina**: `observador.sh`, o teste novo e o
+  modo `rede` só passam por ele no CI, no primeiro push.
+- **Por que o modo máximo troca a curva da ventoinha** continua sem apurar.
+
+---
+
 ## A sessão de 2026-09-11/12, e onde ela parou
 
 Vinte e nove commits, `v1.1.2` → **`v1.1.9`**. Entrou por três pendências que o
