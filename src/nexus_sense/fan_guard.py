@@ -83,6 +83,12 @@ def armada(setpoint, maximo):
     return bool(_baixas(setpoint, maximo))
 
 
+def quente(gpu):
+    """So com isto a rotacao vale a leitura: sao duas chamadas ao
+    firmware, e manual baixo com a maquina fria dura horas."""
+    return gpu is not None and gpu >= GPU_QUENTE
+
+
 def decide(seguidas, setpoint, maximo, gpu, rpm):
     """Uma passada da rede. `dispara` quer dizer: escreva 0,0.
 
@@ -93,7 +99,7 @@ def decide(seguidas, setpoint, maximo, gpu, rpm):
     firmware e nao ha o que devolver.
     """
     baixas = _baixas(setpoint, maximo)
-    if not baixas or gpu is None or gpu < GPU_QUENTE or rpm is None:
+    if not baixas or not quente(gpu) or rpm is None:
         return Veredito(0, False)
 
     teto = AUTOMATICO[bool(maximo)].rpm

@@ -28,6 +28,14 @@ from nexus_sense.tray.sni import StatusNotifierItem
 from conftest import build_tree
 
 
+# O unico dos cinco que o driver responde sem perguntar ao firmware:
+# predator_fan_speed_show imprime duas variaveis. Medido em 2026-10-10,
+# na maquina: 5 a 15 us por leitura, contra 4,3 ms de battery_limiter e
+# 6,2 ms de usb_charging. O agente o le a cada passada, pela rede da
+# ventoinha.
+DE_MEMORIA = frozenset({"fan_speed"})
+
+
 class SysfsEspiao(Sysfs):
     """Sysfs de verdade que anota o nome de cada atributo lido.
 
@@ -46,7 +54,7 @@ class SysfsEspiao(Sysfs):
     @property
     def wmi(self):
         """So os atributos que custam uma chamada ao firmware."""
-        return [nome for nome in self.lidos if nome in SENSE_ATTRS]
+        return [nome for nome in self.lidos if nome in SENSE_ATTRS and nome not in DE_MEMORIA]
 
 
 class RuntimeFalso:
@@ -73,8 +81,8 @@ class RuntimeFalso:
 
 
 def test_a_passada_do_agente_nao_le_atributos_wmi(tmp_path):
-    """O agente decide por perfil e fonte; os cinco do grupo sense nao
-    entram em nenhuma decisao dele."""
+    """O agente decide por perfil e fonte. Do grupo sense ele le so
+    fan_speed, que sai da memoria do driver."""
     raiz = build_tree(tmp_path / "raiz", profile="balanced")
     caminho = tmp_path / "config.toml"
     save(
@@ -97,6 +105,7 @@ def test_a_passada_do_agente_nao_le_atributos_wmi(tmp_path):
     agente.tick()
 
     assert espiao.wmi == []
+    assert [nome for nome in espiao.lidos if nome in SENSE_ATTRS] == ["fan_speed"]
 
 
 def test_a_bandeja_nao_le_atributos_wmi_a_cada_passada(qtbot, fake_root):
