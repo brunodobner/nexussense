@@ -30,7 +30,8 @@ def carrega(nome):
     with open(TRACOS / nome, newline="") as arquivo:
         linhas = list(csv.DictReader(arquivo, delimiter="\t"))
     # Sem isto um recorte vazio aprovaria todo "nao dispara" (armadilha 14).
-    assert len(linhas) > 200, nome
+    # O mais curto, uma rodada do portao, tem 125 linhas.
+    assert len(linhas) > 100, nome
     return linhas
 
 
@@ -189,3 +190,55 @@ def test_no_e3_com_carga_so_de_cpu_nao_dispara(fase):
     assert max(int(l["pacote"]) for l in piso) >= 93000
     assert max(gpu_de(l) for l in linhas) == 69 < fan_guard.GPU_QUENTE
     assert disparos(linhas, fase) == []
+
+
+# ---------------------------------------- os tracos do portao, 2026-10-10/11
+#
+# tests/hardware/ensaio-termico.sh rede, na maquina, com um jogo. O primeiro
+# rodou contra a versao sem rede, com o modo maximo ligado: e o E3b que
+# faltava nesse modo. O segundo, ja com a rede, com o modo desligado.
+
+
+@pytest.mark.parametrize("fase", FASES)
+def test_com_o_modo_maximo_ligado_dispara_bem_antes_do_aborto(fase):
+    """Sem rede instalada, manual no piso com o modo maximo ligado: a GPU
+    pelo EC foi de 73 a 85 C em 22 s, e o roteiro abortou. O limiar e
+    cruzado aos 7 s; a rede, se estivesse la, agiria muito antes do fim."""
+    linhas = carrega("rede-sem-rede-maximo.tsv")
+    assert {l["maximo"] for l in linhas} == {"true"}
+    piso = [l for l in linhas if l["fase"] == "r:piso"]
+    assert piso and {l["fan_speed"] for l in piso} == {"20,20"}
+    assert gpu_de(piso[-1]) == 85
+    aborto = int(piso[-1]["epoch"])
+
+    onde = disparos(linhas, fase)
+
+    assert onde and onde[0]["fase"] == "r:piso"
+    assert aborto - int(onde[0]["epoch"]) >= 10
+    assert gpu_de(onde[0]) <= 80
+
+
+@pytest.mark.parametrize("fase", FASES)
+def test_com_o_modo_maximo_ligado_os_controles_do_portao_nao_disparam(fase):
+    """Um minuto em automatico e um a 90%, com jogo: nenhum arma."""
+    linhas = carrega("rede-sem-rede-maximo.tsv")
+    controles = [l for l in linhas if l["fase"] in ("partida", "r:auto", "r:acima")]
+    acima = [l for l in controles if l["fase"] == "r:acima"]
+    assert len(acima) > 40 and {l["fan_speed"] for l in acima} == {"90,90"}
+    assert disparos(controles, fase) == []
+
+
+@pytest.mark.parametrize("fase", FASES)
+def test_manual_a_60_com_o_modo_desligado_e_a_gpu_quente_nao_dispara(fase):
+    """O controle que nao e por falta de calor: um minuto a 60%, com jogo,
+    e a GPU pelo EC a 76 C ou mais em tres quartos das amostras. Com o modo
+    desligado 60% esta acima do equivalente, e a rede nao arma."""
+    linhas = carrega("rede-desligado.tsv")
+    acima = [l for l in linhas if l["fase"] == "r:acima"]
+    assert len(acima) > 40 and {l["fan_speed"] for l in acima} == {"60,60"}
+    assert {l["maximo"] for l in acima} == {"false"}
+    quentes = [l for l in acima if gpu_de(l) >= fan_guard.GPU_QUENTE]
+    assert len(quentes) > 0.7 * len(acima)
+    assert armadas(acima) == []
+    antes_do_piso = [l for l in linhas if l["fase"] in ("partida", "r:auto", "r:acima")]
+    assert disparos(antes_do_piso, fase) == []

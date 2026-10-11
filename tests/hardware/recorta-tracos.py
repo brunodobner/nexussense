@@ -10,6 +10,10 @@ vale -- conferida linha a linha, nao pelo nome do arquivo:
     e2.tsv, e3.tsv, e3b.tsv    os tres ensaios, inteiros, a 1 Hz
     jogo-auto.tsv              automatico, com jogo, modo maximo desligado
     jogo-auto-maximo.tsv       o mesmo, com o modo maximo ligado
+    rede-sem-rede-maximo.tsv   o portao da sessao 2, contra a versao sem rede,
+                               com o modo maximo ligado: o piso ate o aborto
+    rede-desligado.tsv         o portao, ja com a rede, com o modo desligado:
+                               o controle a 60% com a GPU quente
 
 Por que a janela e nao o arquivo: o passivo "da noite" comecou as 19:31, com
 o modo maximo desligado, e seguiu gravando. Dentro dele estao o E3b (duas
@@ -47,6 +51,10 @@ RECORTES = (
     ("e3.tsv", "ensaio-e3-20261010-185354.tsv", None, None,
      {"acad": "1", "maximo": "false", "jogo": "0"}),
     ("e3b.tsv", "ensaio-e3b-20261010-194448.tsv", None, None,
+     {"acad": "1", "maximo": "false"}),
+    ("rede-sem-rede-maximo.tsv", "ensaio-rede-20261010-233636.tsv", None, None,
+     {"acad": "1", "maximo": "true"}),
+    ("rede-desligado.tsv", "ensaio-rede-20261011-000321.tsv", None, None,
      {"acad": "1", "maximo": "false"}),
     ("jogo-auto.tsv", "passivo-20261010-noite.tsv", 1791672600, 1791678359,
      {"acad": "1", "maximo": "false", "fan_speed": "0,0",
