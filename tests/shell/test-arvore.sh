@@ -59,6 +59,18 @@ else
     falha "LICENSE da raiz difere de driver/LICENSE"
 fi
 
+# ─── 1b. nao ha CI no repositorio ──────────────────────────────────
+# De 2026-10-09 a 2026-10-11 cada push disparava as suites e o shellcheck no
+# GitHub Actions, e o modulo era compilado contra o kernel do Arch toda
+# segunda. O usuario mandou desligar: projeto de uma maquina so, e dez
+# minutos de espera por push. Um fluxo que volte sem decisao volta a gastar
+# os minutos da conta dele a cada push. Ver docs/decisoes.md, secao 22.
+if [ -e .github/workflows ]; then
+    falha "ha fluxos de CI em .github/workflows: $(ls .github/workflows | tr '\n' ' ')"
+else
+    ok "nenhum fluxo de CI no repositorio"
+fi
+
 # ─── 2. o layout antigo nao voltou ─────────────────────────────────
 # Tres arquivos citam os caminhos antigos de PROPOSITO e ficam de fora:
 #   README.md       a tabela de procedencia -- de onde veio cada arquivo

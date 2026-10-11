@@ -443,4 +443,4 @@ verificação, não por pergunta: eram técnicas, e a máquina respondia.
 | D4 | o serviço root de tecla **sai** | nesta máquina ele nunca foi instalado: sem unit, sem script em `/usr/local/bin`, sem `/etc/damx`. O botão já abre o app por hwdb (`KEYBOARD_KEY_f5=prog1`) e atalho do KDE (`Launch (1)`) |
 | D5 | a desinstalação apaga o grupo `nexus_sense`; `~/.config/nexus-sense` **fica** | o grupo é do instalador; a configuração é escolha do usuário (decisão 17). **Só a desinstalação**: a limpeza que antecede uma reinstalação preserva o grupo, porque recriá-lo troca o gid — medido no portão da etapa 3, armadilha 29 |
 | D6 | a limpeza do driver (2.5) **entra**, por último e em commit separado; sai se o portão reprovar | — |
-| D7 | a etapa 4 **tem CI** | repositório privado com Actions habilitado (`gh api …/actions/permissions`) |
+| D7 | a etapa 4 **tem CI** — **revogada em 2026-10-11**: o usuário mandou desligar, e os fluxos saíram do repositório. Ver [decisoes.md](decisoes.md), seção 22 | repositório privado com Actions habilitado (`gh api …/actions/permissions`) |

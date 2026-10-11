@@ -16,10 +16,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 | versão | **v1.2.9** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 26 testes: 24 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
+| suíte shell | 25 testes: 23 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
 | suíte Python | 501 passam (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
-| CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
+| CI | **não há**, desde 2026-10-11, por decisão do usuário: os fluxos saíram do repositório. O shellcheck e a suíte em máquina limpa saíram junto — [decisoes.md](decisoes.md), seção 22 |
 
 ---
 
@@ -61,6 +61,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
 [x] Rede termica, sessao 1 -- medicao  piso em ~2000 rpm, o EC nao socorre; com jogo a GPU bate no limite em 7 s (R3)
 [x] Rede termica, sessao 2 -- a rede   v1.2.9: no agente, pelos tracos; devolveu o automatico na maquina nos dois modos
+[x] CI desligado                     2026-10-11, decisao do usuario: os fluxos sairam; ver decisoes 22
 ```
 
 ### Concluído
@@ -2827,6 +2828,12 @@ O caminho a partir do Máximo não foi feito à mão; está nos testes.
 suíte shell como usuário e como root, em 9 min. O push que traz esta linha
 dispara mais uma rodada, sobre uma árvore que só difere dela neste arquivo.
 
+**Essa rodada foi cancelada, e foi a última.** O usuário perguntou o que era
+"rodada de CI", ouviu, e respondeu: *"não quero isso não. qual
+necessidade?"*. Nenhuma obrigatória. Desligado de vez no mesmo dia, ramo
+`sem-ci`, sem versão nova — nada do que se instala mudou. O que se perdeu e
+como voltar estão em [decisoes.md](decisoes.md), seção 22.
+
 **E a rede disparou sozinha, no uso, sem roteiro nenhum.** Às 01:52, enquanto
 o usuário conferia o Manual da v1.2.8 com o jogo aberto, ele levou os
 cursores ao mínimo pela janela, e o journal tem a linha:
@@ -2840,9 +2847,10 @@ pela mão dele, com um jogo — e ninguém o pediu.
 
 ### Onde o próximo trabalho começa
 
-`master` em v1.2.9, com a sessão 2 mesclada. O baseline esperado é 501 passam
-na suíte Python, sem xfail e, na shell, 24 passam e 2 pulam — sem root, sob
-`LC_ALL=C`, **e com a máquina em repouso**.
+`master` em v1.2.9, com a sessão 2 mesclada e o CI desligado. O baseline
+esperado é 501 passam na suíte Python, sem xfail e, na shell, 23 passam e 2
+pulam — sem root, sob `LC_ALL=C`, **e com a máquina em repouso**. Não há mais
+rodada no GitHub: push é só push.
 
 O que a medição deixou pedindo trabalho, em ordem de quanto pesa:
 
