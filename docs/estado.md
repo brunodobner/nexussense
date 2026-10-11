@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-11 (rede térmica, sessão 2 fechada: a rede está no agente e devolveu o automático na máquina, nos dois modos; o cursor de manual vale 20 a 100; v1.2.8)
+**Última atualização:** 2026-10-11 (rede térmica, sessão 2 fechada: a rede está no agente e devolveu o automático na máquina, nos dois modos; o cursor de manual vale 20 a 100 e Manual aplica no clique; v1.2.9)
 
 ---
 
@@ -13,11 +13,11 @@ diz qual é a vez de qual, e o que ficou pendente.
 |---|---|
 | base | partiu do DAMX `1.0.2-h1` (commit `1f88341`) e seguiu sozinho; não rastreia mais o upstream |
 | driver | **um modelo só**: 1 entrada DMI, 2 quirks, 1 interface WMI, 1 parâmetro, 2864 linhas (eram 5167) |
-| versão | **v1.2.8** — `master` em github.com/brunodobner/nexussense (privado) |
+| versão | **v1.2.9** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
 | suíte shell | 26 testes: 24 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
-| suíte Python | 498 passam (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte Python | 501 passam (`python3 -m pytest -q`), incluindo DBus privado |
 | build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
 | CI | GitHub Actions: suítes e shellcheck a cada push; o módulo contra os headers do Arch toda segunda |
 
@@ -60,7 +60,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 [x] Melhorias, etapa 4e -- botao N   v1.2.7: o evento WMI nao chega e o caminho saiu; partida a frio conferida
 [x] Melhorias, etapa 4f -- termica   plano escrito e passado pelo grill: docs/plano-termico.md
 [x] Rede termica, sessao 1 -- medicao  piso em ~2000 rpm, o EC nao socorre; com jogo a GPU bate no limite em 7 s (R3)
-[x] Rede termica, sessao 2 -- a rede   v1.2.8: no agente, pelos tracos; devolveu o automatico na maquina nos dois modos
+[x] Rede termica, sessao 2 -- a rede   v1.2.9: no agente, pelos tracos; devolveu o automatico na maquina nos dois modos
 ```
 
 ### Concluído
@@ -2789,15 +2789,54 @@ com o modo desligado, recarregou com o jogo aberto.
   nada.
 - **O regime "curva baixa e GPU a 80 °C" não rodou com a rede instalada.**
   Está no traço do E3b, que é teste.
-- **O conserto do Manual foi instalado e não foi conferido pelo usuário**:
-  escolher Manual, não mexer em nada por dez segundos, e os cursores têm de
-  continuar lá.
-- **O CI não rodou**: nenhum push nesta sessão. O shellcheck dos três scripts
-  novos só existe lá.
+- **Entrar em Manual a partir do Automático leva a ventoinha ao piso no
+  clique.** É a decisão do usuário, e a rede cobre o jogo aberto; quem quer
+  manual alto ouve a ventoinha cair por um instante antes de arrastar.
+
+### Depois do merge, na mesma madrugada — v1.2.9
+
+O usuário conferiu o conserto do Manual: ficou. E viu o que ele não
+resolvia: *"não foi pro ponto que já estava marcado, que era o mínimo; tive
+que subir e baixar pra baixar"*. Entrar em manual não escrevia — regra antiga
+da tela — e, com a barra valendo 20 a 100, os cursores no começo mostravam um
+piso que a máquina não estava fazendo. Perguntado, pelo efeito: **Manual
+aplica na hora o que os cursores mostram.** Ramo `termica/2b-manual-aplica`,
+teste que falhou primeiro.
+
+De carona saiu um defeito mais antigo: arrastar os dois cursores a 100
+escrevia `100,100`, a repintura lia "máximo" e escondia os cursores de quem
+acabara de arrastá-los. A tela passou a lembrar o par que ela mesma escreveu.
+
+**O CI da v1.2.8**, no primeiro push (`e655c6d`): verde. O shellcheck passou
+nos três scripts novos, e pytest e a suíte shell passaram como usuário e como
+root, em 9 min 40 s.
+
+**O portão da v1.2.9**, em 2026-10-11, 02:08: terceira reinstalação por
+`pkexec` (gid 948 antes e depois, instalado idêntico ao fonte, `--version`
+1.2.9, `NeedDaemonReload` em `no`), agente e bandeja reiniciados. Com um
+vigia de leitura no ar, o usuário clicou em Manual a partir do Automático:
+
+```
+02:08:45.443   fan_speed 0,0 -> 20,20     no clique, sem tocar em cursor
+02:08:49.116   fan_speed 20,20 -> 0,0     o clique em Automatico; a rotacao ja estava em 2071 / 1718
+```
+
+O caminho a partir do Máximo não foi feito à mão; está nos testes.
+
+**E a rede disparou sozinha, no uso, sem roteiro nenhum.** Às 01:52, enquanto
+o usuário conferia o Manual da v1.2.8 com o jogo aberto, ele levou os
+cursores ao mínimo pela janela, e o journal tem a linha:
+
+```
+01:52:41 WARNING rede térmica: ventoinha em manual a 20,20 (2071 / 1727 rpm) com a GPU a 77 °C; devolvida ao automático
+```
+
+É o gesto do portão como a seção 15 do plano o descrevia — manual no piso
+pela mão dele, com um jogo — e ninguém o pediu.
 
 ### Onde o próximo trabalho começa
 
-`master` em v1.2.8, com a sessão 2 mesclada. O baseline esperado é 498 passam
+`master` em v1.2.9, com a sessão 2 mesclada. O baseline esperado é 501 passam
 na suíte Python, sem xfail e, na shell, 24 passam e 2 pulam — sem root, sob
 `LC_ALL=C`, **e com a máquina em repouso**.
 
