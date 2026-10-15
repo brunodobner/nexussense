@@ -439,3 +439,73 @@ código e pelos traços. Só gosto e autorização foram ao usuário.
 | a autorização de E-C2 | trocar o perfil de energia, esquentar a CPU por ~45 min, e os gestos do modo máximo | o roteiro pronto e testado |
 | os gestos de E-C5 | suspender, tirar o cabo, reiniciar | o roteiro pronto e testado |
 | a parte de cima da curva | se existe | R0 ou R1, depois de E-C2 |
+
+---
+
+## 11. A curva aprovada — 2026-10-15
+
+Desenhada na conversa com o usuário a partir do que já estava medido: os tetos
+da seção 2.1 e o mapa de E2 (plano térmico, seção 6). Ele a aprovou sem esperar
+E-C2 e E-C3: a forma da curva é preferência dele (seção 3), e ele a escolheu.
+Nada foi implementado.
+
+**O que muda no resto do plano:**
+
+- **Uma curva só.** Ela vale com o modo máximo ligado ou desligado; não há uma
+  curva alta à parte. O modo máximo segue fazendo o resto (perfil de energia,
+  PowerMizer). Como os dois convivem na janela e na bandeja fica para o
+  desenho.
+- **A regra da seção 7 não decide mais a parte de cima.** Ir ao máximo no
+  calor é escolha do usuário. E-C2 continua dizendo quanto isso compra, mas
+  deixa de ser portão.
+- **E-C3 não é mais preciso para o teto de ruído:** o usuário aceitou o
+  máximo jogando e 2.300 / 2.000 rpm em repouso.
+- **E-C5 e o guarda seguem obrigatórios.** Entre 50 e 70 °C a curva gira
+  abaixo do firmware: é a forma B.
+
+**A ventoinha da CPU**, pela CPU pelo EC (o sensor da tabela da seção 2.1):
+
+| CPU pelo EC | rpm | manual (mapa de E2) | firmware hoje, curva baixa |
+|---|---|---|---|
+| até 50 °C | 2.300 | 25% | ~2.200 |
+| 60 °C | 3.000 | 35% | ~4.650 |
+| 70 °C | 4.200 | 50% | — (só transição) |
+| 80 °C | 5.800 | 73% | ~4.450 |
+| 88 °C ou mais | 7.450 | 99% | ~4.500 |
+
+**A ventoinha da GPU**, pela GPU pelo EC:
+
+| GPU pelo EC | rpm | manual (mapa de E2) | firmware hoje, com jogo |
+|---|---|---|---|
+| até 55 °C, ou 0 (placa dormindo) | 2.000 | 24% | ~2.000 em repouso |
+| 65 °C | 3.000 | 37% | — |
+| 70 °C | 4.200 | 53% | — |
+| 76 °C | 6.000 | 82% | ~4.000 |
+| 80 °C ou mais | 6.980 | 99% | ~4.000 |
+
+Entre dois pontos, a porcentagem anda em linha reta com a temperatura. As
+rotações são as do mapa de E2, medido em repouso.
+
+**As regras em volta:**
+
+- **O piso da rede.** Com a GPU pelo EC a 76 °C ou mais, as duas ventoinhas
+  ficam no mínimo em 81% e 82%: o equivalente do automático com o modo máximo
+  ligado (`fan_guard.AUTOMATICO[True]`), o mais alto dos dois. A rede olha as
+  duas ventoinhas, não só a da GPU (conferido em `fan_guard.py`). Sem esse
+  piso, um jogo com a CPU a 80 °C poria a ventoinha da CPU a 73%, abaixo dos
+  81%. A rede devolveria o automático, e a curva reescreveria o manual na
+  passada seguinte: vaivém.
+- **Sobe na hora, desce devagar.** A rotação sobe na passada em que a
+  temperatura pede. Só desce depois de a temperatura cair 3 °C abaixo do
+  ponto que a fez subir. Os 3 °C são provisórios: ajustam-se pelo ouvido.
+- **Só escreve quando a porcentagem muda.**
+- **Fora dela:** `quiet` e `low-power`, em que o driver escreve `0,0` (o
+  que o firmware faz com a ventoinha nesses perfis nunca foi medido: todo
+  traço é de `balanced-performance`); e a bateria.
+- **Sem o guarda da seção 8 a curva não entra no ar.** Um agente travado a
+  25%, com a máquina esquentando depois, ficaria sem ninguém que subisse a
+  rotação: a rede mora no mesmo processo.
+
+Esta seção substitui, na tabela "Em aberto" da seção 10, as linhas do teto de
+ruído e da parte de cima da curva. O que falta: o guarda, o modo na janela e
+na bandeja, a função da curva testada contra os traços, e E-C5 na máquina.
