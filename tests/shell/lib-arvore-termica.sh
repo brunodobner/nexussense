@@ -6,6 +6,7 @@
 # `source`, depois de definir S (o roteiro) e antes de qualquer caso:
 #     tests/shell/test-ensaio-termico.sh       o E2 e as protecoes comuns
 #     tests/shell/test-ensaio-termico-e3.sh    o E3
+#     tests/shell/test-ensaio-termico-curva.sh os ensaios da curva (E-C2, E-C3, E-C5)
 #
 # Nada aqui toca em /sys: o roteiro recebe ENSAIO_RAIZ. Os indices de hwmon e
 # de zona termica sao embaralhados de proposito: o roteiro tem de achar tudo
@@ -92,7 +93,51 @@ monta() {    # $1 = raiz da arvore
     echo 0 > "$d/sys/devices/system/cpu/cpu0/thermal_throttle/package_throttle_total_time_ms"
     echo 2400000 > "$d/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq"
     echo "0.50 0.40 0.30 1/100 1" > "$d/proc/loadavg"
+    echo "123.45 400.00" > "$d/proc/uptime"
     echo "maximum_mode = false" > "$d/config.toml"
+    echo balance_performance > "$d/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference"
+    echo balanced > "$d/ppd"
+    mkdir -p "$d/sys/power/suspend_stats" "$d/proc/sys/kernel/random"
+    echo 3 > "$d/sys/power/suspend_stats/success"
+    echo 11111111-2222-3333-4444-555555555555 > "$d/proc/sys/kernel/random/boot_id"
+
+    # O busctl de mentira: o perfil de energia mora no arquivo ppd, e a
+    # preferencia de energia da CPU o segue, como faz o daemon. Cada chamada
+    # fica em busctl.log. Com o arquivo ppd_recusa, a escrita e recusada.
+    cat > "$d/bin/busctl" << FIM
+#!/bin/bash
+echo "\$*" >> "$d/busctl.log"
+case "\$*" in
+    *" get-property "*" ActiveProfile")
+        printf '{"type":"s","data":"%s"}\n' "\$(cat "$d/ppd")" ;;
+    *" set-property "*" ActiveProfile s "*)
+        [ -e "$d/ppd_recusa" ] && exit 1
+        v=\${!#}
+        case "\$v" in
+            performance) e=performance ;;
+            balanced) e=balance_performance ;;
+            power-saver) e=power ;;
+            *) exit 1 ;;
+        esac
+        printf '%s\n' "\$v" > "$d/ppd.novo" && mv "$d/ppd.novo" "$d/ppd"
+        e_=$d/sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference
+        printf '%s\n' "\$e" > "\$e_.novo" && mv "\$e_.novo" "\$e_" ;;
+    *) exit 1 ;;
+esac
+FIM
+    # O systemctl de mentira: so as tres perguntas que o E-C5 faz a unit do
+    # agente. O pid sai de agente.pid; o guarda, de unit.execstoppost e
+    # unit.watchdog. Sem eles: agente fora do ar e unit sem guarda.
+    cat > "$d/bin/systemctl" << FIM
+#!/bin/bash
+echo "\$*" >> "$d/systemctl.log"
+case "\$*" in
+    *"-p MainPID "*) cat "$d/agente.pid" 2> /dev/null || echo 0 ;;
+    *"-p ExecStopPost "*) cat "$d/unit.execstoppost" 2> /dev/null ;;
+    *"-p WatchdogUSec "*) cat "$d/unit.watchdog" 2> /dev/null || echo 0 ;;
+    *) exit 1 ;;
+esac
+FIM
 
     # O ps de mentira: os "processos" sao as linhas de um arquivo.
     : > "$d/processos"
@@ -107,7 +152,7 @@ monta() {    # $1 = raiz da arvore
 trap 'rm -f "$d/carga_ligada"; exit 0' TERM INT EXIT
 while :; do sleep 0.05; done
 FIM
-    chmod +x "$d/bin/ps" "$d/bin/recusa-zero" "$d/bin/carga-falsa"
+    chmod +x "$d/bin/ps" "$d/bin/recusa-zero" "$d/bin/carga-falsa" "$d/bin/busctl" "$d/bin/systemctl"
 }
 
 FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
@@ -127,6 +172,14 @@ FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 #                curva do automatico com fan_speed ainda dizendo o manual
 #   estoura      manual fraco com carga: a zona SEN4 sobe ate passar do limite
 #   auto_parado  o automatico nao sobe com a temperatura
+#   curvas       o automatico tem duas curvas, como a maquina (docs/plano-curva.md,
+#                secao 2.1): com o modo maximo ligado ele gira 600 rpm acima.
+#                Com carga ou jogo a frequencia e a GPU pelo EC seguem a
+#                rotacao -- pouco: o maximo do firmware compra 1,2% e 0,6 C
+#   ganho        o mesmo, e a rotacao compra mais: 5,7% e 3 C
+#   presa        como curvas, mas a curva alta fica depois de o modo desligar
+# Em qualquer temperamento, com o arquivo ec_larga o EC larga o manual: a
+# rotacao vai para o automatico com fan_speed ainda dizendo o manual.
 # A carga de mentira e bin/carga-falsa: enquanto existir o arquivo
 # carga_ligada, o pacote sobe ate 92 C; sem ele, desce ate 45.
 # Um "jogo" (uma linha no arquivo processos) esquenta igual, e esquenta
@@ -134,7 +187,7 @@ FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 # ate 89 com ela baixa -- e sem parar de subir, no temperamento estoura.
 ec_falso() {
     local f h hc z v c g x fs='' manual=0 r1 r2 a1 a2 pac=45000 s4=46050 jogo carga alvo
-    local u1='' u2='' up=45000 us=46050
+    local u1='' u2='' up=45000 us=46050 alta=0 presa=0 cfg hz uh='' gpu ug='' passo
     f=$(FAN_DE "$1"); h="$1/sys/class/hwmon/hwmon7"
     hc="$1/sys/class/hwmon/hwmon11"; z="$1/sys/class/thermal/thermal_zone2"
     while [ -d "$h" ]; do
@@ -147,14 +200,27 @@ ec_falso() {
         jogo=0; carga=0
         [ -s "$1/processos" ] && jogo=1
         [ -e "$1/carga_ligada" ] && carga=1
+        # Nos temperamentos da curva o pacote anda tres vezes mais depressa:
+        # o estagio do E-C2 mede um patamar, e ele tem de chegar logo.
+        passo=4000
+        case "$2" in curvas|ganho|presa) passo=12000 ;; esac
         if [ "$jogo" = 1 ] || [ "$carga" = 1 ]; then
-            [ "$pac" -lt 92000 ] && pac=$((pac + 4000))
+            [ "$pac" -lt 92000 ] && pac=$((pac + passo))
         else
-            [ "$pac" -gt 45000 ] && pac=$((pac - 4000))
+            [ "$pac" -gt 45000 ] && pac=$((pac - passo))
+            [ "$pac" -lt 45000 ] && pac=45000
         fi
 
         a1=$((2300 + (pac - 45000) / 20)); a2=$((2000 + (pac - 45000) / 22))
         if [ "$2" = auto_parado ]; then a1=2300; a2=2000; fi
+        case "$2" in
+            curvas|ganho|presa)
+                cfg=; read -r cfg < "$1/config.toml"
+                alta=0
+                [ "$cfg" = "maximum_mode = true" ] && { alta=1; presa=1; }
+                [ "$2" = presa ] && [ "$presa" = 1 ] && alta=1
+                [ "$alta" = 1 ] && { a1=$((a1 + 600)); a2=$((a2 + 600)); } ;;
+        esac
         if [ "$2" = surdo ]; then
             r1=$a1; r2=$a2
         elif [ "$fs" = "0,0" ]; then
@@ -172,6 +238,7 @@ ec_falso() {
             # Quente, o EC larga o manual e volta para a curva dele.
             [ "$2" = retoma ] && [ "$pac" -ge 88000 ] && { r1=$a1; r2=$a2; }
         fi
+        [ -e "$1/ec_larga" ] && { r1=$a1; r2=$a2; }
 
         # SEN4 anda 3 C por volta ate o alvo. "Fraca" e a ventoinha em manual
         # abaixo de 2600 rpm.
@@ -198,6 +265,20 @@ ec_falso() {
             poe "$hc/temp4_input" "$pac"; poe "$h/temp1_input" $((pac - 1000)); up=$pac
         fi
         if [ "$s4" != "$us" ]; then poe "$z/temp" "$s4"; us=$s4; fi
+        # Nos temperamentos da curva, a frequencia (com carga ou jogo) e a GPU
+        # pelo EC (com jogo) seguem a rotacao da CPU.
+        case "$2" in
+            curvas|ganho|presa)
+                hz=2400000; gpu=47000
+                if [ "$jogo" = 1 ] || [ "$carga" = 1 ]; then
+                    if [ "$2" = ganho ]; then hz=$((r1 * 600)); else hz=$((2000000 + r1 * 100)); fi
+                fi
+                if [ "$jogo" = 1 ]; then
+                    if [ "$2" = ganho ]; then gpu=$((120000 - r1 * 10)); else gpu=$((90000 - r1 * 2)); fi
+                fi
+                if [ "$hz" != "$uh" ]; then poe "$1/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq" "$hz"; uh=$hz; fi
+                if [ "$gpu" != "$ug" ]; then poe "$h/temp2_input" "$gpu"; ug=$gpu; fi ;;
+        esac
         sleep 0.02
     done 2> /dev/null
 }
@@ -216,6 +297,7 @@ roda() {     # $1 = arvore; o resto e o comando. Em primeiro plano.
     local d=$1
     shift
     ENSAIO_RAIZ="$d" ENSAIO_CONFIG="$d/config.toml" PATH="$d/bin:$PATH" \
+        ENSAIO_BUSCTL="$d/bin/busctl" ENSAIO_SYSTEMCTL="$d/bin/systemctl" \
         XDG_RUNTIME_DIR="$d/run" XDG_STATE_HOME="$d/state" \
         ENSAIO_PASSO="${PASSO:-0.05}" ENSAIO_PASSO_VIGIA="${PASSO_VIGIA:-0.05}" \
         ENSAIO_ASSENTA=2 ENSAIO_LEITURAS=2 "$@" > "$d/saida.txt" 2>&1
@@ -227,6 +309,7 @@ lanca() {    # o mesmo, em segundo plano. O exec faz PID ser o do roteiro, e
     shift
     (
         ENSAIO_RAIZ="$d" ENSAIO_CONFIG="$d/config.toml" PATH="$d/bin:$PATH" \
+            ENSAIO_BUSCTL="$d/bin/busctl" ENSAIO_SYSTEMCTL="$d/bin/systemctl" \
             XDG_RUNTIME_DIR="$d/run" XDG_STATE_HOME="$d/state" \
             ENSAIO_PASSO="${PASSO:-0.05}" ENSAIO_PASSO_VIGIA="${PASSO_VIGIA:-0.05}" \
             ENSAIO_ASSENTA=2 ENSAIO_LEITURAS=2 exec "$@"
@@ -250,6 +333,6 @@ confere() {  # $1 = descricao, $2 = rc visto, $3 = rc esperado, $4 = fan esperad
     if [ "$2" = "$3" ] && [ "$(fan "$D")" = "$4" ]; then
         ok "$1"
     else
-        falha "$1: saiu com $2 (esperado $3), fan_speed '$(fan "$D")' (esperado '$4')"
+        falha "$1: saiu com $2 (esperado $3), fan_speed '$(fan "$D")' (esperado '$4') $(grep -h -m1 '^ENCERRADO' "$D/saida.txt" 2> /dev/null)"
     fi
 }
