@@ -3,7 +3,7 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-11 (rede térmica, sessão 2 fechada: a rede está no agente e devolveu o automático na máquina, nos dois modos; o cursor de manual vale 20 a 100 e Manual aplica no clique; v1.2.9)
+**Última atualização:** 2026-10-14 (brilho do teclado pelo slider do Plasma medido e descartado: o firmware não informa nem aceita o nível por software — decisões 23)
 
 ---
 
@@ -3033,6 +3033,19 @@ informada: veio depois de entender por que o fork existe.
 A seção 6b de [decisoes.md](decisoes.md) guarda a medição que sustenta o quadro:
 o `acer_wmi` nativo entrega perfis térmicos, telemetria, rfkill e backlight, mas
 **zero dos nove atributos de controle**, e não reconhece o ANV15-52.
+
+---
+
+## Abandonado: brilho do teclado pelo slider do Plasma
+
+**Medido em 2026-10-14 e decidido não fazer.** O `Brilho nan%` da linha
+"Iluminação do teclado" no widget "Brilho e cor" é do UPower e do Plasma, não
+nosso. Registrar um LED `acer::kbd_backlight` no driver faria o slider
+funcionar, mas o firmware não deixa: o método 21 responde "não suportado" nos
+três níveis, e o EC só guarda "acesa ou apagada" (bit 1 de `0x48`). O nível 1
+ou 2 do Fn+F11 não aparece em lugar nenhum que o Linux leia. O método 20, de
+gravação, ficou sem testar. A medição inteira e como refazer estão em
+[decisões 23](decisoes.md).
 
 ---
 

@@ -1568,6 +1568,38 @@ ps -eo pid,lstart,args | grep '[o]bservador.sh'
 
 ---
 
+## 40. O pacote `acpi_call` traz o kernel do Arch junto
+
+**Sintoma.** Depois de `pacman -S acpi_call`, o `modprobe acpi_call` falha com
+`Module acpi_call not found in directory /lib/modules/7.2.9-1-cachyos`, e o log
+do pacman tem `ERROR: mkinitcpio failed for kernel 7.2.9-arch1-1` e o aviso
+vermelho do gancho do Nexus Sense, "o nexus_sense NAO foi construido para:
+7.2.9-arch1-1".
+
+**Causa.** O `acpi_call` dos repositórios — o do `extra` e o do
+`cachyos-extra-v3` — é o módulo pré-compilado para o kernel `linux` padrão e
+**depende dele**. O pacman instala o `linux` como dependência, em silêncio. O
+mkinitcpio daquele kernel falha porque não há nvidia para ele, e o módulo
+cai em `/usr/lib/modules/7.2.9-arch1-1/`, onde o kernel CachyOS não procura.
+Foi o que aconteceu na sonda da luz do teclado ([decisões 23](decisoes.md)).
+
+**Regra.** Módulo de terceiros nesta máquina é sempre a variante `-dkms`,
+como o próprio `nexus_sense`: ela compila para cada kernel instalado com
+headers. E antes de instalar qualquer pacote de módulo, confira de quem ele
+depende:
+
+```bash
+pacman -Si acpi_call acpi_call-dkms | grep -E '^(Nome|Name|Depende|Depends)'
+```
+
+Se já entrou, o `linux` aparece como dependência e sai junto com o pacote:
+
+```bash
+pacman -Qi linux | grep -E 'Motivo|Reason'
+```
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

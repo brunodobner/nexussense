@@ -422,6 +422,7 @@ rodando como root seria pior que não fazer.
 | caminho GNOME no instalador | a máquina roda KDE; o resto recebe instruções |
 | `linuwu_sense.target` | existia na versão pessoal, mas nenhuma unit o referenciava |
 | manifesto de binários e verificação sha256 | perdeu o objeto quando GUI e daemon viraram fonte |
+| brilho do teclado no slider do Plasma | o firmware não informa nem aceita o nível por software; medido, ver seção 23 |
 
 ---
 
@@ -660,4 +661,66 @@ commit `d122db6`:
 
 ```bash
 git show d122db6:.github/workflows/ci.yml
+```
+
+## 23. A luz do teclado fica com a tecla, não com o slider do Plasma
+
+**O que levantou a questão.** O widget "Brilho e cor" do Plasma 6.7.5 mostra
+uma linha "Iluminação do teclado" com `Brilho nan%`, e o slider não mexe na
+luz. A linha não é do Nexus Sense: o UPower publica
+`/org/freedesktop/UPower/KbdBacklight` mesmo sem nenhum `*::kbd_backlight` em
+`/sys/class/leds`, responde brilho máximo `0`, e o widget divide o brilho por
+esse máximo sem conferir — 0 ÷ 0. O widget não tem opção para esconder só essa
+linha, e mascarar o UPower levaria junto a bateria.
+
+**A pergunta.** O driver poderia registrar um LED `acer::kbd_backlight`. O
+UPower o acharia sozinho, o slider passaria a funcionar e o `nan%` sumiria.
+Para isso o driver precisa **ler e gravar o nível** pelo firmware.
+
+**O que a máquina tem**, dito pelo usuário: LED de cor única, laranja, sem
+troca de cor; Fn+F11 alterna três níveis — desligado, 1 e 2. Seria
+`max_brightness = 2`.
+
+**A medição, em 2026-10-14**, só leitura:
+
+- **ACPI.** A GUID `7A4DDFE7-…` do WMI de jogo é o objeto `BH`, ou seja
+  `\_SB.PC00.WMID.WMBH`, na SSDT10. Os métodos 20 (gravar a luz do teclado) e
+  21 (ler) existem, mas os dois só fazem `WSMI` — escrevem o pedido e disparam
+  SMI pela porta `0xD0`. O que a BIOS faz com ele não está nas tabelas.
+- **Método 21**, chamado com a entrada que o código de RGB removido usava
+  (`u64` valendo 1), nos três níveis e de novo desligado: as quatro respostas
+  foram `{0x01, 0x00 × 15}`. O primeiro byte é status, e sucesso é 0.
+- **EC**, por `ec_sys` sem escrita, nas mesmas quatro posições. Só um byte
+  acompanha a luz, e não separa os níveis:
+
+  | `0x48` | desligado | nível 1 | nível 2 | desligado |
+  |---|---|---|---|---|
+  | valor | `71` | `73` | `73` | `71` |
+
+  O bit 0 é o `KBBL` da DSDT, sempre 1: o `GOTS` o devolve para o dispositivo
+  `0x84`, "o teclado tem luz". O bit 1, sem nome nas tabelas, é luz acesa.
+  Nenhum byte entre `0x00` e `0xFF` distingue o nível 1 do 2.
+- **`GGSI`** (método 5, resolvido em ACPI): só temperaturas, ventoinhas e
+  `BTST`. Nada de teclado.
+- **Fn+F11** não gerou evento no kernel. O EC trata a tecla sozinho.
+
+**Decidido: não fazer.** Ler, só "acesa ou apagada"; gravar, nenhum caminho
+seguro. Escrever no bit do EC às cegas mexe num registrador que guarda outros
+bits do firmware, e o bit provavelmente só informa o estado.
+
+**O que não foi testado, sabendo:** o método 20. É gravação num código da BIOS
+que não se enxerga, e o par de leitura dele respondeu "não suportado". O
+usuário escolheu parar antes. O pacote que ele recebe — efeito, velocidade,
+brilho, direção, cor — está no código de RGB removido na poda, commit
+`800ec90`:
+
+```bash
+git show 800ec90^:driver/src/nexus_sense.c | grep -n -A6 'set_kb_status(int'
+```
+
+**Para refazer a sonda**, o módulo é o `acpi_call-dkms` — não o `acpi_call`,
+que traz o kernel do Arch junto (armadilha 40):
+
+```bash
+echo '\_SB.PC00.WMID.WMBH 0 0x15 b0100000000000000' | sudo tee /proc/acpi/call >/dev/null; sudo cat /proc/acpi/call
 ```
