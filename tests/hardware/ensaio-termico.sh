@@ -88,8 +88,10 @@
 #        ou largou e voltou a ele. Depois, o exercicio do guarda: o agente leva
 #        kill -9, e depois SIGSTOP (travado, mas vivo); nos dois a ventoinha
 #        tem de voltar a 0,0 por outra mao -- o ExecStopPost e o WatchdogSec
-#        da unit -- e a rotacao tem de sair do manual. Sem o guarda na unit, o
-#        exercicio diz que nao rodou, e o roteiro sai com 17. Por ultimo, pede
+#        da unit -- e a rotacao tem de sair do manual. O guarda so devolve o
+#        que o agente registrou ter escrito, e o roteiro registra por ele.
+#        Sem o guarda na unit, o exercicio diz que nao rodou, e o roteiro sai
+#        com 17. Por ultimo, pede
 #        o reinicio e sai DE PROPOSITO COM A VENTOINHA A 95%: nem o trap nem o
 #        vigia a devolvem. ~10 min.
 #
@@ -231,6 +233,7 @@ BOOT_ID="$R/proc/sys/kernel/random/boot_id"
 PPD_SERVICO=org.freedesktop.UPower.PowerProfiles
 PPD_OBJETO=/org/freedesktop/UPower/PowerProfiles
 UNIT_AGENTE=nexus-sense-agent.service
+RUNTIME_AGENTE=nexus-sense      # o RuntimeDirectory da unit, onde mora o registro do guarda
 BUSCTL=${ENSAIO_BUSCTL:-busctl}
 SYSTEMCTL=${ENSAIO_SYSTEMCTL:-systemctl}
 if [ -n "$R" ]; then BUSCTL=${ENSAIO_BUSCTL:-}; SYSTEMCTL=${ENSAIO_SYSTEMCTL:-}; fi
@@ -2171,8 +2174,19 @@ volta_do_agente() {   # $1 = pid antigo -> NOVO_PID, se a unit o subiu de novo
     return 1
 }
 
+# O guarda so devolve o manual que o PROPRIO agente escreveu: o agente o
+# registra em $RUNTIME_DIRECTORY/ventoinha antes de escrever, e o
+# ExecStopPost confere fan_speed contra o registro. O exercicio escreve o
+# manual pelo agente, e por isso registra por ele: o mesmo arquivo, no
+# RuntimeDirectory da unit. Um manual da janela, sem registro, o guarda deixa.
+registra_pelo_agente() {   # $1 = o manual que vai ser escrito. 1 se a pasta nao existe
+    local p="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/$RUNTIME_AGENTE"
+    [ -d "$p" ] || return 1
+    printf '%s\n%s\n' "$ULTIMO" "$1" > "$p/ventoinha.novo" && mv "$p/ventoinha.novo" "$p/ventoinha"
+}
+
 exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem o guarda
-    local pid sp wd seg v="$C5_P,$C5_P" falhou=0 parcial=0
+    local pid sp wd rd seg v="$C5_P,$C5_P" falhou=0 parcial=0
     echo
     echo "O GUARDA -- o agente morre, e depois trava, com a ventoinha em $v"
     if [ -z "$SYSTEMCTL" ]; then
@@ -2180,8 +2194,9 @@ exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem
         return 2
     fi
     pid=$(unit_prop MainPID); sp=$(unit_prop ExecStopPost); wd=$(unit_prop WatchdogUSec)
+    rd=$(unit_prop RuntimeDirectory)
     seg=$(segundos "${wd:-0}")
-    echo "  $UNIT_AGENTE: MainPID ${pid:-?}, ExecStopPost '$sp', WatchdogUSec ${wd:-?}"
+    echo "  $UNIT_AGENTE: MainPID ${pid:-?}, ExecStopPost '$sp', WatchdogUSec ${wd:-?}, RuntimeDirectory '$rd'"
     if ! eh_num "$pid" || [ "$pid" -le 0 ]; then
         echo "guarda: nao rodou -- o agente nao esta no ar" | tee -a "$RESUMO"
         return 2
@@ -2190,8 +2205,16 @@ exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem
         echo "guarda: nao rodou -- a unit nao tem ExecStopPost: o guarda da secao 8 do plano ainda nao existe" | tee -a "$RESUMO"
         return 2
     fi
+    if [ "$rd" != "$RUNTIME_AGENTE" ]; then
+        echo "guarda: nao rodou -- a unit nao tem RuntimeDirectory=$RUNTIME_AGENTE, onde o agente registra o que escreve" | tee -a "$RESUMO"
+        return 2
+    fi
 
     # ---- kill -9: o ExecStopPost tem de devolver
+    if ! registra_pelo_agente "$v"; then
+        echo "guarda: nao rodou -- a pasta do agente em \$XDG_RUNTIME_DIR/$RUNTIME_AGENTE nao existe" | tee -a "$RESUMO"
+        return 2
+    fi
     if [ "$ULTIMO" != "$v" ] && ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi
     observa c5:guarda:antes "$ASSENTA"
     echo "  kill -9 no agente (pid $pid)"
@@ -2221,6 +2244,9 @@ exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem
         parcial=1
     elif [ -z "$NOVO_PID" ]; then
         echo "guarda, SIGSTOP: nao rodou -- sem agente no ar" | tee -a "$RESUMO"
+        falhou=1
+    elif ! registra_pelo_agente "$v"; then
+        echo "guarda, SIGSTOP: nao rodou -- o agente voltou sem a pasta $RUNTIME_AGENTE" | tee -a "$RESUMO"
         falhou=1
     else
         if [ "$ULTIMO" != "$v" ] && ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi

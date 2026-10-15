@@ -34,6 +34,8 @@ source "$RAIZ/tests/shell/lib-arvore-termica.sh"
 for c in timeout ps grep sed cut; do
     command -v "$c" > /dev/null 2>&1 || { echo "ERRO alvo ausente: $c"; exit 3; }
 done
+GUARDA="$RAIZ/packaging/scripts/guarda-ventoinha.sh"
+[ -x "$GUARDA" ] || { echo "ERRO alvo ausente: $GUARDA executavel"; exit 3; }
 
 # O mapa de E2 do EC de mentira: o manual gira 600 + 50 por ponto na CPU e
 # 500 + 45 na GPU. Com ele, o teto da curva alta (5300 / 4781 rpm, pacote a
@@ -121,24 +123,28 @@ com_usuario() {   # $1 = jeito. Depois de `nova`: a pessoa entra junto com o EC
 }
 
 # ─── o agente e o systemd de mentira ────────────────────────────────
-# O systemd sobe o agente, e quando ele morre roda o ExecStopPost -- 0,0 em
-# fan_speed -- e o sobe de novo 0,3 s depois. Com o WatchdogSec (1 s), mata o
+# O systemd cria o RuntimeDirectory (run/nexus-sense) e sobe o agente. Quando
+# ele morre, roda o ExecStopPost -- o guarda de verdade,
+# packaging/scripts/guarda-ventoinha.sh, que devolve o manual registrado ali
+# --, apaga a pasta e sobe o agente de novo 0,3 s depois. Com o WatchdogSec (1 s), mata o
 # agente parado (estado T) ha mais de 1 s: e o agente que deixou de avisar.
 # Pelo estado e nao por um relogio de batidas: com a maquina ocupada, um laco
 # de batidas atrasa mais de 1 s sozinho, e o watchdog de mentira mataria um
 # agente vivo -- o roteiro veria 0,0 de outra mao e pararia. Guardas:
-#   completo   ExecStopPost e WatchdogSec
-#   sem        nenhum dos dois: a unit de hoje
-#   quebrado   os dois declarados, e o ExecStopPost nao escreve nada
-#   surdo      os dois declarados, e o watchdog nunca mata ninguem
+#   completo   ExecStopPost, WatchdogSec e RuntimeDirectory
+#   sem        nenhum dos tres: a unit de antes do guarda
+#   quebrado   os tres declarados, e o ExecStopPost nao roda nada
+#   surdo      os tres declarados, e o watchdog nunca mata ninguem
 systemd_falso() {   # $1 = arvore, $2 = guarda
     local d=$1 pid st parado
     case "$2" in
-        sem) : > "$d/unit.execstoppost"; echo 0 > "$d/unit.watchdog" ;;
-        *)   echo "{ path=/usr/bin/sh ; argv[]=/usr/bin/sh -c echo 0,0 > fan_speed ; }" > "$d/unit.execstoppost"
-             echo 1s > "$d/unit.watchdog" ;;
+        sem) : > "$d/unit.execstoppost"; echo 0 > "$d/unit.watchdog"; : > "$d/unit.runtimedirectory" ;;
+        *)   echo "{ path=/usr/lib/nexus-sense/guarda-ventoinha.sh ; argv[]=/usr/lib/nexus-sense/guarda-ventoinha.sh ; }" \
+                 > "$d/unit.execstoppost"
+             echo 1s > "$d/unit.watchdog"; echo nexus-sense > "$d/unit.runtimedirectory" ;;
     esac
     while [ -d "$d" ]; do
+        [ "$2" = sem ] || mkdir -p "$d/run/nexus-sense"
         ( while [ -d "$d" ]; do sleep 0.05; done ) &
         pid=$!
         poe "$d/agente.pid" "$pid"
@@ -157,7 +163,11 @@ systemd_falso() {   # $1 = arvore, $2 = guarda
         done
         wait "$pid" 2> /dev/null
         poe "$d/agente.pid" 0
-        case "$2" in completo|surdo) poe "$(FAN_DE "$d")" "0,0" ;; esac
+        case "$2" in
+            completo|surdo)
+                GUARDA_RAIZ="$d" RUNTIME_DIRECTORY="$d/run/nexus-sense" "$GUARDA" >> "$d/guarda.log" 2>&1 ;;
+        esac
+        rm -rf "$d/run/nexus-sense"
         sleep 0.3
     done 2> /dev/null
 }
@@ -538,11 +548,16 @@ done
 grep -q '^guarda, kill -9: PASSOU' "$D/ec5.resumo.txt" && grep -q '^guarda, SIGSTOP: PASSOU' "$D/ec5.resumo.txt" \
     && ok "o guarda devolve a ventoinha no kill -9 e no SIGSTOP" \
     || falha "o guarda: $(grep '^guarda' "$D/ec5.resumo.txt" | tr '\n' '|')"
+[ "$(grep -c 'que ele escreveu; devolvida ao automatico' "$D/guarda.log")" -eq 2 ] \
+    && ok "quem devolveu foi o guarda de verdade, pelo registro, nas duas vezes" \
+    || falha "o guarda nao devolveu pelo registro: $(tr '\n' '|' < "$D/guarda.log")"
 grep -q '^GESTO .*reinicie a maquina agora' "$D/saida.txt" \
     && ok "pede o reinicio por ultimo" || falha "nao pediu o reinicio"
 [ -s "$(estado)" ] && ok "a continuacao fica gravada para depois do reinicio" || falha "nao gravou a continuacao"
 sleep 0.3
-[ -z "$(ls -A "$D/run")" ] && ok "nem o trap nem o vigia devolveram o manual: o diretorio de trabalho saiu" \
+# run/nexus-sense e o RuntimeDirectory do agente de mentira, que segue no ar.
+[ -z "$(ls -A "$D/run" | grep -vx nexus-sense)" ] \
+    && ok "nem o trap nem o vigia devolveram o manual: o diretorio de trabalho saiu" \
     || falha "sobrou em run/: $(ls -A "$D/run")"
 [ "$(fan "$D")" = "95,95" ] && ok "o manual segue de pe para o reinicio" || falha "o manual nao ficou: '$(fan "$D")'"
 
@@ -585,6 +600,17 @@ confere "fan_speed devolvido e a rotacao presa no manual: sai com 14" "$?" 14 "9
 grep -q '^guarda, kill -9: FALHOU -- fan_speed em 0,0, mas a rotacao nao saiu do manual' "$D/ec5.resumo.txt" \
     && ok "o guarda reprova quando so o fan_speed volta" \
     || falha "o guarda com a rotacao presa: $(grep '^guarda' "$D/ec5.resumo.txt" | tr '\n' '|')"
+roda "$D" "$S" ec5-volta > /dev/null
+
+# Sem o registro o guarda nao reconhece o manual como do agente, e o deixa:
+# e o que faz com um manual escolhido na janela. A pasta some no meio -- a
+# unit sem RuntimeDirectory --, e o exercicio diz que nao rodou.
+c5 ec5-sem-pasta completo
+echo "" > "$D/unit.runtimedirectory"
+roda "$D" "${C5[@]}"
+confere "unit sem RuntimeDirectory: o guarda nao roda, sai com 17" "$?" 17 "95,95"
+grep -q 'nao tem RuntimeDirectory' "$D/ec5.resumo.txt" \
+    && ok "e diz que falta a pasta do registro" || falha "nao disse que falta a pasta do registro"
 roda "$D" "$S" ec5-volta > /dev/null
 
 # Um watchdog que nunca mata: o agente fica travado ate o roteiro o soltar.

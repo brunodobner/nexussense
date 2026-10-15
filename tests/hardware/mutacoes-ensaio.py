@@ -34,6 +34,7 @@ E3 = "test-ensaio-termico-e3.sh"
 REDE = "test-ensaio-termico-rede.sh"
 CURVA = "test-ensaio-termico-curva.sh"
 APOIO = "lib-arvore-termica.sh"
+GUARDA = "packaging/scripts/guarda-ventoinha.sh"
 
 # O trecho da retomada existe igual no E3 e no E3b; o comentario o ancora no E3.
 RETOMA_E3 = (
@@ -255,6 +256,9 @@ def uma(i, nome, teste, de, para, orig, base):
     alvo.chmod(0o755)
     for f in (APOIO, teste):
         shutil.copy(REPO / "tests/shell" / f, d / "tests/shell" / f)
+    # O E-C5 roda o guarda de verdade como ExecStopPost do systemd de mentira.
+    (d / "packaging/scripts").mkdir(parents=True)
+    shutil.copy2(REPO / GUARDA, d / GUARDA)
     r = subprocess.run([str(d / "tests/shell" / teste)], capture_output=True, text=True)
     falhas = [l.strip()[6:].split(":")[0][:55] for l in r.stdout.splitlines() if l.startswith("  FALHA")]
     shutil.rmtree(d, ignore_errors=True)

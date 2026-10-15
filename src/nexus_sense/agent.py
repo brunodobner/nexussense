@@ -15,10 +15,11 @@ dela em fan_guard.py: o agente le, ela decide, o agente escreve.
 
 import dataclasses
 import logging
+import os
 import threading
 from typing import NamedTuple
 
-from . import fan_guard, telemetry
+from . import fan_guard, guarda, telemetry
 from .config import Config, load, save
 from .device import Controls, WriteError
 from .maximum import MaximumMode, THERMAL_PROFILE
@@ -406,16 +407,33 @@ class Agent:
             self.log.warning("falha ao liberar PowerMizer: %s", error)
         self._gpu_confirmed = False
 
+    def _avisa_systemd(self, mensagem):
+        """sd_notify, pela unit Type=notify. Sem socket -- num terminal, nos
+        testes -- nao ha a quem avisar. Com socket e sem conseguir, o
+        WatchdogSec vai matar um agente sadio a cada poucos segundos: isso
+        merece uma linha, uma vez."""
+        if guarda.notifica(mensagem) or not os.environ.get("NOTIFY_SOCKET"):
+            return
+        if not self._aviso_systemd_falhou:
+            self.log.warning("não foi possível avisar o systemd (%s)", mensagem)
+        self._aviso_systemd_falhou = True
+
     def run(self, stop_event=None):
         """O laco. Para quando `stop_event` for sinalizado."""
         parar = stop_event or threading.Event()
+        self._aviso_systemd_falhou = False
         self.log.info("agente no ar, sondando a cada %.1f s", self.interval)
+        self._avisa_systemd("READY=1")
         try:
             while not parar.is_set():
                 try:
                     self.tick()
                 except Exception:  # nunca deixar o laco morrer por um tick ruim
                     self.log.exception("falha inesperada numa passada")
+                # Depois de cada passada, boa ou ruim: o agente esta vivo.
+                # Quem para de avisar e o travado, e o WatchdogSec o mata --
+                # e o guarda devolve a ventoinha (docs/plano-curva.md, secao 8).
+                self._avisa_systemd("WATCHDOG=1")
                 parar.wait(self.interval)
         finally:
             self._release_gpu()

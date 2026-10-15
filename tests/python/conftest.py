@@ -45,6 +45,16 @@ def sem_barramento_de_sessao(monkeypatch, tmp_path):
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", f"unix:path={tmp_path}/sem-barramento")
 
 
+@pytest.fixture(autouse=True)
+def fora_da_unit(monkeypatch):
+    """Testes nunca falam com o systemd de quem os roda. Rodada de dentro de
+    uma unit -- um CI, um servico --, a suite herdaria o NOTIFY_SOCKET, e o
+    agente dos testes avisaria o gerenciador de verdade (armadilha 30). Quem
+    precisa de socket abre o seu, como os testes de test_guarda.py."""
+    for nome in ("NOTIFY_SOCKET", "RUNTIME_DIRECTORY", "WATCHDOG_USEC", "WATCHDOG_PID"):
+        monkeypatch.delenv(nome, raising=False)
+
+
 # Resposta fixa da isca. 11 graus e um valor que placa nenhuma devolve em
 # uso, e os espioes dos testes respondem outra coisa: quando um teste ve
 # este par, sabe que passou pelo PATH e nao por um runner injetado.

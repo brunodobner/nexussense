@@ -996,6 +996,8 @@ install_nexus_sense() {
   cp -r "$pacote" /usr/lib/nexus-sense/nexus_sense
   find /usr/lib/nexus-sense/nexus_sense -name '__pycache__' -type d -exec rm -rf {} +
   install -m 755 "${RAIZ}/packaging/scripts/apply-perms.sh" /usr/lib/nexus-sense/apply-perms.sh
+  # O ExecStopPost da unit do agente: devolve a ventoinha quando ele para.
+  install -m 755 "${RAIZ}/packaging/scripts/guarda-ventoinha.sh" /usr/lib/nexus-sense/guarda-ventoinha.sh
 
   # --- os dois lancadores
   # -P: sem ele o "-m" poe o diretorio corrente na frente do sys.path. O

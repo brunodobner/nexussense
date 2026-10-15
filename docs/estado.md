@@ -7,6 +7,33 @@ diz qual é a vez de qual, e o que ficou pendente.
 
 ---
 
+## Em andamento: a curva própria da ventoinha (parado em 2026-10-15, à tarde)
+
+Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **nada
+instalado**: a ventoinha da máquina segue no automático do firmware.
+
+- **Feito e verificado:** os modos de ensaio E-C2, E-C3 e E-C5 em
+  `tests/hardware/ensaio-termico.sh` (commit `bd67182`, suíte verde); a curva
+  aprovada pelo usuário, com as duas tabelas, em
+  [plano-curva.md](plano-curva.md), seção 11 (`ba10573`).
+- **Escrito, suítes de depois NÃO terminadas:** o guarda (plano-curva, seção
+  8, no fim): `packaging/scripts/guarda-ventoinha.sh` (ExecStopPost),
+  `src/nexus_sense/guarda.py` (sd_notify e o registro), a unit com
+  `Type=notify`, `WatchdogSec=6`, `WatchdogSignal=SIGKILL` e
+  `RuntimeDirectory`, e o `setup.sh` instalando o guarda. Os testes novos
+  passaram (`test_guarda.py`, `test-guarda-ventoinha.sh`,
+  `test-unit-agente.sh`); o teste da curva com o guarda de verdade e as duas
+  suítes completas foram interrompidos pelo desligamento. **Ao retomar: rodar
+  `python3 -m pytest -q` e `./tests/run-all.sh` e comparar com a baseline**
+  (pytest 501; shell 24 passam, 1 pula, 1 falha — `test-arvore.sh`, só porque
+  num worktree `.git` é arquivo).
+- **Próximo, se o usuário confirmar a versão curta:** a função da curva
+  (tabela, histerese de 3 °C, piso de 81%/82% com a GPU a 76 °C), ligada no
+  agente por uma chave no `config.toml`, sem botão na janela por enquanto.
+  Depois instalar (pkexec, avisando antes) e rodar o E-C5 na máquina.
+
+---
+
 ## Onde estamos
 
 | | |

@@ -125,9 +125,10 @@ case "\$*" in
     *) exit 1 ;;
 esac
 FIM
-    # O systemctl de mentira: so as tres perguntas que o E-C5 faz a unit do
-    # agente. O pid sai de agente.pid; o guarda, de unit.execstoppost e
-    # unit.watchdog. Sem eles: agente fora do ar e unit sem guarda.
+    # O systemctl de mentira: so as perguntas que o E-C5 faz a unit do
+    # agente. O pid sai de agente.pid; o guarda, de unit.execstoppost,
+    # unit.watchdog e unit.runtimedirectory. Sem eles: agente fora do ar e
+    # unit sem guarda.
     cat > "$d/bin/systemctl" << FIM
 #!/bin/bash
 echo "\$*" >> "$d/systemctl.log"
@@ -135,6 +136,7 @@ case "\$*" in
     *"-p MainPID "*) cat "$d/agente.pid" 2> /dev/null || echo 0 ;;
     *"-p ExecStopPost "*) cat "$d/unit.execstoppost" 2> /dev/null ;;
     *"-p WatchdogUSec "*) cat "$d/unit.watchdog" 2> /dev/null || echo 0 ;;
+    *"-p RuntimeDirectory "*) cat "$d/unit.runtimedirectory" 2> /dev/null ;;
     *) exit 1 ;;
 esac
 FIM

@@ -381,6 +381,30 @@ de qualquer jeito, porque a forma B foi pedida.
   depois do último aviso. Falta a prova com a ventoinha: o exercício do
   guarda (seção 6, E-C5).
 
+  **O guarda, implementado em 2026-10-15** (ramo `curva/guarda`; não
+  instalado). Três decisões a mais do que este esboço dizia:
+
+  - **Só o que o agente escreveu.** O esboço mandava o `ExecStopPost`
+    escrever `0,0` sempre. Isso faria todo logout e todo reinício perder o
+    Manual escolhido na janela, que hoje atravessa os dois. Então o agente
+    registra, antes de cada escrita, o valor de antes e o novo em
+    `$RUNTIME_DIRECTORY/ventoinha` (`guarda.py`), e o `ExecStopPost`
+    (`packaging/scripts/guarda-ventoinha.sh`) só devolve o automático se
+    `fan_speed` for um desses dois. Um Manual da janela fica como está: com
+    o agente morto ninguém o protege, como hoje.
+  - **`WatchdogSignal=SIGKILL`.** O padrão é `SIGABRT`, que faz core dump, e
+    o `systemd-coredump` atrasaria o `ExecStopPost`.
+  - **`WatchdogSec=6`:** três passadas.
+
+  Medido com units descartáveis, `ProtectSystem=strict` como a do agente, o
+  guarda de verdade e um `fan_speed` de mentira: com `kill -9`, o `0,0`
+  chegou em 54 ms; com `SIGSTOP`, em 5,8 s. O `RuntimeDirectory` fica
+  gravável sob `ProtectSystem=strict`, o `ExecStopPost` recebe o
+  `$RUNTIME_DIRECTORY`, e a pasta só some depois dele.
+
+  O E-C5 registra pelo agente o manual que escreve: sem isso o guarda o
+  trataria como um Manual da janela, e não o devolveria.
+
 ---
 
 ## 9. O que fica de fora
@@ -507,5 +531,6 @@ rotações são as do mapa de E2, medido em repouso.
   rotação: a rede mora no mesmo processo.
 
 Esta seção substitui, na tabela "Em aberto" da seção 10, as linhas do teto de
-ruído e da parte de cima da curva. O que falta: o guarda, o modo na janela e
-na bandeja, a função da curva testada contra os traços, e E-C5 na máquina.
+ruído e da parte de cima da curva. O que falta: o modo na janela e na bandeja,
+a função da curva testada contra os traços, instalar, e E-C5 na máquina. O
+guarda está escrito (seção 8, no fim).
