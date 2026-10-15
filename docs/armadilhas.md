@@ -1494,6 +1494,15 @@ busctl get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
     net.hadess.PowerProfiles ActiveProfile
 ```
 
+**E o perfil de energia também valeu por um dia.** Em 2026-10-15, com o
+perfil em `performance` desde a véspera, o modo desligado e um reinício no
+meio, o automático assentou em 2160 a 2260 rpm com a CPU pelo EC a 45–50 °C.
+É o repouso da curva baixa. E a queda de 10/11 cabe dentro da curva alta: o
+pacote foi a 65–69 °C, onde ela gira ~5000 rpm. Nem o modo nem o perfil,
+lidos, dizem a curva. Quem diz é a rotação contra a temperatura, comparada
+com a tabela de `docs/plano-curva.md`, seção 2.1. O gatilho está em aberto
+(seção 2.4 do mesmo plano).
+
 **O que isto tem em comum com a 25.** Quem avisou foi o usuário, que ouve a
 ventoinha todo dia: *"mesmo só com você aberto ela mantém uma faixa superior
 à que você espera"*. O plano tinha medido uma curva, numa manhã, e a chamado
