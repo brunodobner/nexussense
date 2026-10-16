@@ -42,9 +42,11 @@ firmware: `fan_curve = false` no `config.toml`.
 - **A bandeja de antes da instalação apagava `fan_curve`** ao gravar o
   `config.toml` (o processo antigo não conhecia o campo). Reiniciada às
   07:28 de 2026-10-16; o `setup.sh` não reinicia a bandeja ao instalar.
-- **Próximo:** a curva reescrever depois de uma suspensão; o watchdog não
-  matar na suspensão; o E-C5 deixar o perfil livre e olhar 30 s depois de
-  acordar; rodar o E-C5 de novo. Depois, o botão "Curva" e o merge.
+- **Os ajustes da suspensão, escritos** (plano-curva, seção 11, no fim):
+  o agente alarga o watchdog antes de dormir, devolve o perfil e reescreve o
+  manual ao acordar, e o E-C5 registra a troca em vez de parar.
+- **Próximo:** instalar, rodar o E-C5 de novo; depois, o botão "Curva" e o
+  merge.
 
 ---
 

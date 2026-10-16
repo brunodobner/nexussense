@@ -17,10 +17,11 @@ import dataclasses
 import logging
 import os
 import threading
+import time
 from collections import deque
 from typing import NamedTuple
 
-from . import curva, fan_guard, guarda, telemetry
+from . import curva, fan_guard, guarda, sono, telemetry
 from .config import Config, load, save
 from .device import Controls, WriteError
 from .maximum import MaximumMode, THERMAL_PROFILE
@@ -115,11 +116,23 @@ DEFAULT_INTERVAL = 2.0
 _NAO_LIDO = object()
 
 
+def _tempo_dormido():
+    """Segundos que a maquina passou dormindo desde o boot: o relogio de boot
+    conta a suspensao, o monotonico nao."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
+
+
 class Agent:
     """Vigia a fonte de energia e corrige o perfil termico."""
 
     def __init__(self, sysfs, config_path, interval=DEFAULT_INTERVAL, logger=None):
         self.sysfs = sysfs
+        # O WatchdogSec da unit, que o systemd passa no ambiente. None fora
+        # dela.
+        try:
+            self._watchdog_usec = int(os.environ.get("WATCHDOG_USEC", "")) or None
+        except ValueError:
+            self._watchdog_usec = None
         self.config_path = config_path
         self.interval = interval
         self.log = logger or LOG
@@ -156,6 +169,18 @@ class Agent:
         self._curva_cpus = deque(maxlen=curva.JANELA)
         self._curva_gpus = deque(maxlen=curva.JANELA)
         self._fan_da_passada = _NAO_LIDO
+        # A suspensao (sono.py). Ao acordar o firmware larga o manual da
+        # ventoinha e troca o perfil termico: a passada seguinte reaplica.
+        self._acordou = threading.Event()
+        self._perfil_visto = None
+        self._perfil_antes_de_dormir = None
+        self._ac_antes_de_dormir = None
+        self._curva_reescreve = False
+        # Quanto o relogio de boot (que conta o tempo dormindo) passou do
+        # monotonico (que nao conta). Se a diferenca salta entre duas
+        # passadas, a maquina dormiu -- mesmo que o aviso do logind falte.
+        self._relogio_sono = _tempo_dormido
+        self._dormido = None
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -192,6 +217,9 @@ class Agent:
         if self._driver_presente is False:
             self.log.info("driver de volta; retomando")
         self._driver_presente = True
+
+        perfil = self._depois_de_dormir(perfil, now_on_ac)
+        self._perfil_visto = perfil
 
         # Recarregado a cada passada de proposito: a GUI escreve neste
         # arquivo, e o agente nao tem outro jeito de saber.
@@ -430,7 +458,7 @@ class Agent:
                 )
             return setpoint
         self._curva_falhas = 0
-        if alvo == setpoint and alvo == self._curva_escrito:
+        if alvo == setpoint and alvo == self._curva_escrito and not self._curva_reescreve:
             return setpoint
 
         # O registro antes da escrita: sem ele o guarda nao reconheceria o
@@ -447,7 +475,10 @@ class Agent:
             self._curva_sem_guarda_avisado = True
             return setpoint
         self._curva_sem_guarda_avisado = False
-        if alvo != setpoint:
+        # Depois de dormir o firmware esta no automatico com fan_speed
+        # dizendo o manual: escrever o mesmo valor o reaplica.
+        reescreve, self._curva_reescreve = self._curva_reescreve, False
+        if alvo != setpoint or reescreve:
             try:
                 self._controls.set_fan_speed(*alvo)
             except WriteError as erro:
@@ -568,6 +599,57 @@ class Agent:
             self.log.warning("falha ao liberar PowerMizer: %s", error)
         self._gpu_confirmed = False
 
+    def _vai_dormir(self):
+        """Do fio do sono, logo antes de a maquina dormir: so anota."""
+        self._perfil_antes_de_dormir = self._perfil_visto
+        self._ac_antes_de_dormir = self._was_on_ac
+
+    def _depois_de_dormir(self, perfil, on_ac):
+        """Na primeira passada depois de acordar, reaplica o que o firmware
+        desfez: o perfil termico que estava em vigor, e o manual da curva.
+
+        Medido no E-C5 em 2026-10-16: ao acordar, a rotacao estava no
+        automatico com fan_speed ainda dizendo o manual, e o perfil tinha
+        ido de balanced-performance para balanced. Devolve o perfil o que
+        dormiu: so na tomada e se o cabo nao mudou enquanto dormia -- senao
+        quem decide e a troca de fonte, como em qualquer passada.
+        """
+        dormido = self._relogio_sono()
+        saltou = self._dormido is not None and dormido - self._dormido > 2.0
+        self._dormido = dormido
+        if not (self._acordou.is_set() or saltou):
+            return perfil
+        self._acordou.clear()
+        if saltou and self._watchdog_usec:
+            # O aviso do logind nao veio, ou veio tarde: o watchdog pode estar
+            # alargado. Volta ao da unit.
+            self._avisa_systemd(f"WATCHDOG_USEC={self._watchdog_usec}")
+        antes, self._perfil_antes_de_dormir = self._perfil_antes_de_dormir, None
+        ac_antes, self._ac_antes_de_dormir = self._ac_antes_de_dormir, None
+        self._curva_reescreve = True
+        if (
+            antes is not None
+            and perfil != antes
+            and on_ac is True
+            and ac_antes in (True, None)
+            and antes in available(self._read_choices(), on_ac=True)
+        ):
+            try:
+                self._controls.set_profile(antes)
+            except WriteError as erro:
+                self.log.warning(
+                    "acordou: o firmware trocou o perfil para %s, e não "
+                    "consegui devolver %s: %s", perfil, antes, erro,
+                )
+                return perfil
+            self.log.info(
+                "acordou: o firmware trocou o perfil para %s; devolvido %s",
+                perfil, antes,
+            )
+            return antes
+        self.log.info("acordou da suspensão")
+        return perfil
+
     def _avisa_systemd(self, mensagem):
         """sd_notify, pela unit Type=notify. Sem socket -- num terminal, nos
         testes -- nao ha a quem avisar. Com socket e sem conseguir, o
@@ -585,6 +667,13 @@ class Agent:
         self._aviso_systemd_falhou = False
         self.log.info("agente no ar, sondando a cada %.1f s", self.interval)
         self._avisa_systemd("READY=1")
+        vigia_do_sono = None
+        # So sob a unit com watchdog: sem ele nao ha o que alargar.
+        if self._watchdog_usec and os.environ.get("NOTIFY_SOCKET"):
+            vigia_do_sono = sono.Sono(
+                guarda.notifica, self._watchdog_usec, self._vai_dormir, self._acordou.set
+            )
+            vigia_do_sono.inicia()
         try:
             while not parar.is_set():
                 try:
@@ -597,5 +686,7 @@ class Agent:
                 self._avisa_systemd("WATCHDOG=1")
                 parar.wait(self.interval)
         finally:
+            if vigia_do_sono is not None:
+                vigia_do_sono.para()
             self._release_gpu()
         self.log.info("agente encerrado")

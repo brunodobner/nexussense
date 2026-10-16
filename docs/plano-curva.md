@@ -617,5 +617,27 @@ nenhuma passou da suspensão:
   ou sem curva: depois de suspender, a máquina fica em `balanced` até alguém
   notar. Nesta rodada ele foi devolvido à mão.
 
-O que falta: os três ajustes acima, o E-C5 de novo, e o botão na janela e na
-bandeja.
+**Os ajustes, escritos em 2026-10-16** (`src/nexus_sense/sono.py` e
+`Agent._depois_de_dormir`):
+
+- **O agente segura um bloqueio de atraso do logind** (`systemd-inhibit
+  --what=sleep --mode=delay`) e espera o `PrepareForSleep` (`busctl wait`,
+  um processo só, um sinal por linha). Antes de dormir manda
+  `WATCHDOG_USEC` de 30 dias e só então solta o bloqueio — o logind espera
+  por ele. Ao acordar devolve o `WATCHDOG_USEC` da unit, avisa que está vivo
+  e segura um bloqueio novo. Sem dependência nova: o `busctl wait` existe
+  desde o systemd 257, e outros programas da sessão já seguram bloqueios
+  assim (`systemd-inhibit --list`). Medido aqui: o `wait` não desiste sem
+  sinal, e o `--timeout=infinity` o busctl 262 recusa.
+- **Na primeira passada depois de acordar,** o agente devolve o perfil que
+  estava em vigor antes de dormir, se o firmware o trocou — só na tomada, e
+  se o cabo não mudou enquanto a máquina dormia. E a curva reescreve o
+  mesmo manual, que é o que o reaplica no firmware.
+- **Se o aviso do logind faltar,** o agente percebe o sono pelo relógio: a
+  diferença entre o de boot (que conta a suspensão) e o monotônico (que não
+  conta) salta. Ele faz o mesmo, e devolve o watchdog da unit.
+- **O E-C5 deixa o perfil livre na suspensão,** registra os perfis que viu e
+  se o agente atravessou a suspensão vivo, e espera o agente devolver o
+  perfil antes de seguir para o cabo.
+
+O que falta: instalar, o E-C5 de novo, e o botão na janela e na bandeja.

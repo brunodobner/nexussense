@@ -73,6 +73,9 @@ confere_ppd() {      # $1 = descricao, $2 = perfil de energia esperado
 #   ausente         nao faz nada
 #   sem_ppd         liga o modo, e a bandeja nao poe o perfil em performance
 #   larga_e_volta   ao suspender, o EC larga o manual e volta a ele em 0,3 s
+#   perfil_preso    ao acordar, o perfil fica no balanced: o agente nao o devolve
+# No jeito normal, ao acordar o perfil vai a balanced e volta em 0,3 s, como
+# na maquina: o firmware o troca, e o agente o devolve.
 usuario() {   # $1 = arvore, $2 = jeito
     local d=$1 n=0 visto linha s
     while [ -d "$d" ]; do
@@ -96,9 +99,15 @@ usuario() {   # $1 = arvore, $2 = jeito
                     poe "$d/processos" GameThread ;;
                 *"suspenda"*)
                     [ "$2" = larga_e_volta ] && : > "$d/ec_larga"
+                    # Como a maquina: o firmware troca o perfil ao acordar, e
+                    # o agente o devolve logo depois. Com perfil_preso, nao.
+                    [ "$2" = perfil_preso ] || [ "$2" = larga_e_volta ] \
+                        || poe "$d/sys/firmware/acpi/platform_profile" balanced
+                    [ "$2" = perfil_preso ] && poe "$d/sys/firmware/acpi/platform_profile" balanced
                     s=$(cat "$d/sys/power/suspend_stats/success")
                     poe "$d/sys/power/suspend_stats/success" $(( s + 1 ))
-                    [ "$2" = larga_e_volta ] && { sleep 0.3; rm -f "$d/ec_larga"; } ;;
+                    [ "$2" = larga_e_volta ] && { sleep 0.3; rm -f "$d/ec_larga"; }
+                    [ "$2" = normal ] && { sleep 0.3; poe "$d/sys/firmware/acpi/platform_profile" balanced-performance; } ;;
                 *"tire o cabo"*)
                     poe "$d/sys/class/power_supply/ACAD/online" 0
                     sleep 0.2      # o agente: na bateria, um perfil que ela aceita
@@ -545,6 +554,12 @@ for g in suspensao cabo "perfil termico"; do
         && ok "$g: o EC manteve o manual" \
         || falha "$g: $(grep "^$g:" "$D/ec5.resumo.txt")"
 done
+grep -q '^    perfis vistos na suspensao: balanced-performance balanced$' "$D/ec5.resumo.txt" \
+    && ok "a troca de perfil na suspensao fica registrada, e nao para o ensaio" \
+    || falha "perfis na suspensao: $(grep 'perfis vistos' "$D/ec5.resumo.txt")"
+grep -q '^    o agente atravessou a suspensao vivo' "$D/ec5.resumo.txt" \
+    && ok "diz se o agente atravessou a suspensao" \
+    || falha "o agente na suspensao: $(grep 'o agente' "$D/ec5.resumo.txt" | head -2)"
 grep -q '^guarda, kill -9: PASSOU' "$D/ec5.resumo.txt" && grep -q '^guarda, SIGSTOP: PASSOU' "$D/ec5.resumo.txt" \
     && ok "o guarda devolve a ventoinha no kill -9 e no SIGSTOP" \
     || falha "o guarda: $(grep '^guarda' "$D/ec5.resumo.txt" | tr '\n' '|')"
@@ -583,6 +598,14 @@ grep -q 'nao tem ExecStopPost' "$D/ec5.resumo.txt" \
 # Desistiu do reinicio: o mesmo boot_id. O ec5-volta devolve e diz.
 roda "$D" "$S" ec5-volta
 confere "sem reinicio, o ec5-volta devolve a ventoinha e sai com 11" "$?" 11 "0,0"
+
+# O perfil que o firmware trocou ao acordar nao volta: o agente nao fez a
+# parte dele, e o ensaio para antes do cabo -- com o manual devolvido.
+c5 ec5-perfil-preso completo perfil_preso
+roda "$D" "${C5[@]}"
+confere "o perfil nao volta depois da suspensao: sai com 11" "$?" 11 "0,0"
+grep -q 'o perfil nao voltou' "$D/saida.txt" \
+    && ok "e diz que quem devolve o perfil e o agente" || falha "nao disse do perfil que nao voltou"
 
 c5 ec5-quebrado quebrado
 roda "$D" "${C5[@]}"

@@ -2097,7 +2097,7 @@ modo_ec3() {
 # O que larga o manual. A ventoinha fica a 95%, bem acima de qualquer
 # automatico em repouso: uma falha e barulho, e "largou" tem sentido conhecido.
 
-reinicia_obs() { OBS_N=0; OBS_FORA=0; OBS_ULT=0; OBS_MIN1=; OBS_MIN2=; }
+reinicia_obs() { OBS_N=0; OBS_FORA=0; OBS_ULT=0; OBS_MIN1=; OBS_MIN2=; OBS_PERFIS=; }
 
 marca_fora() {   # a ultima amostra esta fora do manual? Acumula para relata()
     local d1 d2 f=0
@@ -2107,6 +2107,7 @@ marca_fora() {   # a ultima amostra esta fora do manual? Acumula para relata()
     OBS_N=$(( OBS_N + 1 )); OBS_FORA=$(( OBS_FORA + f )); OBS_ULT=$f
     if [ -z "$OBS_MIN1" ] || [ "$V_RPM1" -lt "$OBS_MIN1" ]; then OBS_MIN1=$V_RPM1; fi
     if [ -z "$OBS_MIN2" ] || [ "$V_RPM2" -lt "$OBS_MIN2" ]; then OBS_MIN2=$V_RPM2; fi
+    case " $OBS_PERFIS " in *" $V_PERFIL "*) ;; *) OBS_PERFIS="${OBS_PERFIS:+$OBS_PERFIS }$V_PERFIL" ;; esac
     return 0
 }
 
@@ -2353,9 +2354,26 @@ modo_ec5() {
     echo
     echo "SUSPENSAO"
     reinicia_obs; C5_SUSP0=$(le "$SUSPENSOES")
-    espera_gesto "suspenda a maquina (menu Suspender, ou feche a tampa) e acorde-a." "" suspendeu c5:suspensao
-    observa c5:suspensao:depois "$C5_DEPOIS"
+    pid0=$(unit_prop MainPID)
+    # O perfil fica livre: medido em 2026-10-16, ao acordar o firmware o
+    # troca para balanced. E achado, e nao motivo para parar; quem o devolve
+    # e o agente (sono.py e Agent._depois_de_dormir).
+    espera_gesto "suspenda a maquina (menu Suspender, ou feche a tampa) e acorde-a." perfil suspendeu c5:suspensao
+    observa c5:suspensao:depois "$C5_DEPOIS" perfil
     relata suspensao
+    pid1=$(unit_prop MainPID)
+    {
+        echo "    perfis vistos na suspensao: $OBS_PERFIS"
+        if [ -z "$pid0" ] || [ -z "$pid1" ]; then
+            echo "    o agente: sem a unit para perguntar"
+        elif [ "$pid0" = "$pid1" ]; then
+            echo "    o agente atravessou a suspensao vivo (pid $pid1)"
+        else
+            echo "    o agente NAO atravessou a suspensao: pid $pid0 antes, $pid1 depois"
+        fi
+    } | tee -a "$RESUMO"
+    acomoda perfil_de_volta perfil c5:suspensao \
+        "depois da suspensao o perfil nao voltou a $PERFIL0: quem o devolve e o agente"
 
     echo
     echo "CABO"
