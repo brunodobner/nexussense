@@ -36,6 +36,12 @@ class Config:
     maximum_saved_ppd: str | None = None
     maximum_saved_powermizer: str | None = None
 
+    # A curva propria da ventoinha (docs/plano-curva.md, secao 11). Desligada
+    # ate o usuario pedir: liga-se com "fan_curve = true" neste arquivo. Com
+    # ela ligada, "Automatico" na janela quer dizer a curva; "Manual" a
+    # suspende enquanto durar.
+    fan_curve: bool = False
+
 
 def default_path():
     base = os.environ.get("XDG_CONFIG_HOME")

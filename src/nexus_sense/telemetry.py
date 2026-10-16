@@ -77,24 +77,21 @@ def acer_temperatures(sysfs):
 
 
 GPU_LABEL = "GPU"
+CPU_LABEL = "CPU"
 
 
-def acer_gpu_temp(sysfs):
-    """A GPU como o EC a ve, em Celsius inteiros. None se nao houver leitura.
+def _acer_temp(sysfs, nome):
+    """Um canal do acer pelo rotulo, em Celsius inteiros. None sem leitura.
 
-    Achada pelo rotulo do canal, nao pelo numero. E so ela e lida: cada
-    temp*_input do acer e uma chamada ao firmware, e o rotulo nao e.
-
-    Nao acorda a placa nem a segura acordada, ao contrario do nvidia-smi
-    (armadilha 20), e le igual ao chip ou ate 6 C acima. Com a placa
-    dormindo o EC responde zero -- e o que esta funcao devolve.
+    Achado pelo rotulo, nao pelo numero. E so ele e lido: cada temp*_input
+    do acer e uma chamada ao firmware, e o rotulo nao e.
     """
     hwmon = acer_hwmon(sysfs)
     if hwmon is None:
         return None
     for rotulo in sorted(hwmon.glob("temp*_label")):
         try:
-            if sysfs.read(rotulo) != GPU_LABEL:
+            if sysfs.read(rotulo) != nome:
                 continue
         except OSError:
             continue
@@ -104,6 +101,25 @@ def acer_gpu_temp(sysfs):
         except (OSError, ValueError):
             return None
     return None
+
+
+def acer_gpu_temp(sysfs):
+    """A GPU como o EC a ve, em Celsius inteiros. None se nao houver leitura.
+
+    Nao acorda a placa nem a segura acordada, ao contrario do nvidia-smi
+    (armadilha 20), e le igual ao chip ou ate 6 C acima. Com a placa
+    dormindo o EC responde zero -- e o que esta funcao devolve.
+    """
+    return _acer_temp(sysfs, GPU_LABEL)
+
+
+def acer_cpu_temp(sysfs):
+    """A CPU como o EC a ve, em Celsius inteiros. None se nao houver leitura.
+
+    E a temperatura que o firmware usa para a curva dele: a tabela da curva
+    propria foi desenhada contra ela (docs/plano-curva.md, secao 2.1).
+    """
+    return _acer_temp(sysfs, CPU_LABEL)
 
 
 def cpu_package_temp(sysfs):

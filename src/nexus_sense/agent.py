@@ -19,11 +19,11 @@ import os
 import threading
 from typing import NamedTuple
 
-from . import fan_guard, guarda, telemetry
+from . import curva, fan_guard, guarda, telemetry
 from .config import Config, load, save
 from .device import Controls, WriteError
 from .maximum import MaximumMode, THERMAL_PROFILE
-from .model import available, nearest, parse_fan_speed
+from .model import available, fan_speed_value, nearest, parse_fan_speed
 from .powermizer import PowerMizer, PowerMizerError
 
 
@@ -110,6 +110,9 @@ LOG = logging.getLogger("nexus-sense-agent")
 # e trariam dependencia. Ver spec secao 4.2.
 DEFAULT_INTERVAL = 2.0
 
+# O fan_speed que a curva leu na passada, para a rede nao ler de novo.
+_NAO_LIDO = object()
+
 
 class Agent:
     """Vigia a fonte de energia e corrige o perfil termico."""
@@ -141,6 +144,14 @@ class Agent:
         # baixo, a GPU quente e a rotacao lenta. Ver _guarda_ventoinha.
         self._rede_seguidas = 0
         self._rede_recusa_avisada = False
+        # A curva propria. `_curva_escrito` e o par que ela escreveu por
+        # ultimo, e None quando a ventoinha nao e dela. Ver _curva.
+        self._curva_escrito = None
+        self._curva_primeira = True
+        self._curva_falhas = 0
+        self._curva_cedeu = False
+        self._curva_sem_guarda_avisado = False
+        self._fan_da_passada = _NAO_LIDO
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -259,6 +270,9 @@ class Agent:
                 self.log.warning("não foi possível gravar a configuração: %s", erro)
 
         self._reconcile_maximum(decisao.config, now_on_ac, perfil)
+        # A curva antes da rede: ela cumpre o invariante da rede, e a rede,
+        # depois, confere por fora.
+        self._curva(decisao.config, now_on_ac, perfil)
         self._guarda_ventoinha(decisao.config.maximum_mode and now_on_ac is True)
 
         return decisao
@@ -336,6 +350,118 @@ class Agent:
         except (OSError, ValueError):
             return None
 
+    # Perfis em que a curva nao age: o driver escreve 0,0 ao entrar neles, e
+    # o que o firmware faz com a ventoinha ali nunca foi medido.
+    PERFIS_SEM_CURVA = ("quiet", "low-power")
+    # Passadas seguidas sem a temperatura em que a curva segura o que esta,
+    # antes de devolver o automatico. Uma leitura falha, de vez em quando,
+    # e a proxima volta (armadilha 24).
+    CURVA_FALHAS = 3
+
+    def _curva(self, config, on_ac, perfil):
+        """Uma passada da curva, e o fan_speed como ela o deixou: a rede, logo
+        depois, julga esse valor sem ler de novo. Cada leitura de fan_speed e
+        uma linha no journal do driver (test_leituras_wmi.py)."""
+        self._fan_da_passada = self._curva_passada(config, on_ac, perfil)
+
+    def _curva_passada(self, config, on_ac, perfil):
+        """A curva propria (docs/plano-curva.md, secao 11), uma passada.
+
+        So age com fan_curve no config, na tomada, fora de quiet e
+        low-power, e com o guarda no ar. Fora disso, devolve o automatico
+        se a ventoinha for dela, e para por ai.
+
+        Um valor em fan_speed que ela nao escreveu, e que nao e o
+        automatico, e de outra mao -- o Manual da janela: a curva espera o
+        automatico voltar. Na primeira passada do agente nao ha como saber
+        de quem e o manual que esta la, e ela o assume: com a curva ligada,
+        a ventoinha e dela quando o agente sobe.
+
+        Devolve o fan_speed depois do que ela fez.
+        """
+        setpoint = self._read_fan_speed()
+        if not config.fan_curve:
+            return self._curva_larga(setpoint, "fan_curve desligado")
+        if on_ac is not True:
+            return self._curva_larga(setpoint, "na bateria")
+        if perfil in self.PERFIS_SEM_CURVA:
+            return self._curva_larga(setpoint, f"perfil {perfil}")
+
+        primeira, self._curva_primeira = self._curva_primeira, False
+        if (
+            not primeira
+            and setpoint not in (None, (0, 0))
+            and setpoint != self._curva_escrito
+        ):
+            if not self._curva_cedeu:
+                self.log.info(
+                    "curva: fan_speed em %d,%d, que ela não escreveu; "
+                    "espera o automático voltar",
+                    *setpoint,
+                )
+            self._curva_cedeu = True
+            self._curva_escrito = None
+            return setpoint
+        if self._curva_cedeu:
+            self.log.info("curva: o automático voltou; a curva retoma")
+        self._curva_cedeu = False
+
+        cpu = telemetry.acer_cpu_temp(self.sysfs)
+        gpu = telemetry.acer_gpu_temp(self.sysfs)
+        alvo = curva.decide(cpu, gpu, self._curva_escrito)
+        if alvo is None:
+            self._curva_falhas += 1
+            if self._curva_falhas >= self.CURVA_FALHAS:
+                return self._curva_larga(
+                    setpoint, f"sem a temperatura há {self._curva_falhas} passadas"
+                )
+            return setpoint
+        self._curva_falhas = 0
+        if alvo == setpoint and alvo == self._curva_escrito:
+            return setpoint
+
+        # O registro antes da escrita: sem ele o guarda nao reconheceria o
+        # manual como do agente, e um agente travado deixaria a ventoinha
+        # baixa sem ninguem. Sem guarda, a curva nao age. Registra tambem
+        # quando assume um manual que ja estava la, sem escrever.
+        anterior = fan_speed_value(*setpoint) if setpoint else "0,0"
+        if not guarda.registra(anterior, fan_speed_value(*alvo)):
+            if not self._curva_sem_guarda_avisado:
+                self.log.warning(
+                    "curva: sem onde registrar o que escreve (RuntimeDirectory "
+                    "da unit); sem o guarda, a curva não age"
+                )
+            self._curva_sem_guarda_avisado = True
+            return setpoint
+        self._curva_sem_guarda_avisado = False
+        if alvo != setpoint:
+            try:
+                self._controls.set_fan_speed(*alvo)
+            except WriteError as erro:
+                self.log.warning("curva: não conseguiu escrever %d,%d: %s", *alvo, erro)
+                return setpoint
+        if self._curva_escrito is None:
+            self.log.info(
+                "curva: ventoinha em %d,%d (CPU a %d °C, GPU a %d °C)", *alvo, cpu, gpu
+            )
+        self._curva_escrito = alvo
+        return alvo
+
+    def _curva_larga(self, setpoint, motivo):
+        """Devolve o automatico, se a ventoinha for da curva. Devolve o
+        fan_speed depois disso."""
+        escrito, self._curva_escrito = self._curva_escrito, None
+        self._curva_falhas = 0
+        if escrito is None or setpoint != escrito:
+            return setpoint
+        try:
+            self._controls.set_fan_speed(0, 0)
+        except WriteError as erro:
+            self.log.warning("curva: não conseguiu devolver o automático (%s): %s", motivo, erro)
+            return setpoint
+        self.log.info("curva: ventoinha devolvida ao automático (%s)", motivo)
+        return (0, 0)
+
     def _guarda_ventoinha(self, maximo_ativo):
         """A rede da ventoinha manual: devolve o automatico, e so isso.
 
@@ -347,7 +473,10 @@ class Agent:
         `maximo_ativo` e pedido E na tomada, como em _reconcile_maximum:
         e o modo que troca a curva do automatico.
         """
-        setpoint = self._read_fan_speed()
+        # A curva acabou de ler, e talvez de escrever: vale o que ela deixou.
+        setpoint, self._fan_da_passada = self._fan_da_passada, _NAO_LIDO
+        if setpoint is _NAO_LIDO:
+            setpoint = self._read_fan_speed()
         if not fan_guard.armada(setpoint, maximo_ativo):
             self._rede_seguidas = 0
             self._rede_recusa_avisada = False
@@ -387,6 +516,23 @@ class Agent:
             *rpm,
             gpu,
         )
+        if self._curva_escrito is not None and setpoint == self._curva_escrito:
+            self._curva_desliga()
+
+    def _curva_desliga(self):
+        """A rede disparou com a curva ativa: e defeito da curva, que
+        cumpre o invariante dela (docs/plano-curva.md, secao 8). A curva sai,
+        e sai no arquivo -- senao ela reescreveria o manual na passada
+        seguinte, e a rede o devolveria de novo."""
+        self._curva_escrito = None
+        self.log.warning(
+            "curva: a rede térmica disparou com a curva ativa; a curva foi "
+            "desligada (fan_curve = false). É defeito da curva"
+        )
+        try:
+            save(dataclasses.replace(load(self.config_path), fan_curve=False), self.config_path)
+        except OSError as erro:
+            self.log.warning("não foi possível gravar a configuração: %s", erro)
 
     def _avisa_falhas(self, falhas):
         """Uma linha quando a falha aparece, outra quando todas somem."""

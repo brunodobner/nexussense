@@ -531,6 +531,30 @@ rotações são as do mapa de E2, medido em repouso.
   rotação: a rede mora no mesmo processo.
 
 Esta seção substitui, na tabela "Em aberto" da seção 10, as linhas do teto de
-ruído e da parte de cima da curva. O que falta: o modo na janela e na bandeja,
-a função da curva testada contra os traços, instalar, e E-C5 na máquina. O
-guarda está escrito (seção 8, no fim).
+ruído e da parte de cima da curva.
+
+**A versão curta, escrita em 2026-10-15** (ramo `curva/guarda`; não
+instalada). O usuário preferiu a curva no ar antes do botão na janela:
+
+- **Liga-se no arquivo**, com `fan_curve = true` em
+  `~/.config/nexus-sense/config.toml`. Desligada por padrão.
+- **"Automático" na janela passa a querer dizer a curva**, enquanto ela
+  estiver ligada: a curva age sempre que `fan_speed` está em `0,0` ou no
+  valor que ela mesma escreveu. Isso inclui o modo máximo, que escreve
+  `0,0` ao ligar — é a curva única que o usuário pediu.
+- **"Manual" na janela a suspende**: um valor em `fan_speed` que ela não
+  escreveu é de outra mão, e ela espera o `0,0` voltar.
+- **Ao subir o agente, a ventoinha é dela.** Depois de um reinício o driver
+  devolve o manual gravado no desligamento, e o agente novo não tem como
+  saber de quem era.
+- **A CPU pelo EC e a GPU pelo EC**, as duas pelo rótulo do canal
+  (`telemetry.acer_cpu_temp`, `acer_gpu_temp`). Uma leitura que falha segura o
+  valor de agora; três seguidas devolvem o automático.
+- **A rede segue no ar.** Se ela disparar com a curva ativa, é defeito da
+  curva: o agente grava `fan_curve = false` e diz isso no journal.
+- **Provado contra os traços** (`tests/python/test_curva.py`): em todas as
+  passadas gravadas, com a GPU a 76 °C ou mais, as duas ventoinhas ficam no
+  piso da rede, e a rede nunca dispara com a curva.
+
+O que falta: instalar, ligar, e E-C5 na máquina; depois, o botão na janela e
+na bandeja.

@@ -7,7 +7,7 @@ diz qual é a vez de qual, e o que ficou pendente.
 
 ---
 
-## Em andamento: a curva própria da ventoinha (parado em 2026-10-15, à tarde)
+## Em andamento: a curva própria da ventoinha (2026-10-15)
 
 Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **nada
 instalado**: a ventoinha da máquina segue no automático do firmware.
@@ -23,10 +23,11 @@ instalado**: a ventoinha da máquina segue no automático do firmware.
   `RuntimeDirectory`, e o `setup.sh` instalando o guarda. Suítes de depois:
   pytest 513 (501 + 12 novos); shell igual à baseline — a única diferença,
   `test-perfil-bateria.sh`, pula na tomada e roda na bateria.
-- **Em curso, a versão curta (o usuário disse "continua a curva"):** a função da curva
-  (tabela, histerese de 3 °C, piso de 81%/82% com a GPU a 76 °C), ligada no
-  agente por uma chave no `config.toml`, sem botão na janela por enquanto.
-  Depois instalar (pkexec, avisando antes) e rodar o E-C5 na máquina.
+- **A curva, versão curta, escrita e testada** ([plano-curva.md](plano-curva.md),
+  seção 11, no fim): `src/nexus_sense/curva.py`, ligada no agente por
+  `fan_curve = true` no `config.toml`, sem botão na janela por enquanto.
+- **Próximo:** instalar (pkexec, avisando antes), ligar `fan_curve`, conferir
+  na máquina, e rodar o E-C5. Depois, o botão "Curva" na janela e na bandeja.
 
 ---
 
