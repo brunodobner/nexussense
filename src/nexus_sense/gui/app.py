@@ -17,7 +17,7 @@ from .window import Window
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="nexus-sense",
-        description="Controle e monitoramento para laptops Acer Nitro e Predator.",
+        description="Controle e monitoramento para o Acer Nitro ANV15-52.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--root", default="/", help="raiz alternativa do sysfs")

@@ -1,4 +1,4 @@
-"""Controle e monitoramento para laptops Acer Nitro e Predator.
+"""Controle e monitoramento para o Acer Nitro ANV15-52.
 
 Nexus Sense -- a janela, a bandeja e o agente de energia.
 
