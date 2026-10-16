@@ -586,6 +586,9 @@ sleep 0.3
 poe "$D/proc/sys/kernel/random/boot_id" 99999999-8888-7777-6666-555555555555
 roda "$D" "$S" ec5-volta
 confere "depois do reinicio, o ec5-volta le e devolve a ventoinha" "$?" 0 "0,0"
+[ "$(cat "$D/run/nexus-sense/ventoinha" 2> /dev/null | tail -1)" = "95,95" ] \
+    && ok "o manual do reinicio vai registrado como do agente, como o da curva" \
+    || falha "o manual do reinicio nao foi registrado: '$(cat "$D/run/nexus-sense/ventoinha" 2> /dev/null)'"
 grep -q '^reinicio: o manual 95,95 VOLTOU na partida' "$D/ec5.resumo.txt" \
     && ok "o resumo diz que o manual voltou na partida" \
     || falha "o resumo do reinicio: $(grep '^reinicio:' "$D/ec5.resumo.txt" | tail -1)"

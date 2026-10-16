@@ -2311,6 +2311,12 @@ reinicio_ec5() {   # $1 = como foi o guarda. Deixa o manual DE PROPOSITO e sai; 
     local v="$C5_P,$C5_P"
     echo
     echo "O REINICIO -- o que volta na partida, antes do login"
+    # O manual vai registrado como do agente, como o da curva: no desligamento
+    # o guarda tenta devolver o 0,0, e o driver grava o estado no rmmod. A unit
+    # do driver nao tem ordem contra a sessao (plano, secao 8): quem chega
+    # primeiro diz o que volta na partida. 0,0 de volta, o guarda chegou antes;
+    # o manual de volta, o driver gravou antes.
+    registra_pelo_agente "$v" || echo "  (sem a pasta do agente: o guarda nao vai reconhecer este manual)"
     reassume_manual c5:reinicio:antes
     mkdir -p "$(dirname "$ESTADO_EC5")" || exit 1
     {
@@ -2475,12 +2481,12 @@ modo_ec5_volta() {
         o="a maquina NAO reiniciou (o boot_id e o mesmo): nada a medir"
     elif [ "$V_FAN" = "$v" ]; then
         if [ "$no_manual" = 1 ]; then
-            o="o manual $v VOLTOU na partida, e o EC o obedece: $m1 / $m2 rpm"
+            o="o manual $v VOLTOU na partida, e o EC o obedece: o driver gravou antes de o guarda devolver; $m1 / $m2 rpm"
         else
             o="fan_speed diz $v, mas a rotacao e $m1 / $m2, e nao a do manual ($r1 / $r2)"
         fi
     elif [ "$V_FAN" = "0,0" ]; then
-        o="voltou em automatico (0,0): $m1 / $m2 rpm"
+        o="voltou em automatico (0,0): o guarda devolveu no desligamento antes de o driver gravar; $m1 / $m2 rpm"
     else
         o="voltou outro valor: fan_speed '$V_FAN', $m1 / $m2 rpm"
     fi
