@@ -3,16 +3,17 @@
 Mapa de onde o trabalho está. As specs descrevem cada projeto; este arquivo
 diz qual é a vez de qual, e o que ficou pendente.
 
-**Última atualização:** 2026-10-14 (brilho do teclado pelo slider do Plasma medido e descartado: o firmware não informa nem aceita o nível por software — decisões 23)
+**Última atualização:** 2026-10-17 (a curva própria é o Automático, juntada, enviada e instalada; os ensaios a pausam; o README revisto)
 
 ---
 
-## Em andamento: a curva própria da ventoinha (2026-10-15)
+## Feito: a curva própria da ventoinha (2026-10-15 a 2026-10-17)
 
-Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **ainda
-não juntado ao `master`, mas instalado na máquina** a partir do ramo em
-2026-10-15, e com a curva **ligada** (`fan_curve = true`). Para voltar ao
-firmware: `fan_curve = false` no `config.toml`.
+**No `master`, no GitHub e instalada.** A curva é o Automático neste modelo
+desde 2026-10-16; para voltar ao firmware, `fan_curve = false` no
+`config.toml`. O que segue é o registro, na ordem em que aconteceu: as
+primeiras linhas falam de um ramo ainda não juntado, e cada uma vale para o
+seu momento.
 
 - **Feito e verificado:** os modos de ensaio E-C2, E-C3 e E-C5 em
   `tests/hardware/ensaio-termico.sh` (commit `bd67182`, suíte verde); a curva
@@ -94,8 +95,9 @@ firmware: `fan_curve = false` no `config.toml`.
 | versão | **v1.2.9** — `master` em github.com/brunodobner/nexussense (privado) |
 | layout | reorganizado em 2026-09-10: só `setup.sh` executável na raiz |
 | histórico | resetado na v1.0.0; a razão dos 111 commits foi para [decisoes.md](decisoes.md) e [armadilhas.md](armadilhas.md) |
-| suíte shell | 25 testes: 23 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C` |
-| suíte Python | 501 passam (`python3 -m pytest -q`), incluindo DBus privado |
+| suíte shell | 28 testes: 26 passam, 2 pulam, 0 falham — sem root e sob `LC_ALL=C`; num worktree, `test-arvore.sh` falha pelo `.git`, que lá é arquivo |
+| suíte Python | 618 passam (`python3 -m pytest -q`), incluindo DBus privado |
+| ventoinha | a curva própria é o Automático desde 2026-10-16, com o guarda na unit — [plano-curva.md](plano-curva.md), seção 11 |
 | build | `W=1` limpo nos dois kernels instalados, medido na 4e — um é Clang 23 e o outro GCC 16 |
 | CI | **não há**, desde 2026-10-11, por decisão do usuário: os fluxos saíram do repositório. O shellcheck e a suíte em máquina limpa saíram junto — [decisoes.md](decisoes.md), seção 22 |
 

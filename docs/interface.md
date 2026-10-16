@@ -230,7 +230,7 @@ Os quatro primeiros botões são os perfis anunciados pelo firmware. O quinto,
 perfil térmico  balanced-performance
 CPU             power-profiles-daemon em performance
 GPU             GPUPowerMizerMode = 1
-ventoinhas      começam no automático; Máximo e Manual permanecem disponíveis
+ventoinhas      começam no Automático (a curva); Máximo e Manual permanecem disponíveis
 Dynamic Boost   permanece sob controle do driver NVIDIA
 ```
 
@@ -249,6 +249,16 @@ Três modos, e não um cursor solto: **Automático**, **Máximo** e
 **Manual**. Os dois cursores só aparecem no manual — em automático os
 números não querem dizer nada, e mostrá-los convidaria a mexer num valor
 que o driver ignora.
+
+**O Automático é a curva do Nexus Sense onde ela age**, desde 2026-10-16
+(decisão do usuário, sem botão novo): na tomada, fora de silencioso e
+econômico, com o agente no ar. O texto do botão diz quem decide — "o Nexus
+Sense decide pela temperatura" ou "o firmware decide pela temperatura". A
+curva grava pares como `45,40`; a tela os reconhece pelo registro do guarda
+(`$XDG_RUNTIME_DIR/nexus-sense/ventoinha`) e os mostra como Automático, não
+como Manual. Manual apaga esse registro antes de escrever: mesmo com o par
+igual ao da curva, ela cede. O cartão Ventoinhas do Painel decide pela mesma
+função e diz só o nome do modo — automático, máximo ou manual — x% / y%.
 
 **Os três botões escrevem na hora.** Manual aplica o que os cursores
 mostram: vindo do automático eles estão no começo da barra, e a ventoinha vai
@@ -282,7 +292,8 @@ da página. Selecionar perfil ou modo atualiza a marca imediatamente; a
 atualização não consulta serviços externos da sessão.
 
 O `0,0` é automático e não "parada": esse atributo é o setpoint, e zero
-significa o driver assumindo o controle.
+significa o firmware assumindo o controle — ou, onde ela age, a curva, em
+até 2 s.
 
 ### 4.6 Diagnóstico
 

@@ -1748,10 +1748,8 @@ cd /home/brunodobner/Claude/Nitrosense
 sudo ./tests/run-all.sh     # inclui o de DKMS
 ```
 
-Os testes vivem em `tests/`, **fora de `driver/`**, de propósito: a próxima
-release do upstream manda sobrescrever o driver e o instalador, e é justamente
-aí que a suíte precisa existir para dizer o que quebrou.
-
-De onde veio cada arquivo está no
-[README da raiz](../README.md#licença-e-origem). O projeto não rastreia mais o
-upstream, então não há diff de personalizações a manter.
+Os testes vivem em `tests/`, **fora de `driver/`**, e não vão junto numa
+instalação. A linhagem do driver está no
+[README da raiz](../README.md#licença-e-origem) e no cabeçalho de
+`driver/src/nexus_sense.c`. O projeto não rastreia mais o upstream, então não
+há diff de personalizações a manter.

@@ -9,7 +9,8 @@ Nada aqui vai junto numa instalação — é tudo ferramenta de manutenção.
 | [estado.md](estado.md) | onde o trabalho está e o que ficou pendente | ao retomar o projeto |
 | [interface.md](interface.md) | o sistema visual da janela e da bandeja | ao mexer na GUI |
 | [plano-melhorias.md](plano-melhorias.md) | as melhorias de 2026-10 em quatro etapas, uma por sessão, com o portão de cada uma | ao abrir a sessão de uma etapa |
-| [plano-curva.md](plano-curva.md) | o estudo de uma curva de ventoinha própria: o teto das curvas do EC, os ensaios que faltam e a regra que decide se haverá código | antes de mexer em como a ventoinha responde à temperatura |
+| [plano-termico.md](plano-termico.md) | a ventoinha manual medida: o piso, o mapa de porcentagem para rotação, os ensaios E2 e E3 e a rede térmica | antes de mexer na rede térmica ou nos ensaios |
+| [plano-curva.md](plano-curva.md) | a curva própria da ventoinha, que é o Automático desde 2026-10-16: o estudo, a curva aprovada, o guarda, a suspensão e cada ensaio na máquina | antes de mexer em como a ventoinha responde à temperatura |
 | [poda-subsistemas.md](poda-subsistemas.md) | o que pode ser cortado do driver, em quatro camadas, e como provar antes de apagar | antes de remover qualquer subsistema |
 | [verificacao-manual.md](verificacao-manual.md) | o que a suíte automatizada não alcança, e por quê | antes de dar uma versão por boa |
 

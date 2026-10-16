@@ -72,16 +72,15 @@ else
 fi
 
 # ─── 2. o layout antigo nao voltou ─────────────────────────────────
-# Tres arquivos citam os caminhos antigos de PROPOSITO e ficam de fora:
-#   README.md       a tabela de procedencia -- de onde veio cada arquivo
-#                   do DAMX. Sao os caminhos da arvore DELE, nao da nossa.
-#   docs/README.md  explica onde foi parar o historico de desenvolvimento
-#   este arquivo    o padrao de busca contem as strings que ele proibe
+# So este arquivo cita os caminhos antigos de proposito: o padrao de busca
+# contem as strings que ele proibe. Ate 2026-10-17 o README.md tambem ficava
+# de fora, pela tabela de onde cada arquivo do DAMX foi parar; a tabela saiu,
+# a pedido do usuario.
 orfaos=$(grep -rn 'original/Linuwu-Sense\|"Linuwu-Sense\|\boriginal/setup\.sh\|\$ORIG\b\|tests/test-[a-z]' \
     --include='*.sh' --include='*.py' --include='*.md' --include='*.toml' \
     --include='*.conf' --include='*.service' --include='*.desktop' --include='*.rules' \
     . --exclude-dir=.git --exclude-dir=__pycache__ \
-    2>/dev/null | grep -vE '^\./(README\.md|docs/README\.md|tests/shell/test-arvore\.sh):')
+    2>/dev/null | grep -vE '^\./tests/shell/test-arvore\.sh:')
 [ -z "$orfaos" ] && ok "nenhuma referencia ao layout antigo" \
     || { falha "referencias orfas:"; printf '%s\n' "$orfaos" | sed 's/^/        /'; }
 
