@@ -45,8 +45,13 @@ firmware: `fan_curve = false` no `config.toml`.
 - **Os ajustes da suspensão, escritos** (plano-curva, seção 11, no fim):
   o agente alarga o watchdog antes de dormir, devolve o perfil e reescreve o
   manual ao acordar, e o E-C5 registra a troca em vez de parar.
-- **Próximo:** instalar, rodar o E-C5 de novo; depois, o botão "Curva" e o
-  merge.
+- **O E-C5 na máquina, menos o reinício:** só a suspensão faz o firmware
+  largar o manual (cabo e perfil não); o agente atravessa a suspensão vivo e
+  devolve o perfil; o guarda devolve `0,0` em 105 ms no `kill -9` e em 5,0 s
+  com o agente travado. O defeito do aviso de dormir era o buffer do
+  `busctl` num pipe (`stdbuf -oL`, `5d682c6`).
+- **Próximo:** a parte do reinício do E-C5 (`ENSAIO_C5_GESTOS=""`); o botão
+  "Curva" na janela e na bandeja; o merge no `master`.
 
 ---
 

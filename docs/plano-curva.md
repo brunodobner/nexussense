@@ -655,4 +655,27 @@ O agente novo, sem saber o perfil de antes, não o devolveu, e o E-C5 parou ali
 Corrigido com `stdbuf -oL` na frente do `busctl`, e o fio do sono passa a
 dizer no journal quando a máquina vai dormir e quando acorda.
 
-O que falta: o E-C5 de novo, e o botão na janela e na bandeja.
+**O E-C5, completo menos o reinício, 2026-10-16 08:10 e 08:21**, com o
+`stdbuf` instalado. Duas rodadas: a primeira até a suspensão (o cabo saiu
+contaminado e o roteiro foi corrigido para reescrever o manual antes de cada
+gesto), a segunda com `ENSAIO_C5_GESTOS="cabo perfil"`:
+
+| gesto | o firmware | o resto |
+|---|---|---|
+| suspender e acordar (S3, ~30 s) | **largou o manual e não voltou:** 2.220 rpm com `fan_speed` em `95,95` | o agente atravessou vivo (mesmo pid); o perfil que o firmware trocou foi devolvido antes de o roteiro o ver |
+| tirar e pôr o cabo | **manteve o manual:** 0 de 69 amostras fora | — |
+| perfil `balanced` e de volta | **manteve o manual:** 0 de 125 amostras fora | — |
+| `kill -9` no agente | — | **o guarda devolveu `0,0` em 105 ms**, pelo registro; a rotação saiu do manual; o agente voltou em 3 s |
+| `SIGSTOP` no agente | — | **o watchdog o matou, e o guarda devolveu `0,0` em 5,0 s**; a rotação saiu do manual; o agente voltou |
+
+O que isso responde, contra a seção 7:
+
+- **C5: só a suspensão larga o manual**, e sem avisar: a memória do driver
+  fica dizendo o manual. O cabo e o perfil não o tocam. A curva já se cobre
+  disso: ao acordar ela reescreve o manual, e o agente devolve o perfil.
+- **O guarda funciona na máquina**, nas duas mortes, no prazo que a seção 8
+  fixou.
+- **Falta só o reinício** — o que volta na partida antes do login. Fica para
+  uma rodada com `ENSAIO_C5_GESTOS=""`, quando reiniciar não atrapalhar.
+
+O que falta: o reinício do E-C5, e o botão na janela e na bandeja.
