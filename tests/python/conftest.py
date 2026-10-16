@@ -194,3 +194,15 @@ def build_tree(
 def fake_root(tmp_path):
     """Arvore ANV15-52 padrao: na tomada, perfil balanced, quatro escolhas."""
     return build_tree(tmp_path)
+
+
+def agente_no_ar(par=None):
+    """A pasta da unit do agente na sessao (isolada por fora_da_unit), e o
+    par que a curva registrou ter escrito. Devolve o caminho do registro."""
+    pasta = os.path.join(os.environ["XDG_RUNTIME_DIR"], "nexus-sense")
+    os.makedirs(pasta, exist_ok=True)
+    registro = os.path.join(pasta, "ventoinha")
+    if par is not None:
+        with open(registro, "w") as arquivo:
+            arquivo.write(f"0,0\n{par}\n")
+    return registro

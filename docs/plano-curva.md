@@ -716,6 +716,12 @@ botão novo, a curva é o Automático. O que mudou (ramo `curva/padrao`):
   curva cede ao par sem registro, e o guarda o deixa como está.
 - **A bandeja não muda:** "Ventoinha automática" grava `0,0`, e a curva
   retoma em até 2 s; ela não mostra o modo da ventoinha.
+- **O Painel também** (2026-10-17, ramo `curva/painel`): instalado o
+  `d0a2d08`, o usuário viu a tela Desempenho marcar Automático e o cartão
+  Ventoinhas do Painel dizer "manual — 6% / 5%" ao mesmo tempo. O cartão
+  fazia a conta sozinho. Agora os dois decidem pela mesma função
+  (`performance.curva_manda`), e o cartão diz "automático — o Nexus Sense
+  decide pela temperatura".
 - **Fora da unit, a curva do padrão fica quieta:** o aviso "sem o guarda"
   é só para quem pediu `fan_curve = true`.
 

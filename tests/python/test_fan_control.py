@@ -408,17 +408,8 @@ def test_a_secao_aparece_mesmo_sem_perfil_anunciado(qtbot, tmp_path):
 
 import os  # noqa: E402
 
+from conftest import agente_no_ar  # noqa: E402
 from nexus_sense.config import Config, default_path, save  # noqa: E402
-
-
-def agente_no_ar(par=None):
-    """A pasta da unit do agente, e o par que a curva registrou ter escrito."""
-    pasta = os.path.join(os.environ["XDG_RUNTIME_DIR"], "nexus-sense")
-    os.makedirs(pasta, exist_ok=True)
-    if par is not None:
-        with open(os.path.join(pasta, "ventoinha"), "w") as arquivo:
-            arquivo.write(f"0,0\n{par}\n")
-    return os.path.join(pasta, "ventoinha")
 
 
 def texto_do_automatico(p):
