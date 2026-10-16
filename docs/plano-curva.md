@@ -720,8 +720,10 @@ botão novo, a curva é o Automático. O que mudou (ramo `curva/padrao`):
   `d0a2d08`, o usuário viu a tela Desempenho marcar Automático e o cartão
   Ventoinhas do Painel dizer "manual — 6% / 5%" ao mesmo tempo. O cartão
   fazia a conta sozinho. Agora os dois decidem pela mesma função
-  (`performance.curva_manda`), e o cartão diz "automático — o Nexus Sense
-  decide pela temperatura".
+  (`performance.curva_manda`). No mesmo dia, a pedido do usuário, o cartão
+  passou a dizer só o nome do modo — "automático", "máximo" ou "manual — x%
+  / y%" —, sem explicar: quem explica é a tela Desempenho. Antes, o `100,100`
+  aparecia como "manual — 100% / 100%".
 - **Fora da unit, a curva do padrão fica quieta:** o aviso "sem o guarda"
   é só para quem pediu `fan_curve = true`.
 

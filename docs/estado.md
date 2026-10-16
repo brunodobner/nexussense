@@ -73,9 +73,10 @@ firmware: `fan_curve = false` no `config.toml`.
   2026-10-17; o instalador reiniciou o agente e a bandeja sozinho.
 - **Achado na conferência:** o cartão Ventoinhas do Painel dizia "manual"
   com a curva mandando. Corrigido no ramo `curva/painel`.
-- **Próximo:** juntar `curva/painel`, instalar e terminar a conferência na
-  janela (Automático marcado; Manual sem mexer fica parado; Automático
-  devolve à curva).
+- **`curva/painel` juntado** (`23cdf53`), enviado e instalado. Na
+  conferência o usuário viu tudo funcionando e pediu só texto: o cartão
+  Ventoinhas do Painel diz o nome do modo, sem explicar, e mostra "máximo"
+  no `100,100` (ramo `curva/painel-texto`).
 
 ---
 
