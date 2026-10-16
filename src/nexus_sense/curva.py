@@ -32,9 +32,23 @@ GPU = ((55, 24), (65, 37), (70, 53), (76, 82), (80, 99))
 GPU_QUENTE = fan_guard.GPU_QUENTE
 PISO_QUENTE = fan_guard.AUTOMATICO[True].percentual
 
-# Sobe na hora; so desce depois de a temperatura cair isto. Provisorio: se
-# ajusta pelo ouvido.
+# So desce depois de a temperatura cair isto. Provisorio: se ajusta pelo
+# ouvido.
 HISTERESE = 3
+
+# A temperatura que a curva usa e a mediana das ultimas tantas passadas (2 s
+# cada), e nao a leitura de agora. Na primeira rodada na maquina, em
+# 2026-10-15, a CPU pelo EC foi de 54 a 88 C e voltou em vinte segundos, com
+# carga em rajadas; a curva seguia cada pulo e a ventoinha ia de 2.770 a 7.460
+# rpm e voltava -- o sobe-desce que se ouve. A mediana de cinco ignora um ou
+# dois pulos, e uma carga que dura a move em ~5 s. O firmware faz parecido:
+# a rotacao dele acompanha a CPU pelo EC com uns 10 s de atraso (plano,
+# secao 2.1).
+JANELA = 5
+
+# E desce no maximo isto por passada: de 99% a 35% em ~30 s, sem queda brusca.
+# Para subir nao ha limite.
+DESCE_POR_PASSADA = 4
 
 
 def na_tabela(tabela, temperatura):
@@ -66,24 +80,37 @@ def _uma(tabela, temperatura, gpu, indice, atual):
     if atual is None or atual < sobe:
         return sobe
     if atual > desce:
-        return desce
+        return max(desce, atual - DESCE_POR_PASSADA)
     return atual
 
 
-def decide(cpu, gpu, atual):
+def mediana(leituras):
+    """A do meio; com um numero par, a de baixo das duas do meio. None sem
+    leitura nenhuma."""
+    valores = sorted(leituras)
+    if not valores:
+        return None
+    return valores[(len(valores) - 1) // 2]
+
+
+def decide(cpu, gpu, atual, gpu_agora=None):
     """O par a escrever em fan_speed: (CPU, GPU), em porcentagem de manual.
 
-    `cpu` e `gpu` em Celsius inteiros. A GPU vale zero com a placa
-    dormindo, e isso e repouso. `atual` e o par que a curva escreveu por
-    ultimo, ou None se ela ainda nao escreveu.
+    `cpu` e `gpu` em Celsius inteiros: a mediana das ultimas JANELA
+    passadas, que quem chama guarda. A GPU vale zero com a placa dormindo,
+    e isso e repouso. `gpu_agora` e a leitura desta passada: o piso da GPU
+    quente olha para ela, e nao para a mediana -- e a seguranca da rede, e
+    nao espera. Sem ela, vale `gpu`. `atual` e o par que a curva escreveu
+    por ultimo, ou None se ela ainda nao escreveu.
 
     Sem uma das leituras (None) devolve None: sem saber a temperatura, a
     curva nao decide, e quem chama segura ou devolve o automatico.
     """
     if cpu is None or gpu is None:
         return None
+    quente = gpu if gpu_agora is None else max(gpu, gpu_agora)
     anterior = atual or (None, None)
     return (
-        _uma(CPU, cpu, gpu, 0, anterior[0]),
-        _uma(GPU, gpu, gpu, 1, anterior[1]),
+        _uma(CPU, cpu, quente, 0, anterior[0]),
+        _uma(GPU, gpu, quente, 1, anterior[1]),
     )

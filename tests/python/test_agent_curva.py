@@ -75,11 +75,35 @@ def test_so_escreve_quando_a_porcentagem_muda(tmp_path, unit, monkeypatch):
     a.tick()
     a.tick()
     temperaturas(raiz, 80, 78)
+    # O piso da GPU quente entra na hora, pela leitura de agora; a tabela da
+    # GPU espera a mediana das ultimas leituras chegar la.
     a.tick()
     a.tick()
-    assert escritas == [(25, 24), (81, 91)]
+    a.tick()
+    assert escritas == [(25, 24), (81, 82), (81, 91)]
     assert fan(raiz) == "81,91"
-    assert (unit / "ventoinha").read_text() == "25,24\n81,91\n"
+    assert (unit / "ventoinha").read_text() == "81,82\n81,91\n"
+
+
+def test_um_pulo_de_temperatura_nao_move_a_ventoinha(tmp_path, unit):
+    """Na maquina a CPU pelo EC pulou de 54 a 88 C e voltou em segundos, com
+    carga em rajadas, e a ventoinha ia atras. A mediana nao vai."""
+    raiz = arvore(tmp_path, cpu=45, gpu=0)
+    a = agente(tmp_path, raiz)
+    for _ in range(4):
+        a.tick()
+    temperaturas(raiz, 90, 0)
+    a.tick()
+    a.tick()
+    assert fan(raiz) == "25,24"
+    temperaturas(raiz, 45, 0)
+    a.tick()
+    assert fan(raiz) == "25,24"
+    # Uma carga que dura move, sim: tres leituras de cinco.
+    temperaturas(raiz, 90, 0)
+    for _ in range(3):
+        a.tick()
+    assert fan(raiz) == "99,24"
 
 
 def test_cede_ao_manual_da_janela_e_volta_com_o_automatico(tmp_path, unit, caplog):
@@ -159,7 +183,7 @@ def test_a_rede_disparando_com_a_curva_desliga_a_curva(tmp_path, unit, monkeypat
     """A curva cumpre o invariante da rede. Se a rede dispara com ela
     ativa, e defeito da curva: ela sai, e sai no arquivo."""
     raiz = arvore(tmp_path, cpu=80, gpu=80)
-    monkeypatch.setattr(curva, "decide", lambda cpu, gpu, atual: (25, 24))
+    monkeypatch.setattr(curva, "decide", lambda *_, **__: (25, 24))
     a = agente(tmp_path, raiz)
     with caplog.at_level(logging.WARNING):
         for _ in range(3):

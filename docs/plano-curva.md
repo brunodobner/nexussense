@@ -556,5 +556,22 @@ instalada). O usuário preferiu a curva no ar antes do botão na janela:
   passadas gravadas, com a GPU a 76 °C ou mais, as duas ventoinhas ficam no
   piso da rede, e a rede nunca dispara com a curva.
 
-O que falta: instalar, ligar, e E-C5 na máquina; depois, o botão na janela e
-na bandeja.
+**A primeira rodada na máquina, 2026-10-15 às 22:00**, instalada do ramo,
+com a curva ligada por um minuto, sem jogo, com outra sessão rodando Python e
+LibreOffice em rajadas. O agente subiu como `Type=notify`, com o watchdog de
+6 s, e passou o minuto sem uma morte. A curva escreveu o que a tabela manda,
+registrou cada escrita, e devolveu o automático quando foi desligada. Mas a
+CPU pelo EC pulava — 54 a 88 °C e de volta em vinte segundos —, e a curva
+seguia cada pulo: a ventoinha da CPU foi de 2.770 a 7.460 rpm e voltou em
+segundos. Os 3 °C de histerese não seguram pulos assim. A curva foi
+desligada na hora, e corrigida:
+
+- **A temperatura que a curva usa é a mediana das últimas cinco passadas**
+  (10 s), não a leitura de agora. Um ou dois pulos não movem a ventoinha;
+  uma carga que dura a move em ~5 s. O firmware faz parecido: a rotação dele
+  acompanha a CPU pelo EC com uns 10 s de atraso (seção 2.1).
+- **Desce no máximo 4 pontos por passada:** de 99% a 35% em ~30 s.
+- **O piso da GPU quente segue imediato**, pela leitura de agora: é a
+  segurança da rede, e a GPU sobe um grau por segundo com um jogo (E3b).
+
+O que falta: E-C5 na máquina; depois, o botão na janela e na bandeja.

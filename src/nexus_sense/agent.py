@@ -17,6 +17,7 @@ import dataclasses
 import logging
 import os
 import threading
+from collections import deque
 from typing import NamedTuple
 
 from . import curva, fan_guard, guarda, telemetry
@@ -151,6 +152,9 @@ class Agent:
         self._curva_falhas = 0
         self._curva_cedeu = False
         self._curva_sem_guarda_avisado = False
+        # As ultimas leituras: a curva usa a mediana delas (curva.JANELA).
+        self._curva_cpus = deque(maxlen=curva.JANELA)
+        self._curva_gpus = deque(maxlen=curva.JANELA)
         self._fan_da_passada = _NAO_LIDO
 
     def _read_choices(self):
@@ -408,7 +412,16 @@ class Agent:
 
         cpu = telemetry.acer_cpu_temp(self.sysfs)
         gpu = telemetry.acer_gpu_temp(self.sysfs)
-        alvo = curva.decide(cpu, gpu, self._curva_escrito)
+        alvo = None
+        if cpu is not None and gpu is not None:
+            self._curva_cpus.append(cpu)
+            self._curva_gpus.append(gpu)
+            alvo = curva.decide(
+                curva.mediana(self._curva_cpus),
+                curva.mediana(self._curva_gpus),
+                self._curva_escrito,
+                gpu_agora=gpu,
+            )
         if alvo is None:
             self._curva_falhas += 1
             if self._curva_falhas >= self.CURVA_FALHAS:
@@ -452,6 +465,8 @@ class Agent:
         fan_speed depois disso."""
         escrito, self._curva_escrito = self._curva_escrito, None
         self._curva_falhas = 0
+        self._curva_cpus.clear()
+        self._curva_gpus.clear()
         if escrito is None or setpoint != escrito:
             return setpoint
         try:
