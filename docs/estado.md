@@ -69,8 +69,13 @@ firmware: `fan_curve = false` no `config.toml`.
   sem `fan_curve` no config a curva vale no `Nitro ANV15-52` e só nele; a
   janela mostra Automático enquanto ela manda e diz quem decide; Manual sem
   mexer nos cursores vale, porque a janela apaga o registro da curva.
-- **Próximo:** juntar `curva/armadilhas` e `curva/padrao` ao `master` e
-  instalar, com a autorização do usuário.
+- **Juntados ao `master`** (`d0a2d08`), enviados ao GitHub e instalados em
+  2026-10-17; o instalador reiniciou o agente e a bandeja sozinho.
+- **Achado na conferência:** o cartão Ventoinhas do Painel dizia "manual"
+  com a curva mandando. Corrigido no ramo `curva/painel`.
+- **Próximo:** juntar `curva/painel`, instalar e terminar a conferência na
+  janela (Automático marcado; Manual sem mexer fica parado; Automático
+  devolve à curva).
 
 ---
 

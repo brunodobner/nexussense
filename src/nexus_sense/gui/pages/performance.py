@@ -62,6 +62,15 @@ def fan_mode(fan_speed, da_curva=None):
     return "manual"
 
 
+def curva_manda(maximum, produto, state):
+    """Se a curva manda na ventoinha agora: com o agente no ar, onde ela age
+    (curva.age). A tela Desempenho e o Painel decidem por aqui. O config so
+    e lido com o agente no ar."""
+    if not guarda.agente_no_ar():
+        return False
+    return curva.age(maximum.config().fan_curve, produto, state.on_ac, state.profile)
+
+
 def par_da_curva(ambiente=None):
     """O par que a curva escreveu e ainda e dela, ou None."""
     bruto = guarda.registrado(guarda.caminho_na_sessao(ambiente))
@@ -316,9 +325,7 @@ class PerformancePage(QWidget):
         if self._cursor_em_uso():
             return
 
-        curva_age = guarda.agente_no_ar() and curva.age(
-            self.maximum.config().fan_curve, self._produto, state.on_ac, state.profile
-        )
+        curva_age = curva_manda(self.maximum, self._produto, state)
         explicacao = AUTO_DA_CURVA if curva_age else FAN_ROTULOS[0][2]
         self.fan_buttons["auto"].setText(f"{self._fan_nomes['auto']}\n{explicacao}")
 

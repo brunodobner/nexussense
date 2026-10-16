@@ -4,7 +4,7 @@ from nexus_sense.gui.poller import Poller
 from nexus_sense.sysfs import Sysfs
 from nexus_sense.telemetry import battery
 
-from conftest import build_tree
+from conftest import agente_no_ar, build_tree
 
 SUPERIORES = ("cpu", "gpu", "ventoinhas")
 
@@ -107,6 +107,34 @@ def test_setpoint_manual_aparece_como_manual(qtbot, tmp_path):
     # Na escala da barra da tela Desempenho, que vale 20 a 100 no
     # firmware: os dois lugares mostram o mesmo numero.
     assert texto == "manual — 63% / 75%"
+
+
+def test_o_par_da_curva_aparece_como_automatico(qtbot, tmp_path):
+    """A curva grava pares como 25,24. Ate 2026-10-17 o painel os chamava de
+    manual enquanto a tela Desempenho marcava Automatico -- o usuario viu os
+    dois ao mesmo tempo."""
+    raiz = build_tree(tmp_path / "t")
+    (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("25,24\n")
+    agente_no_ar("25,24")
+    p = painel(qtbot, raiz)
+    assert p.cards["ventoinhas"].rows["modo"].text() == (
+        "automático — o Nexus Sense decide pela temperatura"
+    )
+
+
+def test_um_par_que_a_curva_nao_registrou_segue_manual(qtbot, tmp_path):
+    raiz = build_tree(tmp_path / "t")
+    (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("70,80\n")
+    agente_no_ar("25,24")
+    p = painel(qtbot, raiz)
+    assert p.cards["ventoinhas"].rows["modo"].text() == "manual — 63% / 75%"
+
+
+def test_com_o_agente_parado_o_par_e_manual(qtbot, tmp_path):
+    raiz = build_tree(tmp_path / "t")
+    (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("25,24\n")
+    p = painel(qtbot, raiz)
+    assert p.cards["ventoinhas"].rows["modo"].text().startswith("manual")
 
 
 def test_o_cabecalho_traz_o_perfil_com_o_nome_em_portugues(qtbot, tmp_path):
