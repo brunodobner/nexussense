@@ -1054,6 +1054,13 @@ EOL
   # (NeedDaemonReload=yes) ate relogar, e um restart do agente logo depois
   # de atualizar sobe a unit velha.
   each_user_manager daemon-reload
+  # E os processos que ja estavam no ar seguem com o codigo velho na memoria
+  # ate relogar. Em 2026-10-16 a bandeja que subira antes da instalacao
+  # regravou o config.toml sem o campo novo fan_curve, e a curva da ventoinha
+  # se desligou sozinha. try-restart reinicia so o que esta rodando: o que
+  # estava parado fica parado, e nada e parado de vez.
+  each_user_manager try-restart nexus-sense-agent.service \
+    'app-nexus\x2dsense\x2dautostart@autostart.service'
   # --global habilita para todo usuario sem precisar de sessao ativa.
   systemctl --global enable nexus-sense-agent.service
 

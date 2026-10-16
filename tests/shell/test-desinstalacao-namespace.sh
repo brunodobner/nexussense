@@ -326,10 +326,20 @@ else
 fi
 confere "agente segue rodando"  vivo "$(campo instala agente)"
 confere "bandeja segue rodando" vivo "$(campo instala bandeja)"
-if grep -qE 'systemctl --user (stop|restart)' "$T/chamadas.instala"; then
-    echo "  FALHA parou ou reiniciou algo na sessao do usuario"; falhas=$((falhas + 1))
+if grep -qE 'systemctl --user (stop|restart|kill)' "$T/chamadas.instala"; then
+    echo "  FALHA parou algo na sessao do usuario"; falhas=$((falhas + 1))
 else
-    echo "  OK   nao para nem reinicia nada na sessao do usuario"
+    echo "  OK   nao para nada na sessao do usuario"
+fi
+# O que estava rodando sobe com o codigo novo: sem isto a bandeja de antes da
+# instalacao seguia no ar e, em 2026-10-16, apagou o campo novo do config.
+REINICIA="runuser -u $NOME_ALVO -- env XDG_RUNTIME_DIR=/run/user/$UID_ALVO systemctl --user try-restart nexus-sense-agent.service app-nexus\x2dsense\x2dautostart@autostart.service"
+if grep -qxF "$REINICIA" "$T/chamadas.instala"; then
+    echo "  OK   reinicia o agente e a bandeja que estiverem no ar, e so eles"
+else
+    echo "  FALHA nao reinicia o agente e a bandeja com try-restart; chamadas ao systemctl:"
+    grep -E 'systemctl' "$T/chamadas.instala" | sed 's/^/        /'
+    falhas=$((falhas + 1))
 fi
 
 # ─── 4. a maquina de verdade, depois ────────────────────────────────

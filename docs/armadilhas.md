@@ -1609,6 +1609,137 @@ pacman -Qi linux | grep -E 'Motivo|Reason'
 
 ---
 
+## 41. O `busctl` escrevendo num pipe guarda a saída até sair
+
+**Sintoma.** Um processo lê o `busctl ... wait` por um pipe e não recebe nada,
+nunca — com os sinais passando no barramento. No E-C5 de 2026-10-16 o agente
+esperava o `PrepareForSleep` assim, e o journal do logind mostrou o resultado:
+
+```
+systemd-logind: Delay lock is active (UID 1000/brunodobner, PID .../systemd-inhibit)
+                but inhibitor timeout is reached.
+```
+
+O agente nunca soube que a máquina ia dormir, nunca soltou o bloqueio, e o
+watchdog o matou ao acordar (armadilha 42).
+
+**Causa.** O `busctl` escreve pela `stdio` do C. Num terminal a saída vai por
+linha; num pipe, por bloco, e o bloco só sai quando enche ou quando o processo
+termina. Com `--limit-messages` alto ele não termina. Um teste à mão que
+espera poucos sinais e sai esvazia o buffer ao sair, e parece funcionar.
+
+**Como verificar**, com os mesmos sinais nos dois — os da bateria:
+
+```bash
+timeout 100 busctl --system --json=short wait --limit-messages=1000 \
+    org.freedesktop.UPower /org/freedesktop/UPower/devices/battery_BAT1 \
+    org.freedesktop.DBus.Properties PropertiesChanged | while read -r l; do date +%T; done
+# nenhuma linha em 100 s
+timeout 100 stdbuf -oL busctl ...   # o mesmo: uma linha a cada sinal
+```
+
+**Regra.** Programa em C lido por pipe e que não termina: `stdbuf -oL` na
+frente. E teste a leitura com o processo **vivo**, não com um que sai sozinho.
+O `--timeout=infinity` o busctl 262 recusa; sem `--timeout` o `wait` espera
+para sempre.
+
+---
+
+## 42. O watchdog do systemd conta o tempo em que a máquina dormiu
+
+**Sintoma.** Depois de cada suspensão, o journal do usuário mostra o agente
+morto e reiniciado:
+
+```
+nexus-sense-agent.service: Watchdog timeout (limit 6s)!
+nexus-sense-agent.service: Killing process ... with signal SIGKILL.
+nexus-sense-agent.service: Failed with result 'watchdog'.
+```
+
+**Causa.** O agente avisa a cada 2 s (`WATCHDOG=1`), e congelado na suspensão
+não avisa. Ao acordar, o systemd mede o intervalo contando o tempo dormindo, e
+ele já passou dos 6 s antes de o agente voltar a rodar. Medido em 2026-10-16,
+numa suspensão S3 de 30 s.
+
+**Como ficou.** O agente segura um bloqueio de atraso do logind
+(`systemd-inhibit --what=sleep --mode=delay`) e espera o `PrepareForSleep`
+(`src/nexus_sense/sono.py`). Antes de dormir manda `WATCHDOG_USEC` de 30 dias e
+só então solta o bloqueio — o logind espera por ele. Ao acordar devolve o
+`WATCHDOG_USEC` da unit. Se o aviso faltar, o agente percebe o sono pelo salto
+entre `CLOCK_BOOTTIME`, que conta a suspensão, e `CLOCK_MONOTONIC`, que não
+conta. Conferido no E-C5 de 2026-10-16: no journal, *"sono: a máquina vai
+dormir; watchdog alargado"*, e o mesmo pid antes e depois.
+
+**Regra.** Um serviço com `WatchdogSec` numa máquina que suspende precisa
+saber da suspensão. E o que conferir é o pid antes e depois, não o
+`ActiveState`: o serviço reiniciado também diz `active`.
+
+---
+
+## 43. Ao acordar de S3, o firmware troca o perfil e larga o manual
+
+**Sintoma.** Depois de suspender e acordar, o perfil térmico está em
+`balanced`, e a ventoinha gira no automático — com o `fan_speed` do driver
+ainda dizendo o manual que estava antes. Medido em 2026-10-16, em todas as
+suspensões do E-C5:
+
+```
+antes de dormir   fan_speed 95,95   ~7.139 rpm          balanced-performance
+ao acordar        fan_speed 95,95   2.241 / 2.103 rpm   balanced
+```
+
+Na primeira medida o agente já estava morto nesse instante (armadilha 42):
+não foi ele.
+
+**Causa.** O firmware volta da S3 com o perfil e a ventoinha no padrão dele, e
+o driver não sabe: `acer_resume` só reinicia o acelerômetro, e a memória de
+`fan_speed` fica com o valor de antes. Tirar e pôr o cabo e trocar o perfil
+não fazem isso — o mesmo E-C5 mediu 0 de 69 e 0 de 125 amostras fora do
+manual.
+
+**Como ficou.** Na primeira passada depois de acordar o agente devolve o perfil
+que estava em vigor (só na tomada, e se o cabo não mudou enquanto dormia), e
+a curva reescreve o mesmo manual — escrever de novo o reaplica.
+
+**Regra.** Depois de uma suspensão, `fan_speed` e o perfil lidos do driver não
+provam o que o firmware está fazendo. Prova a rotação (`fan1_input`,
+`fan2_input`).
+
+---
+
+## 44. Um processo de versão anterior apaga o campo novo do `config.toml`
+
+**Sintoma.** A curva da ventoinha, ligada com `fan_curve = true`, aparece
+desligada horas depois, sem ninguém ter mexido nela. O journal do agente
+registra a saída como se fosse pedida: *"curva: ventoinha devolvida ao
+automático (fan_curve desligado)"*.
+
+**Causa.** A bandeja que subira antes da instalação seguia no ar com o código
+velho, cujo `Config` não tinha `fan_curve`. Ao gravar o arquivo — o modo
+máximo e o perfil de tomada moram nele —, ela o regravou com os campos que
+conhecia, e o `fan_curve` sumiu. O
+agente leu o padrão, desligada. E nada a reiniciou: o instalador recarregava
+as units, mas não reiniciava o que estava rodando.
+
+```
+bandeja no ar desde   qui 15 21:20:19   (ps -o lstart)
+instalado em         qui 15 22:10
+```
+
+**Como ficou.** As duas pontas:
+
+- `config.save` preserva as chaves do arquivo que o `Config` de quem grava
+  não conhece (`tests/python/test_config.py`, com um `Config` de antes do
+  campo no papel da bandeja velha);
+- o `setup.sh` faz `try-restart` do agente e da bandeja ao instalar: o que
+  está rodando sobe com o código novo, e o que estava parado fica parado.
+
+**Regra.** Num arquivo que mais de um processo grava, o processo mais velho no
+ar decide o que sobrevive. Quem grava preserva o que não conhece. E quem
+instala reinicia o que está rodando, ou diz que vale só depois de relogar.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

@@ -1,3 +1,6 @@
+import dataclasses
+import tomllib
+
 from nexus_sense.config import Config, default_path, load, save
 
 
@@ -134,3 +137,46 @@ def test_gravar_por_um_link_preserva_o_link(tmp_path):
 
     assert link.is_symlink()
     assert load(verdadeiro).battery_profile == "low-power"
+
+
+# ─── o que esta versao nao conhece fica ─────────────────────────────
+
+
+def test_gravar_preserva_a_chave_que_esta_versao_nao_conhece(tmp_path):
+    caminho = tmp_path / "config.toml"
+    caminho.write_text('auto_switch = true\ncampo_de_uma_versao_futura = 7\n')
+    save(dataclasses.replace(load(caminho), maximum_mode=True), caminho)
+    bruto = tomllib.loads(caminho.read_text())
+    assert bruto["campo_de_uma_versao_futura"] == 7
+    assert bruto["maximum_mode"] is True
+
+
+def test_um_processo_antigo_nao_apaga_o_campo_novo(tmp_path):
+    """Em 2026-10-16 a bandeja que subiu antes da instalacao regravou o
+    arquivo sem fan_curve, e a curva se desligou sozinha. Um Config de
+    antes do campo faz o papel dela."""
+
+    @dataclasses.dataclass(frozen=True)
+    class ConfigDeAntes:
+        auto_switch: bool = True
+        maximum_mode: bool = False
+
+    caminho = tmp_path / "config.toml"
+    save(Config(fan_curve=True), caminho)
+    save(ConfigDeAntes(maximum_mode=True), caminho)
+    assert load(caminho).fan_curve is True
+    assert load(caminho).maximum_mode is True
+
+
+def test_um_campo_conhecido_que_vira_none_sai_do_arquivo(tmp_path):
+    caminho = tmp_path / "config.toml"
+    save(Config(saved_ac_profile="balanced-performance"), caminho)
+    save(Config(saved_ac_profile=None), caminho)
+    assert "saved_ac_profile" not in tomllib.loads(caminho.read_text())
+
+
+def test_arquivo_corrompido_nao_impede_a_gravacao(tmp_path):
+    caminho = tmp_path / "config.toml"
+    caminho.write_text("isto nao e toml = = =\n")
+    save(Config(fan_curve=True), caminho)
+    assert load(caminho).fan_curve is True

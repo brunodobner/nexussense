@@ -73,6 +73,15 @@ def load(path):
     return Config(**aceitos)
 
 
+def _bruto(caminho):
+    """O arquivo como esta, sem interpretar. Vazio se nao der para ler."""
+    try:
+        with open(caminho, "rb") as arquivo:
+            return tomllib.load(arquivo)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
 def save(config, path):
     """Grava a configuracao, criando o diretorio se faltar.
 
@@ -85,8 +94,14 @@ def save(config, path):
     # uma copia.
     caminho = Path(os.path.realpath(path))
     caminho.parent.mkdir(parents=True, exist_ok=True)
+    # As chaves que este Config nao conhece ficam como estavam. Sem isto um
+    # processo de versao anterior apaga o campo novo na primeira gravacao:
+    # em 2026-10-16 a bandeja que subiu antes da instalacao regravou o
+    # arquivo sem "fan_curve", e a curva da ventoinha se desligou sozinha.
+    conhecidos = {campo.name for campo in fields(config)}
+    dados = {k: v for k, v in _bruto(caminho).items() if k not in conhecidos}
     # tomli_w nao serializa None; a ausencia da chave e o proprio None.
-    dados = {k: v for k, v in asdict(config).items() if v is not None}
+    dados.update({k: v for k, v in asdict(config).items() if v is not None})
     # O PID no nome separa os dois escritores, janela e agente.
     provisorio = caminho.with_name(f".{caminho.name}.{os.getpid()}.tmp")
     try:
