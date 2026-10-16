@@ -35,8 +35,16 @@ firmware: `fan_curve = false` no `config.toml`.
   foi morto pelo watchdog nenhuma vez.
 - **A janela não sabe da curva:** com ela ligada, mostra Manual com os números
   que a curva escreveu. "Automático" na janela devolve a ventoinha à curva.
-- **Próximo:** o E-C5 na máquina (gestos do usuário); o botão "Curva" na janela
-  e na bandeja; e o merge no `master`, com as suítes de novo.
+- **E-C5 na máquina, duas tentativas** ([plano-curva.md](plano-curva.md),
+  seção 11, no fim): achou que o watchdog mata o agente a cada suspensão, e
+  que na volta da suspensão o firmware larga o manual e troca o perfil para
+  `balanced`, com o `fan_speed` ainda dizendo o manual.
+- **A bandeja de antes da instalação apagava `fan_curve`** ao gravar o
+  `config.toml` (o processo antigo não conhecia o campo). Reiniciada às
+  07:28 de 2026-10-16; o `setup.sh` não reinicia a bandeja ao instalar.
+- **Próximo:** a curva reescrever depois de uma suspensão; o watchdog não
+  matar na suspensão; o E-C5 deixar o perfil livre e olhar 30 s depois de
+  acordar; rodar o E-C5 de novo. Depois, o botão "Curva" e o merge.
 
 ---
 

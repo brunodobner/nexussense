@@ -581,4 +581,41 @@ CPU pelo EC a 80–88 °C nos primeiros 55 s. A ventoinha da CPU subiu a 90–93
 a 45–51 °C, ficou em ~2.000 rpm. Nenhuma morte pelo watchdog. A curva ficou
 ligada.
 
-O que falta: E-C5 na máquina; depois, o botão na janela e na bandeja.
+**E-C5 na máquina, 2026-10-15 22:22 e 2026-10-16 07:31.** Duas tentativas, e
+nenhuma passou da suspensão:
+
+- **A primeira parou pelo limite de repouso** (pacote a 85 °C por três
+  amostras), com a ventoinha a 95%: o Brave e uma verificação de outra sessão
+  ocupavam três núcleos. O aborto fez o que devia — devolveu `0,0` e a
+  rotação saiu do manual. Foi o controle positivo do aborto, na máquina.
+- **A segunda achou duas coisas na volta de uma suspensão de 30 s (S3):**
+  - **O watchdog matou o agente ao acordar** (`Failed with result
+    'watchdog'`). O systemd contou o tempo dormindo como tempo sem aviso. O
+    guarda rodou e fez o certo: o 95% era do roteiro, não do agente, e
+    ficou. O agente voltou em 3 s. Isso se repete a cada suspensão.
+  - **O firmware largou o manual e trocou o perfil.** Na primeira amostra
+    depois de acordar, a rotação era 2.241 / 2.103 rpm com `fan_speed`
+    ainda dizendo `95,95`, e o perfil térmico tinha ido de
+    `balanced-performance` para `balanced` — com o agente já morto, então
+    não foi ele. É a resposta a C5 para a suspensão: o firmware larga o
+    manual sem avisar, e a memória do driver fica mentindo. O roteiro parou
+    nessa amostra (o perfil mudou), então não se viu se ele volta.
+
+**O que isso pede, antes de rodar o E-C5 de novo:**
+
+- **A curva precisa reescrever o manual depois de uma suspensão.** Ela
+  compara o que escreveu com `fan_speed`, e os dois batem: sem reescrever,
+  o firmware fica no automático e a curva acha que manda. Hoje quem a salva
+  é a morte pelo watchdog — o agente novo escreve de novo assim que a
+  temperatura muda a porcentagem —, por acaso.
+- **O watchdog não pode matar o agente a cada suspensão.** O caminho limpo é
+  o agente segurar um bloqueio de atraso do logind e, no `PrepareForSleep`,
+  alargar o `WATCHDOG_USEC` antes de dormir e voltá-lo ao acordar.
+- **O E-C5 tem de deixar o perfil livre na suspensão** e registrar a troca
+  como achado, em vez de parar; e olhar a rotação por 30 s depois de acordar.
+- **O perfil que o firmware troca na suspensão** muda o uso de todo dia, com
+  ou sem curva: depois de suspender, a máquina fica em `balanced` até alguém
+  notar. Nesta rodada ele foi devolvido à mão.
+
+O que falta: os três ajustes acima, o E-C5 de novo, e o botão na janela e na
+bandeja.
