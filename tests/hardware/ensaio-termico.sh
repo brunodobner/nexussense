@@ -96,7 +96,7 @@
 #        vigia a devolvem. ~10 min. Antes de cada gesto e do guarda reescreve
 #        os 95% e confere a rotacao: a suspensao faz o firmware largar o
 #        manual com fan_speed ainda dizendo o valor. ENSAIO_C5_GESTOS escolhe
-#        os gestos (padrao "suspensao cabo perfil"); ENSAIO_C5_REINICIO=0
+#        os gestos (padrao "suspensao cabo perfil"; vazio, nenhum); ENSAIO_C5_REINICIO=0
 #        termina sem pedir o reinicio, com a ventoinha devolvida.
 #
 #   ec5-volta  depois do reinicio e do login: le o que voltou na partida
@@ -1512,8 +1512,10 @@ C3_FALSO=${ENSAIO_C3_FALSO:-}            # a janela sem troca, de 1 a 4; sortead
 # O E-C5, em amostras; os prazos do guarda, em segundos.
 C5_P=${ENSAIO_C5_P:-95}
 # Quais gestos, e se termina pedindo o reinicio. Repetir so uma parte poupa os
-# gestos que ja foram medidos.
-C5_GESTOS=${ENSAIO_C5_GESTOS:-suspensao cabo perfil}
+# gestos que ja foram medidos. Sem os dois-pontos de proposito: vazio quer
+# dizer nenhum gesto, e nao o padrao -- em 2026-10-16 um ENSAIO_C5_GESTOS=""
+# rodou os tres.
+C5_GESTOS=${ENSAIO_C5_GESTOS-suspensao cabo perfil}
 C5_REINICIO=${ENSAIO_C5_REINICIO:-1}
 C5_DEPOIS=${ENSAIO_C5_DEPOIS:-30}        # olhando a rotacao depois de cada gesto
 C5_FORA=${ENSAIO_C5_FORA:-15}            # na bateria, ou no outro perfil

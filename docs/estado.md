@@ -50,8 +50,12 @@ firmware: `fan_curve = false` no `config.toml`.
   devolve o perfil; o guarda devolve `0,0` em 105 ms no `kill -9` e em 5,0 s
   com o agente travado. O defeito do aviso de dormir era o buffer do
   `busctl` num pipe (`stdbuf -oL`, `5d682c6`).
-- **Próximo:** a parte do reinício do E-C5 (`ENSAIO_C5_GESTOS=""`); o botão
-  "Curva" na janela e na bandeja; o merge no `master`.
+- **O reinício do E-C5:** com o manual registrado como o da curva, o guarda o
+  devolveu no desligamento no mesmo segundo em que o driver gravou o estado,
+  e a partida voltou no automático. O E-C5 está completo.
+- **A curva ficou ligada** depois do reinício (`fan_curve = true`).
+- **Próximo:** o merge no `master`; depois, o botão "Curva" na janela e na
+  bandeja.
 
 ---
 

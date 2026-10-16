@@ -616,6 +616,14 @@ grep -q 'GESTO 1: tire o cabo' "$D/saida.txt" && ! grep -q 'suspenda' "$D/saida.
     && ok "so o gesto pedido" || falha "gestos: $(grep '^GESTO' "$D/saida.txt" | tr '\n' '|')"
 [ ! -e "$(estado)" ] && ok "sem reinicio, sem continuacao gravada" || falha "gravou continuacao sem pedir reinicio"
 
+# Nenhum gesto: so o guarda e o reinicio. Vazio e nenhum, e nao o padrao.
+c5 ec5-sem-gestos completo
+roda "$D" env ENSAIO_C5_GESTOS= "${C5[@]}"
+confere "sem gestos: vai direto ao guarda e ao reinicio" "$?" 0 "95,95"
+grep -q '^GESTO 1: reinicie' "$D/saida.txt" \
+    && ok "o unico gesto pedido e o reinicio" || falha "gestos: $(grep '^GESTO' "$D/saida.txt" | tr '\n' '|')"
+roda "$D" "$S" ec5-volta > /dev/null
+
 # O EC que larga o manual na suspensao e volta a ele. A unit de hoje, sem
 # guarda: o exercicio nao roda, e o codigo de saida diz isso.
 c5 ec5-larga sem larga_e_volta

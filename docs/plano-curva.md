@@ -675,7 +675,19 @@ O que isso responde, contra a seção 7:
   disso: ao acordar ela reescreve o manual, e o agente devolve o perfil.
 - **O guarda funciona na máquina**, nas duas mortes, no prazo que a seção 8
   fixou.
-- **Falta só o reinício** — o que volta na partida antes do login. Fica para
-  uma rodada com `ENSAIO_C5_GESTOS=""`, quando reiniciar não atrapalhar.
+- **O reinício, medido às 08:39–08:45**, numa rodada que repetiu também os três
+  gestos (o `ENSAIO_C5_GESTOS=""` caiu no padrão; corrigido) e deu o mesmo de
+  antes. O manual de 95% foi registrado como do agente, como o da curva. No
+  desligamento, às 08:43:31, o guarda o devolveu (*"o agente parou com a
+  ventoinha em 95,95, que ele escreveu; devolvida ao automatico"*), e no mesmo
+  segundo o driver gravou o estado — já com o `0,0`. Na partida o driver
+  restaurou `0,0`, e a ventoinha subiu no automático (2.213 rpm, lido 79 s
+  depois da partida). **Com a curva ligada, desligar a máquina deixa a próxima
+  partida no automático.** O guarda chegou antes do driver por menos de um
+  segundo: é o que se viu, não uma ordem garantida.
 
-O que falta: o reinício do E-C5, e o botão na janela e na bandeja.
+**C5 está respondida**, e a forma B não espera mais nada dela: só a suspensão
+larga o manual, e a curva o reescreve ao acordar; o guarda cobre o agente
+morto e o travado; e o reinício, desta vez, voltou no automático.
+
+O que falta: o botão na janela e na bandeja, e o merge.
