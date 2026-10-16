@@ -117,9 +117,22 @@ def test_o_par_da_curva_aparece_como_automatico(qtbot, tmp_path):
     (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("25,24\n")
     agente_no_ar("25,24")
     p = painel(qtbot, raiz)
-    assert p.cards["ventoinhas"].rows["modo"].text() == (
-        "automático — o Nexus Sense decide pela temperatura"
-    )
+    assert p.cards["ventoinhas"].rows["modo"].text() == "automático"
+
+
+def test_cem_cem_aparece_como_maximo(qtbot, tmp_path):
+    """Ate 2026-10-17 o painel dizia "manual — 100% / 100%" com a
+    ventoinha no Maximo; a tela Desempenho marcava Maximo."""
+    raiz = build_tree(tmp_path / "t")
+    (raiz / "sys/devices/platform/acer-wmi/nitro_sense/fan_speed").write_text("100,100\n")
+    p = painel(qtbot, raiz)
+    assert p.cards["ventoinhas"].rows["modo"].text() == "máximo"
+
+
+def test_zero_zero_e_so_o_nome_do_modo(qtbot, fake_root):
+    """O painel nao explica o modo: quem explica e a tela Desempenho."""
+    p = painel(qtbot, fake_root)
+    assert p.cards["ventoinhas"].rows["modo"].text() == "automático"
 
 
 def test_um_par_que_a_curva_nao_registrou_segue_manual(qtbot, tmp_path):

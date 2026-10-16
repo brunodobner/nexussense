@@ -23,7 +23,7 @@ from PySide6.QtCore import Signal
 from ... import model, telemetry
 from ...device import read_product
 from ...maximum import MaximumMode
-from .performance import AUTO_DA_CURVA, curva_manda, fan_mode, par_da_curva
+from .performance import curva_manda, fan_mode, par_da_curva
 from ..graph import COR_CPU, COR_GPU, TemperatureGraph
 
 VAZIO = "—"
@@ -184,19 +184,22 @@ class DashboardPage(QWidget):
         self.cards["gpu"].set_value("modelo", self._gpu_name)
 
         # O setpoint, nao a rotacao: "0,0" e automatico. Ver spec secao 2.5.
-        # O par que a curva escreveu tambem e o Automatico, como na tela
-        # Desempenho: ate 2026-10-17 o painel o chamava de manual.
+        # O par que a curva escreveu tambem e o Automatico, e "100,100" e o
+        # Maximo, como na tela Desempenho: ate 2026-10-17 o painel chamava
+        # os dois de manual. So o nome do modo: quem o explica e a tela
+        # Desempenho (decisao do usuario).
         da_curva = None
         if state.fan_speed not in (None, (0, 0)) and curva_manda(
             self.maximum, self._produto, state
         ):
             da_curva = par_da_curva()
-        if state.fan_speed is None:
+        modo = fan_mode(state.fan_speed, da_curva)
+        if modo is None:
             self.cards["ventoinhas"].set_value("modo", VAZIO)
-        elif state.fan_speed == (0, 0):
+        elif modo == "auto":
             self.cards["ventoinhas"].set_value("modo", "automático")
-        elif fan_mode(state.fan_speed, da_curva) == "auto":
-            self.cards["ventoinhas"].set_value("modo", f"automático — {AUTO_DA_CURVA}")
+        elif modo == "max":
+            self.cards["ventoinhas"].set_value("modo", "máximo")
         else:
             # Na escala do cursor da tela Desempenho, nao na do firmware:
             # os dois lugares tem de mostrar o mesmo numero.
