@@ -9,8 +9,10 @@ diz qual é a vez de qual, e o que ficou pendente.
 
 ## Em andamento: a curva própria da ventoinha (2026-10-15)
 
-Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **nada
-instalado**: a ventoinha da máquina segue no automático do firmware.
+Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **ainda
+não juntado ao `master`, mas instalado na máquina** a partir do ramo em
+2026-10-15, e com a curva **ligada** (`fan_curve = true`). Para voltar ao
+firmware: `fan_curve = false` no `config.toml`.
 
 - **Feito e verificado:** os modos de ensaio E-C2, E-C3 e E-C5 em
   `tests/hardware/ensaio-termico.sh` (commit `bd67182`, suíte verde); a curva
@@ -26,8 +28,15 @@ instalado**: a ventoinha da máquina segue no automático do firmware.
 - **A curva, versão curta, escrita e testada** ([plano-curva.md](plano-curva.md),
   seção 11, no fim): `src/nexus_sense/curva.py`, ligada no agente por
   `fan_curve = true` no `config.toml`, sem botão na janela por enquanto.
-- **Próximo:** instalar (pkexec, avisando antes), ligar `fan_curve`, conferir
-  na máquina, e rodar o E-C5. Depois, o botão "Curva" na janela e na bandeja.
+- **Na máquina:** a primeira rodada achou o sobe-desce (a CPU pelo EC pula com
+  carga em rajadas), corrigido com a mediana de 10 s e a descida de 4 pontos
+  por passada (`49f5320`). Na segunda, dois minutos com carga: subiu a ~7.100
+  rpm, desceu a ~2.700 em 30 s sem tranco, ignorou os pulos, e o agente não
+  foi morto pelo watchdog nenhuma vez.
+- **A janela não sabe da curva:** com ela ligada, mostra Manual com os números
+  que a curva escreveu. "Automático" na janela devolve a ventoinha à curva.
+- **Próximo:** o E-C5 na máquina (gestos do usuário); o botão "Curva" na janela
+  e na bandeja; e o merge no `master`, com as suítes de novo.
 
 ---
 

@@ -574,4 +574,11 @@ desligada na hora, e corrigida:
 - **O piso da GPU quente segue imediato**, pela leitura de agora: é a
   segurança da rede, e a GPU sobe um grau por segundo com um jogo (E3b).
 
+**A segunda rodada, logo depois, com a correção instalada:** dois minutos, a
+CPU pelo EC a 80–88 °C nos primeiros 55 s. A ventoinha da CPU subiu a 90–93%
+(~7.100 rpm) e ficou; com a carga fora, desceu de 93% a 31% (~2.700 rpm) em
+~30 s, sem tranco; um pulo a 90 °C aos 120 s não a moveu. A da GPU, com a GPU
+a 45–51 °C, ficou em ~2.000 rpm. Nenhuma morte pelo watchdog. A curva ficou
+ligada.
+
 O que falta: E-C5 na máquina; depois, o botão na janela e na bandeja.
