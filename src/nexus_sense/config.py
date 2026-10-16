@@ -36,11 +36,17 @@ class Config:
     maximum_saved_ppd: str | None = None
     maximum_saved_powermizer: str | None = None
 
-    # A curva propria da ventoinha (docs/plano-curva.md, secao 11). Desligada
-    # ate o usuario pedir: liga-se com "fan_curve = true" neste arquivo. Com
-    # ela ligada, "Automatico" na janela quer dizer a curva; "Manual" a
-    # suspende enquanto durar.
-    fan_curve: bool = False
+    # A curva propria da ventoinha (docs/plano-curva.md, secao 11). None e
+    # "ninguem escolheu": vale o padrao do modelo (curva.ligada). Desde
+    # 2026-10-16, por decisao do usuario, ela e o proprio Automatico nos
+    # modelos em que foi medida, sem botao. "fan_curve = false" a desliga, e e
+    # o que o agente grava se a rede termica disparar com ela ativa;
+    # "fan_curve = true" a liga num modelo em que ela nao foi medida.
+    fan_curve: bool | None = None
+
+
+# Os campos que valem None por padrao sao texto, menos estes.
+_TIPOS_DOS_OPCIONAIS = {"fan_curve": bool}
 
 
 def default_path():
@@ -64,13 +70,24 @@ def load(path):
             continue
         valor = bruto[campo.name]
         atual = getattr(padrao, campo.name)
-        esperado = type(atual) if atual is not None else str
+        esperado = (
+            type(atual) if atual is not None else _TIPOS_DOS_OPCIONAIS.get(campo.name, str)
+        )
         if isinstance(valor, esperado) and not (
             esperado is int and isinstance(valor, bool)
         ):
             aceitos[campo.name] = valor
 
     return Config(**aceitos)
+
+
+def _bruto(caminho):
+    """O arquivo como esta, sem interpretar. Vazio se nao der para ler."""
+    try:
+        with open(caminho, "rb") as arquivo:
+            return tomllib.load(arquivo)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
 
 
 def save(config, path):
@@ -85,8 +102,14 @@ def save(config, path):
     # uma copia.
     caminho = Path(os.path.realpath(path))
     caminho.parent.mkdir(parents=True, exist_ok=True)
+    # As chaves que este Config nao conhece ficam como estavam. Sem isto um
+    # processo de versao anterior apaga o campo novo na primeira gravacao:
+    # em 2026-10-16 a bandeja que subiu antes da instalacao regravou o
+    # arquivo sem "fan_curve", e a curva da ventoinha se desligou sozinha.
+    conhecidos = {campo.name for campo in fields(config)}
+    dados = {k: v for k, v in _bruto(caminho).items() if k not in conhecidos}
     # tomli_w nao serializa None; a ausencia da chave e o proprio None.
-    dados = {k: v for k, v in asdict(config).items() if v is not None}
+    dados.update({k: v for k, v in asdict(config).items() if v is not None})
     # O PID no nome separa os dois escritores, janela e agente.
     provisorio = caminho.with_name(f".{caminho.name}.{os.getpid()}.tmp")
     try:

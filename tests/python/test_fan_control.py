@@ -398,3 +398,84 @@ def test_a_secao_aparece_mesmo_sem_perfil_anunciado(qtbot, tmp_path):
     p = PerformancePage(Controls(s))
     qtbot.addWidget(p)
     assert p.has_content(read_state(s)) is True
+
+
+# ------------------------------------- a curva como o proprio Automatico
+#
+# Decisao do usuario em 2026-10-16: a curva e o Automatico, sem botao. Ela
+# grava pares como 45,40; a janela os reconhece pelo registro do agente, em
+# $XDG_RUNTIME_DIR/nexus-sense/ventoinha, e diz quem decide.
+
+import os  # noqa: E402
+
+from nexus_sense.config import Config, default_path, save  # noqa: E402
+
+
+def agente_no_ar(par=None):
+    """A pasta da unit do agente, e o par que a curva registrou ter escrito."""
+    pasta = os.path.join(os.environ["XDG_RUNTIME_DIR"], "nexus-sense")
+    os.makedirs(pasta, exist_ok=True)
+    if par is not None:
+        with open(os.path.join(pasta, "ventoinha"), "w") as arquivo:
+            arquivo.write(f"0,0\n{par}\n")
+    return os.path.join(pasta, "ventoinha")
+
+
+def texto_do_automatico(p):
+    return p.fan_buttons["auto"].text().split("\n", 1)[1]
+
+
+def test_o_par_da_curva_aparece_como_automatico(qtbot, tmp_path):
+    raiz = build_tree(tmp_path / "t")
+    (raiz / SENSE / "fan_speed").write_text("45,40\n")
+    agente_no_ar("45,40")
+    p = pagina(qtbot, raiz)
+    assert p.fan_buttons["auto"].isChecked() is True
+    assert p.fan_manual_box.isVisible() is False
+    assert texto_do_automatico(p) == "o Nexus Sense decide pela temperatura"
+
+
+def test_um_par_que_a_curva_nao_registrou_e_manual(qtbot, tmp_path):
+    raiz = build_tree(tmp_path / "t")
+    (raiz / SENSE / "fan_speed").write_text("60,60\n")
+    agente_no_ar("45,40")
+    p = pagina(qtbot, raiz)
+    assert p.fan_buttons["manual"].isChecked() is True
+
+
+@pytest.mark.parametrize(
+    "monta",
+    [
+        pytest.param(lambda raiz: None, id="agente-parado"),
+        pytest.param(lambda raiz: (agente_no_ar(), (raiz / "sys/class/power_supply/ACAD/online").write_text("0\n")), id="bateria"),
+        pytest.param(lambda raiz: (agente_no_ar(), (raiz / "sys/class/dmi/id/product_name").write_text("Nitro AN515-58\n")), id="outro-modelo"),
+        pytest.param(lambda raiz: (agente_no_ar(), save(Config(fan_curve=False), default_path())), id="fan_curve-false"),
+    ],
+)
+def test_onde_a_curva_nao_age_o_automatico_e_do_firmware(qtbot, tmp_path, monta):
+    raiz = build_tree(tmp_path / "t")
+    monta(raiz)
+    p = pagina(qtbot, raiz)
+    assert texto_do_automatico(p) == "o firmware decide pela temperatura"
+
+
+def test_em_quiet_o_automatico_e_do_firmware(qtbot, tmp_path):
+    raiz = build_tree(tmp_path / "t", profile="quiet")
+    agente_no_ar()
+    p = pagina(qtbot, raiz)
+    assert texto_do_automatico(p) == "o firmware decide pela temperatura"
+
+
+def test_manual_tira_o_par_da_curva(qtbot, tmp_path):
+    """Manual sem mexer nos cursores escreve o mesmo par que a curva
+    escreveu. A janela apaga o registro antes: a curva cede, e a tela
+    fica em Manual."""
+    raiz = build_tree(tmp_path / "t")
+    (raiz / SENSE / "fan_speed").write_text("45,40\n")
+    registro = agente_no_ar("45,40")
+    p = pagina(qtbot, raiz)
+    p.fan_buttons["manual"].click()
+    assert not os.path.exists(registro)
+    assert (raiz / SENSE / "fan_speed").read_text().strip() == "45,40"
+    p.apply_state(read_state(Sysfs(raiz)))
+    assert p.fan_buttons["manual"].isChecked() is True

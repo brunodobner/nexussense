@@ -65,6 +65,15 @@ else
     falhas=$((falhas + 1))
 fi
 
+# E reinicia o que ja estava no ar, para o codigo novo valer sem relogar.
+if sed -n '/^install_nexus_sense() {/,/^}/p' "$S" | grep -v '^\s*#' \
+     | grep -qE '^\s*each_user_manager try-restart nexus-sense-agent\.service'; then
+    echo "  OK   reinicia o agente e a bandeja que estiverem rodando"
+else
+    echo "  FALHA nao reinicia o agente e a bandeja ao instalar"
+    falhas=$((falhas + 1))
+fi
+
 # Nenhum arquivo privilegiado deve reaparecer sem decisao: se alguem
 # ressuscitar o helper, este teste acusa.
 #

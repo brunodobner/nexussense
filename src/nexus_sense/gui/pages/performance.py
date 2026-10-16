@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ... import model
-from ...device import WriteError, read_state
+from ... import curva, guarda, model
+from ...device import WriteError, read_product, read_state
 from ...maximum import MaximumMode
 
 # Quatro perfis do firmware e o modo composto do Nexus Sense.
@@ -37,21 +37,40 @@ FAN_MAX = (100, 100)
 ATRASO_CURSOR_MS = 150
 
 FAN_ROTULOS = (
-    ("auto", "Automático", "o driver decide pela temperatura"),
+    ("auto", "Automático", "o firmware decide pela temperatura"),
     ("max", "Máximo", "as duas ventoinhas a 100%"),
     ("manual", "Manual", "você escolhe a velocidade de cada uma"),
 )
 
+# Desde 2026-10-16 o Automatico e a curva propria onde ela age (curva.age):
+# na tomada, fora de quiet e low-power, com o agente no ar. Fora disso,
+# quem decide e o firmware, e o botao diz isso.
+AUTO_DA_CURVA = "o Nexus Sense decide pela temperatura"
 
-def fan_mode(fan_speed):
-    """Qual dos tres modos este setpoint representa. None se ilegivel."""
+
+def fan_mode(fan_speed, da_curva=None):
+    """Qual dos tres modos este setpoint representa. None se ilegivel.
+
+    `da_curva` e o par que o agente registrou ter escrito: a curva grava
+    pares como 45,40, e eles sao o Automatico, nao um Manual."""
     if fan_speed is None:
         return None
-    if fan_speed == FAN_AUTO:
+    if fan_speed == FAN_AUTO or (da_curva is not None and fan_speed == da_curva):
         return "auto"
     if fan_speed == FAN_MAX:
         return "max"
     return "manual"
+
+
+def par_da_curva(ambiente=None):
+    """O par que a curva escreveu e ainda e dela, ou None."""
+    bruto = guarda.registrado(guarda.caminho_na_sessao(ambiente))
+    if bruto is None:
+        return None
+    try:
+        return model.parse_fan_speed(bruto)
+    except ValueError:
+        return None
 
 
 SOMENTE_LEITURA = (
@@ -149,6 +168,8 @@ class PerformancePage(QWidget):
         # Maximo: sem lembrar de quem veio, a repintura esconderia os
         # cursores de quem acabou de arrasta-los ate o fim.
         self._manual_escrito = None
+        # O modelo decide se a curva e o Automatico (curva.ligada).
+        self._produto = read_product(controls.sysfs)
         self._fan_timer = QTimer(self)
         self._fan_timer.setSingleShot(True)
         self._fan_timer.setInterval(ATRASO_CURSOR_MS)
@@ -181,8 +202,10 @@ class PerformancePage(QWidget):
         caixa.addWidget(rotulo)
 
         self.fan_buttons = {}
+        self._fan_nomes = {}
         linha = QHBoxLayout()
         for chave, nome, explicacao in FAN_ROTULOS:
+            self._fan_nomes[chave] = nome
             botao = QPushButton(f"{nome}\n{explicacao}")
             botao.setCheckable(True)
             botao.setMinimumHeight(52)
@@ -254,6 +277,9 @@ class PerformancePage(QWidget):
             model.fan_bar_to_firmware(self.fan_sliders["gpu"].value()),
         )
         self._manual_escrito = par
+        # O manual e de quem o escolheu: sem o registro, a curva cede mesmo
+        # quando o par e o mesmo que ela escreveu (guarda.esquece).
+        guarda.esquece()
         self._escreve_ventoinha(*par)
 
     def _cursor_em_uso(self):
@@ -290,7 +316,13 @@ class PerformancePage(QWidget):
         if self._cursor_em_uso():
             return
 
-        modo = fan_mode(state.fan_speed)
+        curva_age = guarda.agente_no_ar() and curva.age(
+            self.maximum.config().fan_curve, self._produto, state.on_ac, state.profile
+        )
+        explicacao = AUTO_DA_CURVA if curva_age else FAN_ROTULOS[0][2]
+        self.fan_buttons["auto"].setText(f"{self._fan_nomes['auto']}\n{explicacao}")
+
+        modo = fan_mode(state.fan_speed, par_da_curva() if curva_age else None)
         if self._manual_escrito is not None and state.fan_speed == self._manual_escrito:
             modo = "manual"
         else:

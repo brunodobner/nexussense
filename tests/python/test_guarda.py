@@ -88,6 +88,43 @@ def test_registro_que_nao_grava_diz_que_nao_gravou(tmp_path):
     assert guarda.registra("0,0", "25,24", ambiente) is False
 
 
+# ─── o registro visto da janela ─────────────────────────────────────
+
+
+def test_a_janela_acha_o_registro_pela_sessao(tmp_path):
+    ambiente = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    assert guarda.caminho_na_sessao(ambiente) == str(tmp_path / "nexus-sense/ventoinha")
+    assert guarda.caminho_na_sessao({}) is None
+
+
+def test_o_agente_no_ar_e_a_pasta_da_unit(tmp_path):
+    ambiente = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    assert guarda.agente_no_ar(ambiente) is False
+    (tmp_path / "nexus-sense").mkdir()
+    assert guarda.agente_no_ar(ambiente) is True
+    assert guarda.agente_no_ar({}) is False
+
+
+def test_registrado_e_a_segunda_linha(tmp_path):
+    ambiente = {"RUNTIME_DIRECTORY": str(tmp_path)}
+    caminho = guarda.caminho_do_registro(ambiente)
+    assert guarda.registrado(caminho) is None
+    guarda.registra("0,0", "25,24", ambiente)
+    assert guarda.registrado(caminho) == "25,24"
+    assert guarda.registrado(None) is None
+
+
+def test_a_janela_esquece_o_registro(tmp_path):
+    ambiente = {"XDG_RUNTIME_DIR": str(tmp_path)}
+    (tmp_path / "nexus-sense").mkdir()
+    guarda.registra("0,0", "25,24", {"RUNTIME_DIRECTORY": str(tmp_path / "nexus-sense")})
+    guarda.esquece(ambiente)
+    assert not (tmp_path / "nexus-sense/ventoinha").exists()
+    # Sem registro, ou fora de uma sessao, nao ha o que esquecer.
+    guarda.esquece(ambiente)
+    guarda.esquece({})
+
+
 # ─── o agente avisa ─────────────────────────────────────────────────
 
 

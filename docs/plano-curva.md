@@ -691,3 +691,43 @@ larga o manual, e a curva o reescreve ao acordar; o guarda cobre o agente
 morto e o travado; e o reinício, desta vez, voltou no automático.
 
 O que falta: o botão na janela e na bandeja, e o merge.
+
+**A curva como o próprio Automático, 2026-10-16.** Decisão do usuário: sem
+botão novo, a curva é o Automático. O que mudou (ramo `curva/padrao`):
+
+- **Ligada desde a instalação, só no modelo medido.** `fan_curve` no config
+  passa a ter três valores: ausente é "ninguém escolheu", e vale o padrão do
+  modelo (`curva.ligada`); `true` e `false` são escolhas. O padrão liga a curva
+  só no `Nitro ANV15-52` (`curva.MEDIDOS`, pelo `product_name` do DMI): as
+  tabelas são porcentagens, e o mapa de porcentagem para rotação (E2) e o piso
+  da rede (`fan_guard.AUTOMATICO`) foram medidos neste notebook. Noutro modelo
+  ela só liga com `fan_curve = true`. Gravar o config por outro motivo não fixa
+  o padrão como escolha: o `None` não vai para o arquivo. O `false` que o
+  agente grava quando a rede dispara com a curva ativa segue valendo.
+- **A janela mostra Automático enquanto a curva manda.** Ela reconhece o par
+  da curva pelo registro do guarda, visto da sessão
+  (`$XDG_RUNTIME_DIR/nexus-sense/ventoinha`), e o texto do botão diz quem
+  decide: "o Nexus Sense decide pela temperatura" onde a curva age
+  (`curva.age`: na tomada, fora de quiet e low-power, com o agente no ar) e
+  "o firmware decide pela temperatura" fora disso.
+- **Manual sem mexer nos cursores vale.** Ele escreve o mesmo par que a curva
+  escreveu, e a curva, que só comparava o par, seguia mandando. Agora a
+  janela apaga o registro antes de escrever um manual (`guarda.esquece`); a
+  curva cede ao par sem registro, e o guarda o deixa como está.
+- **A bandeja não muda:** "Ventoinha automática" grava `0,0`, e a curva
+  retoma em até 2 s; ela não mostra o modo da ventoinha.
+- **Fora da unit, a curva do padrão fica quieta:** o aviso "sem o guarda"
+  é só para quem pediu `fan_curve = true`.
+
+O que fica de fora, de propósito:
+
+- **Quem instalou o `2b1ea62` e nunca ligou a curva** tem `fan_curve = false`
+  gravado: aquela versão gravava o padrão de então. Para ela ficar desligada
+  é escolha; para valer o novo padrão, apagar a linha. Só esta máquina tem a
+  instalação, e nela a linha diz `true`.
+- **Um corredor pequeno:** se o agente lê o registro na mesma passada em que
+  a janela o apaga e escreve o manual, a curva escreve por cima uma vez. Já
+  existia com o cursor arrastado.
+- **Os ensaios que medem o automático do firmware** (`ensaio-termico.sh`,
+  E-C2/E-C3) precisam de `fan_curve = false` no config enquanto rodam: com
+  a curva valendo, ela toma o `0,0` em 2 s. Hoje o roteiro não cuida disso.

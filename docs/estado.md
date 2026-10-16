@@ -41,7 +41,9 @@ firmware: `fan_curve = false` no `config.toml`.
   `balanced`, com o `fan_speed` ainda dizendo o manual.
 - **A bandeja de antes da instalação apagava `fan_curve`** ao gravar o
   `config.toml` (o processo antigo não conhecia o campo). Reiniciada às
-  07:28 de 2026-10-16; o `setup.sh` não reinicia a bandeja ao instalar.
+  07:28 de 2026-10-16. Corrigido nas duas pontas (armadilha 44): o
+  `config.save` preserva as chaves que não conhece, e o `setup.sh` faz
+  `try-restart` do agente e da bandeja ao instalar.
 - **Os ajustes da suspensão, escritos** (plano-curva, seção 11, no fim):
   o agente alarga o watchdog antes de dormir, devolve o perfil e reescreve o
   manual ao acordar, e o E-C5 registra a troca em vez de parar.
@@ -54,8 +56,21 @@ firmware: `fan_curve = false` no `config.toml`.
   devolveu no desligamento no mesmo segundo em que o driver gravou o estado,
   e a partida voltou no automático. O E-C5 está completo.
 - **A curva ficou ligada** depois do reinício (`fan_curve = true`).
-- **Próximo:** o merge no `master`; depois, o botão "Curva" na janela e na
-  bandeja.
+- **Juntado ao `master`** (`2b1ea62`) e enviado ao GitHub.
+- **As armadilhas da curva escritas** em [armadilhas.md](armadilhas.md),
+  41 a 44: o `busctl` num pipe, o watchdog que conta o sono, o firmware que
+  larga o manual ao acordar, e o processo antigo que apaga campo novo.
+- **Decidido pelo usuário (2026-10-16): a curva vira o próprio
+  Automático**, sem botão novo. Ligada desde a instalação; a janela mostra
+  Automático enquanto ela manda; o automático do firmware fica para a
+  bateria, os perfis silencioso e econômico, e o agente parado (o guarda).
+- **Implementada no ramo `curva/padrao`** (de `curva/armadilhas`), não
+  juntada nem instalada ([plano-curva.md](plano-curva.md), seção 11, no fim):
+  sem `fan_curve` no config a curva vale no `Nitro ANV15-52` e só nele; a
+  janela mostra Automático enquanto ela manda e diz quem decide; Manual sem
+  mexer nos cursores vale, porque a janela apaga o registro da curva.
+- **Próximo:** juntar `curva/armadilhas` e `curva/padrao` ao `master` e
+  instalar, com a autorização do usuário.
 
 ---
 
