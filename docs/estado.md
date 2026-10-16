@@ -16,18 +16,14 @@ instalado**: a ventoinha da máquina segue no automático do firmware.
   `tests/hardware/ensaio-termico.sh` (commit `bd67182`, suíte verde); a curva
   aprovada pelo usuário, com as duas tabelas, em
   [plano-curva.md](plano-curva.md), seção 11 (`ba10573`).
-- **Escrito, suítes de depois NÃO terminadas:** o guarda (plano-curva, seção
-  8, no fim): `packaging/scripts/guarda-ventoinha.sh` (ExecStopPost),
+- **O guarda, feito e verificado** (plano-curva, seção 8, no fim):
+  `packaging/scripts/guarda-ventoinha.sh` (ExecStopPost),
   `src/nexus_sense/guarda.py` (sd_notify e o registro), a unit com
   `Type=notify`, `WatchdogSec=6`, `WatchdogSignal=SIGKILL` e
-  `RuntimeDirectory`, e o `setup.sh` instalando o guarda. Os testes novos
-  passaram (`test_guarda.py`, `test-guarda-ventoinha.sh`,
-  `test-unit-agente.sh`); o teste da curva com o guarda de verdade e as duas
-  suítes completas foram interrompidos pelo desligamento. **Ao retomar: rodar
-  `python3 -m pytest -q` e `./tests/run-all.sh` e comparar com a baseline**
-  (pytest 501; shell 24 passam, 1 pula, 1 falha — `test-arvore.sh`, só porque
-  num worktree `.git` é arquivo).
-- **Próximo, se o usuário confirmar a versão curta:** a função da curva
+  `RuntimeDirectory`, e o `setup.sh` instalando o guarda. Suítes de depois:
+  pytest 513 (501 + 12 novos); shell igual à baseline — a única diferença,
+  `test-perfil-bateria.sh`, pula na tomada e roda na bateria.
+- **Em curso, a versão curta (o usuário disse "continua a curva"):** a função da curva
   (tabela, histerese de 3 °C, piso de 81%/82% com a GPU a 76 °C), ligada no
   agente por uma chave no `config.toml`, sem botão na janela por enquanto.
   Depois instalar (pkexec, avisando antes) e rodar o E-C5 na máquina.
