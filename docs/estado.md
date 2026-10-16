@@ -76,7 +76,12 @@ firmware: `fan_curve = false` no `config.toml`.
 - **`curva/painel` juntado** (`23cdf53`), enviado e instalado. Na
   conferência o usuário viu tudo funcionando e pediu só texto: o cartão
   Ventoinhas do Painel diz o nome do modo, sem explicar, e mostra "máximo"
-  no `100,100` (ramo `curva/painel-texto`).
+  no `100,100` (ramo `curva/painel-texto`), juntado (`933a856`), enviado e
+  instalado.
+- **Os ensaios pausam a curva** (ramo `curva/ensaio-pausa`): todo modo de
+  `ensaio-termico.sh` que começa no `0,0` grava `fan_curve = false` antes da
+  partida e devolve a linha como estava no fim; no ec5, quem devolve é o
+  `ec5-volta`. Não roda nada na máquina.
 
 ---
 

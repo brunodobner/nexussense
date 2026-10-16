@@ -4,7 +4,7 @@
 tests/hardware/ensaio-termico.sh escreve na ventoinha de verdade e esquenta a
 maquina de proposito. O que o impede de fazer besteira esta provado em arvore
 de mentira, por tests/shell/test-ensaio-termico.sh, -e3.sh, -rede.sh e
--curva.sh. Este roteiro prova os testes: copia o ensaio, estraga UMA
+-curva.sh e -pausa.sh. Este roteiro prova os testes: copia o ensaio, estraga UMA
 protecao, roda o teste que a guarda, e cobra que ele reprove.
 
 Nao faz parte da suite -- leva uns quinze minutos e ocupa cinco nucleos. Rode
@@ -33,6 +33,7 @@ E2 = "test-ensaio-termico.sh"
 E3 = "test-ensaio-termico-e3.sh"
 REDE = "test-ensaio-termico-rede.sh"
 CURVA = "test-ensaio-termico-curva.sh"
+PAUSA = "test-ensaio-termico-pausa.sh"
 APOIO = "lib-arvore-termica.sh"
 GUARDA = "packaging/scripts/guarda-ventoinha.sh"
 
@@ -225,13 +226,29 @@ MUT = [
     ("curva: o degrau de controle tambem troca", CURVA,
      'then b=${reais[1]}; troca=0;', 'then b=${reais[1]}; troca=1;'),
     ("curva: o trap devolve o manual que tinha de atravessar o reinicio", CURVA,
-     '    DEVOLVIDO=1; : > "$RUN/devolvido"\n    echo "reinicio: pedido', '    : > "$RUN/devolvido"\n    echo "reinicio: pedido'),
+     '    DEVOLVIDO=1; : > "$RUN/devolvido"\n    CURVA_INICIAL=;', '    : > "$RUN/devolvido"\n    CURVA_INICIAL=;'),
     ("curva: o agente fica sob SIGSTOP", CURVA,
      '    kill -CONT "$AGENTE_PARADO" 2>/dev/null\n', ''),
     ("curva: o guarda passa sem a rotacao sair do manual", CURVA,
      '        if rotacao_largou 30 "$C5_REF1" "$C5_REF2" "$QUEDA_RPM" queda; then\n'
      '            echo "guarda, kill -9: PASSOU',
      '        if true; then\n            echo "guarda, kill -9: PASSOU'),
+    # ---- a curva do agente, pausada enquanto o ensaio roda
+    ("pausa: o E2 nao pausa a curva", PAUSA,
+     '    echo "E2 -- mapa de porcentagem para rotacao, em repouso"\n    echo "saida: $SAIDA"\n    pausa_curva\n',
+     '    echo "E2 -- mapa de porcentagem para rotacao, em repouso"\n    echo "saida: $SAIDA"\n'),
+    ("pausa: antes da partida, nada devolve a curva", PAUSA,
+     '    trap devolve_curva EXIT\n', ''),
+    ("pausa: o trap nao devolve a curva", PAUSA,
+     '    devolve_ppd\n    devolve_curva\n', '    devolve_ppd\n'),
+    ("pausa: o vigia nao devolve a curva", PAUSA,
+     '    if [ -s "$RUN/curva_inicial" ]; then', '    if false; then'),
+    ("pausa: a curva volta sempre como false", PAUSA,
+     '    if poe_curva "$inicial"; then', '    if poe_curva false; then'),
+    ("pausa: o reinicio do ec5 devolve a curva antes da hora", CURVA,
+     '    CURVA_INICIAL=; rm -f "$RUN/curva_inicial"\n', ''),
+    ("pausa: o ec5-volta nao devolve a curva", CURVA,
+     '    CURVA_INICIAL=$(chave curva)\n    devolve_curva\n', ''),
 ]
 
 # Mutacoes que nao mudam o que o roteiro faz, e por isso nao tem como

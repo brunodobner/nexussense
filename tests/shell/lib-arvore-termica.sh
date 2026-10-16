@@ -7,6 +7,7 @@
 #     tests/shell/test-ensaio-termico.sh       o E2 e as protecoes comuns
 #     tests/shell/test-ensaio-termico-e3.sh    o E3
 #     tests/shell/test-ensaio-termico-curva.sh os ensaios da curva (E-C2, E-C3, E-C5)
+#     tests/shell/test-ensaio-termico-pausa.sh a curva do agente pausada no ensaio
 #
 # Nada aqui toca em /sys: o roteiro recebe ENSAIO_RAIZ. Os indices de hwmon e
 # de zona termica sao embaralhados de proposito: o roteiro tem de achar tudo
@@ -218,9 +219,12 @@ ec_falso() {
         if [ "$2" = auto_parado ]; then a1=2300; a2=2000; fi
         case "$2" in
             curvas|ganho|presa)
-                cfg=; read -r cfg < "$1/config.toml"
+                # O arquivo inteiro, e nao a primeira linha: o roteiro poe o
+                # fan_curve no topo enquanto pausa a curva.
                 alta=0
-                [ "$cfg" = "maximum_mode = true" ] && { alta=1; presa=1; }
+                while read -r cfg; do
+                    [ "$cfg" = "maximum_mode = true" ] && { alta=1; presa=1; }
+                done < "$1/config.toml"
                 [ "$2" = presa ] && [ "$presa" = 1 ] && alta=1
                 [ "$alta" = 1 ] && { a1=$((a1 + 600)); a2=$((a2 + 600)); } ;;
         esac
@@ -287,6 +291,33 @@ ec_falso() {
         esac
         sleep 0.02
     done 2> /dev/null
+}
+
+# O agente com a curva propria, so no que importa ao ensaio. Com fan_curve
+# fora de false no config -- ausente ou true, como na maquina desde 2026-10-17
+# --, toma o 0,0 e grava o par dela; com false, devolve ao 0,0 o par que e
+# dela. Um manual que nao e o dela fica: a curva cede, como a de verdade.
+curva_falsa() {   # $1 = arvore, $2 = o par que a curva grava
+    local f l v desligada
+    f=$(FAN_DE "$1")
+    while [ -d "$1/sys" ]; do
+        desligada=0
+        while read -r l; do
+            [ "$l" = "fan_curve = false" ] && desligada=1
+        done < "$1/config.toml"
+        v=; read -r v < "$f"
+        if [ "$desligada" = 0 ] && [ "$v" = "0,0" ]; then
+            poe "$f" "$2"
+        elif [ "$desligada" = 1 ] && [ "$v" = "$2" ]; then
+            poe "$f" "0,0"
+        fi
+        sleep 0.1
+    done 2> /dev/null
+}
+
+com_curva() {   # $1 = o par -> a curva falsa no ar na arvore $D, ate o proximo `nova`
+    curva_falsa "$D" "${1:-25,24}" &
+    ECS+=("$!")
 }
 
 nova() {     # $1 = nome do caso, $2 = modo do EC -> a arvore fica em $D

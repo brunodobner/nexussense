@@ -738,4 +738,15 @@ O que fica de fora, de propósito:
   existia com o cursor arrastado.
 - **Os ensaios que medem o automático do firmware** (`ensaio-termico.sh`,
   E-C2/E-C3) precisam de `fan_curve = false` no config enquanto rodam: com
-  a curva valendo, ela toma o `0,0` em 2 s. Hoje o roteiro não cuida disso.
+  a curva valendo, ela toma o `0,0` em 2 s. **Feito em 2026-10-17** (ramo
+  `curva/ensaio-pausa`): todo modo que começa no `0,0` — e2, e3, e3b, rede,
+  ec2, ec3 e ec5, porque todos exigem o `0,0` na partida — grava
+  `fan_curve = false` antes dela, só essa linha, espera o agente devolver o
+  automático e, no fim, devolve a linha como estava (ausente, `true`), pelo
+  trap e, num kill -9, pelo vigia. Morto antes de o vigia subir, a curva fica
+  desligada: o firmware segue no automático, o lado seguro. No ec5 a pausa
+  atravessa o reinício (com ela valendo, o agente da partida tomaria o `0,0`),
+  e quem a devolve é o `ec5-volta`. Teste em
+  `tests/shell/test-ensaio-termico-pausa.sh`, com uma curva falsa na árvore;
+  o roteiro antigo recusa a partida nele (12). Oito mutações novas em
+  `mutacoes-ensaio.py`, todas reprovadas.
