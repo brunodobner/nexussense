@@ -180,3 +180,39 @@ def test_arquivo_corrompido_nao_impede_a_gravacao(tmp_path):
     caminho.write_text("isto nao e toml = = =\n")
     save(Config(fan_curve=True), caminho)
     assert load(caminho).fan_curve is True
+
+
+# ─── fan_curve: ninguem escolheu, ligada, desligada ─────────────────
+#
+# Desde 2026-10-16 a curva e o Automatico nos modelos medidos. O config
+# distingue "ninguem escolheu" (None: vale o padrao do modelo) de uma
+# escolha -- inclusive o false que o agente grava quando a rede dispara.
+
+
+def test_sem_fan_curve_no_arquivo_ninguem_escolheu(tmp_path):
+    caminho = tmp_path / "config.toml"
+    caminho.write_text('battery_profile = "balanced"\n')
+    assert load(caminho).fan_curve is None
+    assert Config().fan_curve is None
+
+
+def test_fan_curve_escrito_e_escolha(tmp_path):
+    caminho = tmp_path / "config.toml"
+    for valor, esperado in (("true", True), ("false", False)):
+        caminho.write_text(f"fan_curve = {valor}\n")
+        assert load(caminho).fan_curve is esperado
+
+
+def test_ninguem_escolheu_nao_vira_escolha_ao_gravar(tmp_path):
+    """Gravar o config por outro motivo -- o modo maximo, o perfil de
+    tomada -- nao pode fixar o padrao de hoje como escolha do usuario."""
+    caminho = tmp_path / "config.toml"
+    save(Config(maximum_mode=True), caminho)
+    with open(caminho, "rb") as arquivo:
+        assert "fan_curve" not in tomllib.load(arquivo)
+
+
+def test_fan_curve_de_tipo_errado_e_ninguem_escolheu(tmp_path):
+    caminho = tmp_path / "config.toml"
+    caminho.write_text('fan_curve = "sim"\n')
+    assert load(caminho).fan_curve is None

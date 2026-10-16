@@ -257,6 +257,11 @@ class SystemInfo(NamedTuple):
     module_params: dict
 
 
+def read_product(sysfs):
+    """O modelo da maquina, como o DMI o diz. None se ilegivel."""
+    return _read(sysfs, sysfs.root / "sys/class/dmi/id/product_name")
+
+
 def read_system(sysfs):
     """Identidade da maquina e do driver, para o Diagnostico."""
     sense = sysfs.sense_dir()
@@ -276,7 +281,7 @@ def read_system(sysfs):
         break
 
     return SystemInfo(
-        product=_read(sysfs, sysfs.root / "sys/class/dmi/id/product_name"),
+        product=read_product(sysfs),
         family=familia,
         driver_version=_read(sysfs, sense / "version") if sense is not None else None,
         module_params=parametros,

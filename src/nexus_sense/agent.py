@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 from . import curva, fan_guard, guarda, sono, telemetry
 from .config import Config, load, save
-from .device import Controls, WriteError
+from .device import Controls, WriteError, read_product
 from .maximum import MaximumMode, THERMAL_PROFILE
 from .model import available, fan_speed_value, nearest, parse_fan_speed
 from .powermizer import PowerMizer, PowerMizerError
@@ -161,6 +161,9 @@ class Agent:
         # A curva propria. `_curva_escrito` e o par que ela escreveu por
         # ultimo, e None quando a ventoinha nao e dela. Ver _curva.
         self._curva_escrito = None
+        # O modelo, que decide o padrao da curva (curva.ligada). Nao muda com
+        # a maquina ligada: le-se uma vez.
+        self._produto = read_product(sysfs)
         self._curva_primeira = True
         self._curva_falhas = 0
         self._curva_cedeu = False
@@ -383,9 +386,6 @@ class Agent:
         except (OSError, ValueError):
             return None
 
-    # Perfis em que a curva nao age: o driver escreve 0,0 ao entrar neles, e
-    # o que o firmware faz com a ventoinha ali nunca foi medido.
-    PERFIS_SEM_CURVA = ("quiet", "low-power")
     # Passadas seguidas sem a temperatura em que a curva segura o que esta,
     # antes de devolver o automatico. Uma leitura falha, de vez em quando,
     # e a proxima volta (armadilha 24).
@@ -400,36 +400,49 @@ class Agent:
     def _curva_passada(self, config, on_ac, perfil):
         """A curva propria (docs/plano-curva.md, secao 11), uma passada.
 
-        So age com fan_curve no config, na tomada, fora de quiet e
-        low-power, e com o guarda no ar. Fora disso, devolve o automatico
-        se a ventoinha for dela, e para por ai.
+        So age ligada (curva.ligada: o fan_curve do config, ou o padrao do
+        modelo), na tomada, fora de quiet e low-power, e com o guarda no ar.
+        Fora disso, devolve o automatico se a ventoinha for dela, e para por
+        ai.
 
         Um valor em fan_speed que ela nao escreveu, e que nao e o
         automatico, e de outra mao -- o Manual da janela: a curva espera o
-        automatico voltar. Na primeira passada do agente nao ha como saber
-        de quem e o manual que esta la, e ela o assume: com a curva ligada,
-        a ventoinha e dela quando o agente sobe.
+        automatico voltar. Tambem e de outra mao o par dela sem o registro:
+        a janela o apaga antes de escrever um manual (guarda.esquece). Na
+        primeira passada do agente nao ha como saber de quem e o manual que
+        esta la, e ela o assume: com a curva ligada, a ventoinha e dela
+        quando o agente sobe.
 
         Devolve o fan_speed depois do que ela fez.
         """
         setpoint = self._read_fan_speed()
-        if not config.fan_curve:
-            return self._curva_larga(setpoint, "fan_curve desligado")
+        if config.fan_curve is False:
+            return self._curva_larga(setpoint, "fan_curve = false")
+        if not curva.ligada(config.fan_curve, self._produto):
+            return self._curva_larga(setpoint, f"a curva não foi medida em {self._produto}")
         if on_ac is not True:
             return self._curva_larga(setpoint, "na bateria")
-        if perfil in self.PERFIS_SEM_CURVA:
+        if perfil in curva.PERFIS_SEM_CURVA:
             return self._curva_larga(setpoint, f"perfil {perfil}")
+        registro = guarda.caminho_do_registro()
+        if registro is None:
+            # Fora da unit -- num terminal, nos testes: sem o guarda. So avisa
+            # quem pediu a curva no config; a do padrao do modelo fica quieta.
+            return self._curva_sem_guarda(setpoint, avisa=config.fan_curve is True)
 
         primeira, self._curva_primeira = self._curva_primeira, False
         if (
             not primeira
             and setpoint not in (None, (0, 0))
-            and setpoint != self._curva_escrito
+            and (
+                setpoint != self._curva_escrito
+                or guarda.registrado(registro) != fan_speed_value(*setpoint)
+            )
         ):
             if not self._curva_cedeu:
                 self.log.info(
-                    "curva: fan_speed em %d,%d, que ela não escreveu; "
-                    "espera o automático voltar",
+                    "curva: fan_speed em %d,%d, que ela não escreveu ou que a "
+                    "janela tomou; espera o automático voltar",
                     *setpoint,
                 )
             self._curva_cedeu = True
@@ -468,13 +481,7 @@ class Agent:
         # quando assume um manual que ja estava la, sem escrever.
         anterior = fan_speed_value(*setpoint) if setpoint else "0,0"
         if not guarda.registra(anterior, fan_speed_value(*alvo)):
-            if not self._curva_sem_guarda_avisado:
-                self.log.warning(
-                    "curva: sem onde registrar o que escreve (RuntimeDirectory "
-                    "da unit); sem o guarda, a curva não age"
-                )
-            self._curva_sem_guarda_avisado = True
-            return setpoint
+            return self._curva_sem_guarda(setpoint)
         self._curva_sem_guarda_avisado = False
         # Depois de dormir o firmware esta no automatico com fan_speed
         # dizendo o manual: escrever o mesmo valor o reaplica.
@@ -491,6 +498,16 @@ class Agent:
             )
         self._curva_escrito = alvo
         return alvo
+
+    def _curva_sem_guarda(self, setpoint, avisa=True):
+        """Sem onde registrar, a curva nao escreve: o guarda nao devolveria."""
+        if avisa and not self._curva_sem_guarda_avisado:
+            self.log.warning(
+                "curva: sem onde registrar o que escreve (RuntimeDirectory "
+                "da unit); sem o guarda, a curva não age"
+            )
+            self._curva_sem_guarda_avisado = True
+        return setpoint
 
     def _curva_larga(self, setpoint, motivo):
         """Devolve o automatico, se a ventoinha for da curva. Devolve o

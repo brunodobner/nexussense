@@ -166,3 +166,32 @@ def test_a_rede_nunca_dispara_com_a_curva(caminho):
             )
             seguidas = veredito.seguidas
             assert not veredito.dispara, linha
+
+
+# ─── onde ela vale ──────────────────────────────────────────────────
+
+
+def test_sem_escolha_vale_o_padrao_do_modelo():
+    assert curva.ligada(None, "Nitro ANV15-52") is True
+    assert curva.ligada(None, "Nitro AN515-58") is False
+    assert curva.ligada(None, None) is False
+
+
+def test_a_escolha_do_config_vence_o_modelo():
+    assert curva.ligada(False, "Nitro ANV15-52") is False
+    assert curva.ligada(True, "Nitro AN515-58") is True
+
+
+@pytest.mark.parametrize(
+    "on_ac, perfil, esperado",
+    [
+        (True, "balanced-performance", True),
+        (True, "balanced", True),
+        (False, "balanced", False),
+        (None, "balanced", False),
+        (True, "quiet", False),
+        (True, "low-power", False),
+    ],
+)
+def test_ela_manda_so_na_tomada_e_fora_de_quiet_e_low_power(on_ac, perfil, esperado):
+    assert curva.age(None, "Nitro ANV15-52", on_ac, perfil) is esperado

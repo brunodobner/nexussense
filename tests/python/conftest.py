@@ -46,13 +46,19 @@ def sem_barramento_de_sessao(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def fora_da_unit(monkeypatch):
+def fora_da_unit(monkeypatch, tmp_path_factory):
     """Testes nunca falam com o systemd de quem os roda. Rodada de dentro de
     uma unit -- um CI, um servico --, a suite herdaria o NOTIFY_SOCKET, e o
     agente dos testes avisaria o gerenciador de verdade (armadilha 30). Quem
     precisa de socket abre o seu, como os testes de test_guarda.py."""
     for nome in ("NOTIFY_SOCKET", "RUNTIME_DIRECTORY", "WATCHDOG_USEC", "WATCHDOG_PID"):
         monkeypatch.delenv(nome, raising=False)
+    # Nem com o agente de quem os roda: a janela le o registro da curva em
+    # $XDG_RUNTIME_DIR/nexus-sense, e o agente de verdade escreve la.
+    # Fora do tmp_path do teste, que alguns conferem arquivo por arquivo.
+    sessao = tmp_path_factory.mktemp("xdg-run")
+    sessao.chmod(0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(sessao))
 
 
 # Resposta fixa da isca. 11 graus e um valor que placa nenhuma devolve em

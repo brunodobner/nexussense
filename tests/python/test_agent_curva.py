@@ -191,3 +191,80 @@ def test_a_rede_disparando_com_a_curva_desliga_a_curva(tmp_path, unit, monkeypat
     assert fan(raiz) == "0,0"
     assert load(tmp_path / "config.toml").fan_curve is False
     assert any("defeito da curva" in r.getMessage() for r in caplog.records)
+
+
+# ------------------------------------------- a curva como o proprio Automatico
+#
+# Decisao do usuario em 2026-10-16: sem botao, a curva e o Automatico nos
+# modelos em que as tabelas foram medidas. "fan_curve" ausente do config e
+# "ninguem escolheu".
+
+
+def agente_sem_escolha(tmp_path, raiz):
+    return Agent(Sysfs(raiz), tmp_path / "config.toml")
+
+
+def modelo(raiz, nome):
+    (raiz / "sys/class/dmi/id/product_name").write_text(f"{nome}\n")
+
+
+def test_sem_escolha_no_modelo_medido_a_curva_age(tmp_path, unit):
+    raiz = arvore(tmp_path)
+    agente_sem_escolha(tmp_path, raiz).tick()
+    assert fan(raiz) == "25,24"
+
+
+def test_sem_escolha_noutro_modelo_fica_o_firmware(tmp_path, unit):
+    raiz = arvore(tmp_path)
+    modelo(raiz, "Nitro AN515-58")
+    agente_sem_escolha(tmp_path, raiz).tick()
+    assert fan(raiz) == "0,0"
+
+
+def test_noutro_modelo_so_com_fan_curve_true(tmp_path, unit):
+    raiz = arvore(tmp_path)
+    modelo(raiz, "Nitro AN515-58")
+    agente(tmp_path, raiz, ligada=True).tick()
+    assert fan(raiz) == "25,24"
+
+
+def test_fan_curve_false_desliga_no_modelo_medido(tmp_path, unit):
+    raiz = arvore(tmp_path)
+    agente(tmp_path, raiz, ligada=False).tick()
+    assert fan(raiz) == "0,0"
+
+
+def test_sem_escolha_fora_da_unit_nao_avisa(tmp_path, monkeypatch, caplog):
+    """No terminal, nos testes, a curva do padrao fica quieta: o aviso de
+    'sem o guarda' e para quem a pediu no config."""
+    monkeypatch.delenv("RUNTIME_DIRECTORY", raising=False)
+    raiz = arvore(tmp_path)
+    with caplog.at_level(logging.WARNING):
+        agente_sem_escolha(tmp_path, raiz).tick()
+    assert fan(raiz) == "0,0"
+    assert not any("sem o guarda" in r.getMessage() for r in caplog.records)
+
+
+def test_manual_da_janela_com_o_mesmo_par_da_curva_vale(tmp_path, unit):
+    """Manual sem mexer nos cursores escreve o par que a curva escreveu. A
+    janela apaga o registro antes (guarda.esquece): a curva cede, e nao
+    move o manual quando a temperatura muda."""
+    raiz = arvore(tmp_path)
+    a = agente_sem_escolha(tmp_path, raiz)
+    a.tick()
+    assert fan(raiz) == "25,24"
+    (unit / "ventoinha").unlink()      # a janela, em Manual
+    escreve_fan(raiz, "25,24")
+    temperaturas(raiz, 70, 70)
+    for _ in range(JANELA_CHEIA):
+        a.tick()
+    assert fan(raiz) == "25,24"
+    escreve_fan(raiz, "0,0")           # Automatico de volta
+    a.tick()
+    assert fan(raiz) != "0,0"          # a curva retomou
+    for _ in range(JANELA_CHEIA):
+        a.tick()
+    assert fan(raiz) == "50,53"        # e segue a temperatura
+
+
+JANELA_CHEIA = curva.JANELA + 1

@@ -50,6 +50,32 @@ JANELA = 5
 # Para subir nao ha limite.
 DESCE_POR_PASSADA = 4
 
+# Os modelos em que as tabelas foram medidas, pelo product_name do DMI. Neles
+# a curva e o proprio Automatico desde a instalacao (decisao do usuario,
+# 2026-10-16). Noutro modelo as mesmas porcentagens giram outra rotacao, e o
+# piso da rede (fan_guard.AUTOMATICO) foi medido aqui: la ela so liga com
+# "fan_curve = true" no config.
+MEDIDOS = ("Nitro ANV15-52",)
+
+# Perfis em que a curva nao age: o driver escreve 0,0 ao entrar neles, e o
+# que o firmware faz com a ventoinha ali nunca foi medido.
+PERFIS_SEM_CURVA = ("quiet", "low-power")
+
+
+def ligada(escolha, produto):
+    """Se a curva vale nesta maquina: o que o usuario escolheu no config
+    (fan_curve), ou, sem escolha, se o modelo e um dos medidos."""
+    if escolha is not None:
+        return escolha
+    return produto in MEDIDOS
+
+
+def age(escolha, produto, on_ac, perfil):
+    """Se a curva manda agora, e nao o firmware: ligada, na tomada e fora
+    dos perfis em que ela nao age. O agente decide por aqui, e a janela
+    diz por aqui quem decide."""
+    return ligada(escolha, produto) and on_ac is True and perfil not in PERFIS_SEM_CURVA
+
 
 def na_tabela(tabela, temperatura):
     """A porcentagem da tabela nesta temperatura, arredondada para cima: na

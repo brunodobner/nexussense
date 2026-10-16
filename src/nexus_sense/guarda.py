@@ -25,6 +25,9 @@ import os
 import socket
 
 ARQUIVO = "ventoinha"
+# O RuntimeDirectory= da unit. Numa unit de usuario ele mora em
+# $XDG_RUNTIME_DIR, e o systemd o apaga quando ela para.
+PASTA = "nexus-sense"
 
 
 def notifica(mensagem, ambiente=None):
@@ -75,3 +78,47 @@ def registra(anterior, novo, ambiente=None):
     except OSError:
         return False
     return True
+
+
+def caminho_na_sessao(ambiente=None):
+    """Onde o registro mora visto de fora da unit -- da janela. None sem
+    XDG_RUNTIME_DIR."""
+    ambiente = os.environ if ambiente is None else ambiente
+    base = ambiente.get("XDG_RUNTIME_DIR")
+    if not base:
+        return None
+    return os.path.join(base, PASTA, ARQUIVO)
+
+
+def agente_no_ar(ambiente=None):
+    """Se a unit do agente esta rodando: a pasta dela so existe enquanto
+    ela roda."""
+    caminho = caminho_na_sessao(ambiente)
+    return caminho is not None and os.path.isdir(os.path.dirname(caminho))
+
+
+def registrado(caminho):
+    """O manual que o agente registrou por ultimo, como "cpu,gpu". None
+    sem registro."""
+    if caminho is None:
+        return None
+    try:
+        with open(caminho) as arquivo:
+            linhas = arquivo.read().splitlines()
+    except OSError:
+        return None
+    return linhas[1] if len(linhas) >= 2 else None
+
+
+def esquece(ambiente=None):
+    """A janela vai escrever um manual: o que estiver em fan_speed deixa de
+    ser do agente. Sem isto, Manual sem mexer nos cursores escreve o mesmo
+    par que a curva escreveu, e ela, que so compara o par, seguiria mandando.
+    Sem o registro a curva cede, e o guarda deixa o manual como esta."""
+    caminho = caminho_na_sessao(ambiente)
+    if caminho is None:
+        return
+    try:
+        os.unlink(caminho)
+    except OSError:
+        pass

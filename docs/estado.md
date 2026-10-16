@@ -64,7 +64,13 @@ firmware: `fan_curve = false` no `config.toml`.
   Automático**, sem botão novo. Ligada desde a instalação; a janela mostra
   Automático enquanto ela manda; o automático do firmware fica para a
   bateria, os perfis silencioso e econômico, e o agente parado (o guarda).
-- **Próximo:** implementar essa decisão.
+- **Implementada no ramo `curva/padrao`** (de `curva/armadilhas`), não
+  juntada nem instalada ([plano-curva.md](plano-curva.md), seção 11, no fim):
+  sem `fan_curve` no config a curva vale no `Nitro ANV15-52` e só nele; a
+  janela mostra Automático enquanto ela manda e diz quem decide; Manual sem
+  mexer nos cursores vale, porque a janela apaga o registro da curva.
+- **Próximo:** juntar `curva/armadilhas` e `curva/padrao` ao `master` e
+  instalar, com a autorização do usuário.
 
 ---
 
