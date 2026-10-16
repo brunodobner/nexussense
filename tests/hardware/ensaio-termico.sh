@@ -126,6 +126,16 @@
 # O perfil de energia, quando o roteiro o troca (ec2), volta pelas camadas 1
 # e 2. O agente que o ec5 deixa sob SIGSTOP tambem: o trap e o vigia o soltam.
 #
+# A curva propria do agente sai enquanto o ensaio roda, em todos os modos.
+# Desde 2026-10-17 ela e o Automatico neste modelo: com ela valendo, o agente
+# toma o 0,0 em 2 s e grava o par dela, e o ensaio mediria a curva -- ou
+# pararia na outra mao. Antes da partida o roteiro grava fan_curve = false no
+# config.toml, so essa linha, e espera o agente devolver o automatico; no fim
+# devolve a linha como estava (ausente, true ou false), pelas camadas 1 e 2.
+# Morto antes de o vigia subir, a curva fica desligada: o firmware segue no
+# automatico, o lado seguro. No ec5 a pausa atravessa o reinicio, e quem a
+# devolve e o ec5-volta.
+#
 # Saidas:
 #    0  terminou (no E3: nenhum estagio abortou num limite)
 #    3  alvo ausente: sensor ou atributo que o ensaio exige
@@ -255,6 +265,8 @@ DRILL_RPM1=; DRILL_RPM2=   # o que a porcentagem dos exercicios gira
 RESUMO=; ABORTOU=0; RETOMOU_NO_ULTIMO=0
 PPD0=                 # o perfil de energia que a medicao espera
 PPD_INICIAL=; MAX_INICIAL=   # o que devolver no fim, quando o roteiro mexe nele
+CURVA_INICIAL=        # a linha fan_curve da partida (ausente, true), quando o roteiro a pausa
+CURVA_ESPERA=${ENSAIO_CURVA_ESPERA:-10}   # segundos para o agente devolver o automatico
 LIVRE=                # condicoes que um gesto pedido esta mudando: verifica() as pula
 ACEITA_FAN=           # um fan_speed alem do escrito que nao e outra mao (o guarda)
 AGENTE_PARADO=        # pid do agente sob SIGSTOP, para o trap o soltar
@@ -599,6 +611,65 @@ devolve_ppd() {   # o perfil de energia volta ao da partida, se o roteiro o mexe
     fi
 }
 
+le_curva() {   # a linha fan_curve do config: true, false, ou ausente (sem a linha, ou sem o arquivo)
+    local v
+    v=$(grep -m1 '^fan_curve' "$CFG" 2>/dev/null | tr -d ' ' | cut -d= -f2)
+    echo "${v:-ausente}"
+}
+
+poe_curva() {   # $1 = true, false ou ausente. So a linha fan_curve muda; o resto do config fica
+    local novo="$CFG.ensaio.$$"
+    if grep -q '^fan_curve' "$CFG" 2>/dev/null; then
+        if [ "$1" = ausente ]; then
+            grep -v '^fan_curve' "$CFG" > "$novo"
+        else
+            sed "s/^fan_curve.*/fan_curve = $1/" "$CFG" > "$novo"
+        fi
+    elif [ "$1" = ausente ]; then
+        return 0
+    else
+        # No topo: no TOML, uma chave depois de uma tabela seria da tabela.
+        mkdir -p "$(dirname "$CFG")" || return 1
+        { echo "fan_curve = $1"; cat "$CFG" 2>/dev/null; } > "$novo"
+    fi
+    # A troca e atomica, como a do config.save: o agente rele a cada passada.
+    mv "$novo" "$(readlink -f "$CFG")"
+}
+
+pausa_curva() {   # antes da partida: a curva sai, e o agente devolve o automatico
+    local i
+    CURVA_INICIAL=$(le_curva)
+    if [ "$CURVA_INICIAL" = false ]; then CURVA_INICIAL=; return 0; fi
+    # Os traps do modo vem depois da partida; ate la, estes devolvem a linha.
+    trap devolve_curva EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
+    if ! poe_curva false; then
+        echo "ERRO: nao consegui gravar fan_curve = false em $CFG"
+        CURVA_INICIAL=
+        exit "$COD_RECUSA"
+    fi
+    echo "curva propria pausada (fan_curve = false, era $CURVA_INICIAL); volta como estava no fim"
+    for ((i = 0; i < CURVA_ESPERA * 10; i++)); do
+        [ "$(le "$FAN")" = "0,0" ] && return 0
+        sleep 0.1
+    done
+    echo "  o agente nao devolveu o automatico em ${CURVA_ESPERA}s: fan_speed segue $(le "$FAN")"
+}
+
+devolve_curva() {   # a linha fan_curve volta a ser a da partida, se o roteiro a pausou
+    local inicial=$CURVA_INICIAL
+    [ -n "$inicial" ] || return 0
+    CURVA_INICIAL=
+    [ -n "$RUN" ] && rm -f "$RUN/curva_inicial"
+    if poe_curva "$inicial"; then
+        avisa "curva propria devolvida: fan_curve $inicial"
+    else
+        avisa "ERRO: nao consegui devolver fan_curve a '$inicial' em $CFG; confira o arquivo"
+    fi
+}
+
 solta_agente() {  # o agente que um exercicio deixou sob SIGSTOP volta a andar
     [ -n "$AGENTE_PARADO" ] || return 0
     kill -CONT "$AGENTE_PARADO" 2>/dev/null
@@ -617,6 +688,7 @@ ao_sair() {
     [ -n "$DRILL_VALOR" ] && [ "$(le "$FAN")" = "$DRILL_VALOR" ] && ULTIMO=$DRILL_VALOR
     devolve
     devolve_ppd
+    devolve_curva
     [ -n "$VIGIA_PID" ] && kill "$VIGIA_PID" 2>/dev/null
     [ -n "$RUN" ] && rm -rf "$RUN"
     [ "$FALHOU_DEVOLVER" = 1 ] && rc=$COD_DEVOLUCAO
@@ -636,6 +708,8 @@ prepara() {      # vigia no ar ANTES da primeira escrita, e os traps
         printf '%s\n' "$PPD_INICIAL" > "$RUN/ppd_inicial"
         printf '%s\n' "$MAX_INICIAL" > "$RUN/max_inicial"
     fi
+    # E a curva, quando o roteiro a pausou.
+    [ -n "$CURVA_INICIAL" ] && printf '%s\n' "$CURVA_INICIAL" > "$RUN/curva_inicial"
     FIM=$(( EPOCHSECONDS + PRAZO ))
     trap ao_sair EXIT
     trap 'exit 130' INT
@@ -685,6 +759,11 @@ vigia_devolve() {
     if [ -s "$RUN/ppd_inicial" ]; then
         PPD_INICIAL=$(cat "$RUN/ppd_inicial"); MAX_INICIAL=$(cat "$RUN/max_inicial" 2>/dev/null)
         devolve_ppd
+    fi
+    # Por ultimo a curva: com a ventoinha ja em 0,0, ela a retoma.
+    if [ -s "$RUN/curva_inicial" ]; then
+        CURVA_INICIAL=$(cat "$RUN/curva_inicial")
+        devolve_curva
     fi
 }
 
@@ -880,6 +959,7 @@ modo_e2() {
 
     echo "E2 -- mapa de porcentagem para rotacao, em repouso"
     echo "saida: $SAIDA"
+    pausa_curva
     amostra partida; registra
     exige_alvos || exit "$COD_ALVO"
     mostra_condicao
@@ -1104,6 +1184,7 @@ modo_e3() {
 
     echo "E3 -- manual baixo com carga de CPU. ESQUENTA A MAQUINA."
     echo "saida: $SAIDA"
+    pausa_curva
     # Cinco leituras do pacote, e vale a mediana: com a maquina parada ele da
     # picos de uma amostra so, que nao devem recusar nem aprovar a partida.
     for ((i = 0; i < 5; i++)); do
@@ -1152,6 +1233,7 @@ modo_e3b() {
 
     echo "E3b -- manual no piso com um jogo aberto. O JOGO E A CARGA."
     echo "saida: $SAIDA"
+    pausa_curva
     amostra partida; registra
     exige_alvos || exit "$COD_ALVO"
     mostra_condicao
@@ -1329,6 +1411,7 @@ modo_rede() {
 
     echo "REDE -- a prova da rede do agente, com um jogo aberto. O JOGO E A CARGA."
     echo "saida: $SAIDA"
+    pausa_curva
     amostra partida; registra
     exige_alvos || exit "$COD_ALVO"
     mostra_condicao
@@ -1910,6 +1993,7 @@ modo_ec2() {   # $1 = saida, $2 = 1: so a parte com o jogo
         echo "E-C2 -- qual curva, e o que a rotacao acima do teto compra. ESQUENTA A MAQUINA."
     fi
     echo "saida: $SAIDA"
+    pausa_curva
     # Cinco leituras do pacote, e vale a mediana, como no E3.
     for ((i = 0; i < 5; i++)); do
         amostra partida; registra
@@ -2010,6 +2094,7 @@ modo_ec3() {
 
     echo "E-C3 -- o ouvido. A ventoinha passa por varias rotacoes, e voce diz o que aceita."
     echo "saida: $SAIDA"
+    pausa_curva
     amostra partida; registra
     exige_alvos || exit "$COD_ALVO"
     mostra_condicao
@@ -2324,10 +2409,14 @@ reinicio_ec5() {   # $1 = como foi o guarda. Deixa o manual DE PROPOSITO e sai; 
     {
         echo "valor=$v"; echo "rpm1=$C5_REF1"; echo "rpm2=$C5_REF2"
         echo "boot=$(le "$BOOT_ID")"; echo "saida=$SAIDA"; echo "resumo=$RESUMO"; echo "epoch=$EPOCHSECONDS"
+        echo "curva=$CURVA_INICIAL"
     } > "$ESTADO_EC5"
     # Nem o trap nem o vigia devolvem: o manual atravessa o reinicio de
-    # proposito. A 95% e barulho, nao calor.
+    # proposito. A 95% e barulho, nao calor. A curva pausada tambem: com ela
+    # valendo, o agente da partida tomaria o 0,0, e o ec5-volta nao veria o
+    # que o desligamento deixou.
     DEVOLVIDO=1; : > "$RUN/devolvido"
+    CURVA_INICIAL=; rm -f "$RUN/curva_inicial"
     echo "reinicio: pedido com fan_speed em $v; o resultado vem do ec5-volta" >> "$RESUMO"
     N_GESTO=$(( N_GESTO + 1 ))
     echo "GESTO $N_GESTO: reinicie a maquina agora. A ventoinha fica a $C5_P% ate la: barulho, nao calor."
@@ -2352,6 +2441,7 @@ modo_ec5() {
 
     echo "E-C5 -- o que larga o manual. A ventoinha fica a $C5_P%, e os gestos sao seus."
     echo "saida: $SAIDA"
+    pausa_curva
     amostra partida; registra
     exige_alvos || exit "$COD_ALVO"
     for par in "suspend_stats:$SUSPENSOES" "boot_id:$BOOT_ID"; do
@@ -2508,6 +2598,9 @@ modo_ec5_volta() {
             rc=$COD_DEVOLUCAO
         fi
     fi
+    # A curva que o ec5 pausou volta agora, com a ventoinha ja devolvida.
+    CURVA_INICIAL=$(chave curva)
+    devolve_curva
     rm -f "$ESTADO_EC5"
     [ "$rc" -ne 0 ] && exit "$rc"
     [ "$reiniciou" = 1 ] || exit "$COD_CONDICAO"

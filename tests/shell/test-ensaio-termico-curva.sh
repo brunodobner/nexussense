@@ -638,6 +638,24 @@ grep -q 'nao tem ExecStopPost' "$D/ec5.resumo.txt" \
 roda "$D" "$S" ec5-volta
 confere "sem reinicio, o ec5-volta devolve a ventoinha e sai com 11" "$?" 11 "0,0"
 
+# A curva do agente valendo, como na maquina desde 2026-10-17: o ec5 a pausa
+# antes da partida, e a pausa atravessa o reinicio -- com ela valendo, o
+# agente da partida tomaria o 0,0. Quem a devolve e o ec5-volta.
+c5 ec5-curva sem
+cp "$D/config.toml" "$D/config.antes"
+com_curva 25,24
+espera_fan "$D" "25,24" 30 || falha "a curva falsa nao tomou o 0,0"
+roda "$D" env ENSAIO_C5_GESTOS= "${C5[@]}"
+confere "com a curva valendo, o ec5 a pausa e chega ao reinicio" "$?" 17 "95,95"
+grep -qx 'fan_curve = false' "$D/config.toml" && grep -qx 'curva=ausente' "$(estado)" \
+    && ok "a pausa atravessa o reinicio, anotada para o ec5-volta" \
+    || falha "a pausa no reinicio: config '$(tr '\n' '|' < "$D/config.toml")', estado '$(grep '^curva=' "$(estado)")'"
+roda "$D" "$S" ec5-volta
+cmp -s "$D/config.toml" "$D/config.antes" \
+    && ok "o ec5-volta devolve a ventoinha e a curva como estava" \
+    || falha "depois do ec5-volta o config ficou '$(tr '\n' '|' < "$D/config.toml")'"
+espera_fan "$D" "25,24" 30 && ok "e a curva retoma" || falha "a curva nao retomou: '$(fan "$D")'"
+
 # O perfil que o firmware trocou ao acordar nao volta: o agente nao fez a
 # parte dele, e o ensaio para antes do cabo -- com o manual devolvido.
 c5 ec5-perfil-preso completo perfil_preso
