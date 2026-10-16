@@ -5,8 +5,23 @@ After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-Type=simple
+# O agente avisa a cada passada que esta vivo (guarda.py). O que para de
+# avisar -- travado, mas vivo -- o WatchdogSec mata. SIGKILL, e nao o SIGABRT
+# padrao: o SIGABRT faz core dump, e o systemd-coredump atrasaria o guarda.
+# 6 s sao tres passadas; com uma unit descartavel, em 2026-10-15, o processo
+# parado teve o 0,0 de volta em 5,8 s.
+Type=notify
 ExecStart=/usr/bin/nexus-sense-agent
+WatchdogSec=6
+WatchdogSignal=SIGKILL
+# O guarda da ventoinha (docs/plano-curva.md, secao 8). Em toda parada do
+# agente -- logout, kill -9, falta de memoria, watchdog -- devolve o
+# automatico, mas so se fan_speed estiver num manual que o PROPRIO agente
+# registrou ter escrito. O registro mora no RuntimeDirectory: o
+# ProtectSystem=strict o deixa gravavel, e o systemd so o apaga depois do
+# ExecStopPost.
+ExecStopPost=/usr/lib/nexus-sense/guarda-ventoinha.sh
+RuntimeDirectory=nexus-sense
 Restart=always
 RestartSec=3
 # Não precisa de privilégio: escreve pelo grupo nexus_sense, aplicado

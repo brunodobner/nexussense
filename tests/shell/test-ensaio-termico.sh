@@ -44,6 +44,7 @@ provoca() {
         perfil)      poe "$D/sys/firmware/acpi/platform_profile" balanced ;;
         maximo)      poe "$D/config.toml" "maximum_mode = true" ;;
         jogo)        poe "$D/processos" GameThread ;;
+        ppd)         poe "$D/ppd" performance ;;
         sensor_some) rm -f "$z/thermal_zone2/temp" ;;
         outra_mao)   poe "$(FAN_DE "$D")" "33,33" ;;
         automatico)  poe "$(FAN_DE "$D")" "0,0" ;;
@@ -70,7 +71,8 @@ for l in pacote crit_alarm ec_cpu ec_gpu sen2 sen3 sen4 sen5 nvme1 nvme2; do
 done
 
 echo "--- pessoa, bateria e sensor que some"
-for l in cabo carga perfil maximo jogo sensor_some; do
+# O perfil de energia tambem troca a curva do automatico (armadilha 37).
+for l in cabo carga perfil maximo jogo sensor_some ppd; do
     caso "$l" 11 "0,0"
 done
 
@@ -216,6 +218,12 @@ for p in 100 80 60 50 40 30 20 15 10 5 1; do
         "$D/e2.tsv" || { falha "o traco nao tem as amostras de $p%"; faltam=1; }
 done
 [ "$faltam" -eq 0 ] && ok "o traco tem as onze porcentagens, escritas e lidas de volta"
+# O perfil de energia e o EPP entraram no fim: as 29 colunas de antes ficam
+# onde estavam, e quem as le pelo numero continua lendo a certa.
+head -1 "$D/e2.tsv" | grep -q $'\tmaximo\tjogo\tload1\tppd\tepp$' \
+    && awk -F'\t' 'NF != 31 { r = 1 } NR > 1 && ($30 != "balanced" || $31 != "balance_performance") { r = 1 } END { exit r }' "$D/e2.tsv" \
+    && ok "o traco traz o perfil de energia e o EPP em cada amostra, nas colunas 30 e 31" \
+    || falha "o traco nao traz o perfil de energia e o EPP nas colunas 30 e 31"
 # A rotacao do EC de mentira e 600 + 50 por ponto: 100% da 5600, 1% da 650.
 grep -qE '^100 +5600 5600 5600 ' "$D/e2.resumo.txt" && grep -qE '^1 +650 650 650 ' "$D/e2.resumo.txt" \
     && ok "o resumo traz a rotacao de cada porcentagem" \

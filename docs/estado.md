@@ -7,6 +7,58 @@ diz qual é a vez de qual, e o que ficou pendente.
 
 ---
 
+## Em andamento: a curva própria da ventoinha (2026-10-15)
+
+Tudo no ramo `curva/guarda` (worktree `interesting-hofstadter-4f7494`), **ainda
+não juntado ao `master`, mas instalado na máquina** a partir do ramo em
+2026-10-15, e com a curva **ligada** (`fan_curve = true`). Para voltar ao
+firmware: `fan_curve = false` no `config.toml`.
+
+- **Feito e verificado:** os modos de ensaio E-C2, E-C3 e E-C5 em
+  `tests/hardware/ensaio-termico.sh` (commit `bd67182`, suíte verde); a curva
+  aprovada pelo usuário, com as duas tabelas, em
+  [plano-curva.md](plano-curva.md), seção 11 (`ba10573`).
+- **O guarda, feito e verificado** (plano-curva, seção 8, no fim):
+  `packaging/scripts/guarda-ventoinha.sh` (ExecStopPost),
+  `src/nexus_sense/guarda.py` (sd_notify e o registro), a unit com
+  `Type=notify`, `WatchdogSec=6`, `WatchdogSignal=SIGKILL` e
+  `RuntimeDirectory`, e o `setup.sh` instalando o guarda. Suítes de depois:
+  pytest 513 (501 + 12 novos); shell igual à baseline — a única diferença,
+  `test-perfil-bateria.sh`, pula na tomada e roda na bateria.
+- **A curva, versão curta, escrita e testada** ([plano-curva.md](plano-curva.md),
+  seção 11, no fim): `src/nexus_sense/curva.py`, ligada no agente por
+  `fan_curve = true` no `config.toml`, sem botão na janela por enquanto.
+- **Na máquina:** a primeira rodada achou o sobe-desce (a CPU pelo EC pula com
+  carga em rajadas), corrigido com a mediana de 10 s e a descida de 4 pontos
+  por passada (`49f5320`). Na segunda, dois minutos com carga: subiu a ~7.100
+  rpm, desceu a ~2.700 em 30 s sem tranco, ignorou os pulos, e o agente não
+  foi morto pelo watchdog nenhuma vez.
+- **A janela não sabe da curva:** com ela ligada, mostra Manual com os números
+  que a curva escreveu. "Automático" na janela devolve a ventoinha à curva.
+- **E-C5 na máquina, duas tentativas** ([plano-curva.md](plano-curva.md),
+  seção 11, no fim): achou que o watchdog mata o agente a cada suspensão, e
+  que na volta da suspensão o firmware larga o manual e troca o perfil para
+  `balanced`, com o `fan_speed` ainda dizendo o manual.
+- **A bandeja de antes da instalação apagava `fan_curve`** ao gravar o
+  `config.toml` (o processo antigo não conhecia o campo). Reiniciada às
+  07:28 de 2026-10-16; o `setup.sh` não reinicia a bandeja ao instalar.
+- **Os ajustes da suspensão, escritos** (plano-curva, seção 11, no fim):
+  o agente alarga o watchdog antes de dormir, devolve o perfil e reescreve o
+  manual ao acordar, e o E-C5 registra a troca em vez de parar.
+- **O E-C5 na máquina, menos o reinício:** só a suspensão faz o firmware
+  largar o manual (cabo e perfil não); o agente atravessa a suspensão vivo e
+  devolve o perfil; o guarda devolve `0,0` em 105 ms no `kill -9` e em 5,0 s
+  com o agente travado. O defeito do aviso de dormir era o buffer do
+  `busctl` num pipe (`stdbuf -oL`, `5d682c6`).
+- **O reinício do E-C5:** com o manual registrado como o da curva, o guarda o
+  devolveu no desligamento no mesmo segundo em que o driver gravou o estado,
+  e a partida voltou no automático. O E-C5 está completo.
+- **A curva ficou ligada** depois do reinício (`fan_curve = true`).
+- **Próximo:** o merge no `master`; depois, o botão "Curva" na janela e na
+  bandeja.
+
+---
+
 ## Onde estamos
 
 | | |

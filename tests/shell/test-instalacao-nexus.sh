@@ -26,6 +26,7 @@ exigir "$RAIZ/packaging/desktop/nexus-sense.desktop"
 exigir "$RAIZ/packaging/systemd/nexus-sense-agent.service"
 exigir "$RAIZ/packaging/udev/60-nexus-sense.rules"
 exigir "$RAIZ/packaging/scripts/apply-perms.sh"
+exigir "$RAIZ/packaging/scripts/guarda-ventoinha.sh"
 
 confere() {  # $1=descricao  $2=padrao
     if grep -q -- "$2" "$S"; then
@@ -41,6 +42,7 @@ confere "chamada em perform_install"        'install_nexus_sense'
 confere "instala dependencias da interface" 'install_runtime_deps'
 confere "pode importar sem abrir o menu"      'BASH_SOURCE\[0\].*==.*\$0'
 confere "instala o pacote Python"           '/usr/lib/nexus-sense'
+confere "instala o guarda da ventoinha"     'install -m 755 .*guarda-ventoinha\.sh.* /usr/lib/nexus-sense/guarda-ventoinha\.sh$'
 confere "instala o lancador da GUI"         '/usr/bin/nexus-sense'
 confere "instala o lancador do agente"      'nexus-sense-agent'
 confere "instala o lancador do desktop"     'nexus-sense.desktop'

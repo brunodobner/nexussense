@@ -15,14 +15,17 @@ dela em fan_guard.py: o agente le, ela decide, o agente escreve.
 
 import dataclasses
 import logging
+import os
 import threading
+import time
+from collections import deque
 from typing import NamedTuple
 
-from . import fan_guard, telemetry
+from . import curva, fan_guard, guarda, sono, telemetry
 from .config import Config, load, save
 from .device import Controls, WriteError
 from .maximum import MaximumMode, THERMAL_PROFILE
-from .model import available, nearest, parse_fan_speed
+from .model import available, fan_speed_value, nearest, parse_fan_speed
 from .powermizer import PowerMizer, PowerMizerError
 
 
@@ -109,12 +112,27 @@ LOG = logging.getLogger("nexus-sense-agent")
 # e trariam dependencia. Ver spec secao 4.2.
 DEFAULT_INTERVAL = 2.0
 
+# O fan_speed que a curva leu na passada, para a rede nao ler de novo.
+_NAO_LIDO = object()
+
+
+def _tempo_dormido():
+    """Segundos que a maquina passou dormindo desde o boot: o relogio de boot
+    conta a suspensao, o monotonico nao."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
+
 
 class Agent:
     """Vigia a fonte de energia e corrige o perfil termico."""
 
     def __init__(self, sysfs, config_path, interval=DEFAULT_INTERVAL, logger=None):
         self.sysfs = sysfs
+        # O WatchdogSec da unit, que o systemd passa no ambiente. None fora
+        # dela.
+        try:
+            self._watchdog_usec = int(os.environ.get("WATCHDOG_USEC", "")) or None
+        except ValueError:
+            self._watchdog_usec = None
         self.config_path = config_path
         self.interval = interval
         self.log = logger or LOG
@@ -140,6 +158,30 @@ class Agent:
         # baixo, a GPU quente e a rotacao lenta. Ver _guarda_ventoinha.
         self._rede_seguidas = 0
         self._rede_recusa_avisada = False
+        # A curva propria. `_curva_escrito` e o par que ela escreveu por
+        # ultimo, e None quando a ventoinha nao e dela. Ver _curva.
+        self._curva_escrito = None
+        self._curva_primeira = True
+        self._curva_falhas = 0
+        self._curva_cedeu = False
+        self._curva_sem_guarda_avisado = False
+        # As ultimas leituras: a curva usa a mediana delas (curva.JANELA).
+        self._curva_cpus = deque(maxlen=curva.JANELA)
+        self._curva_gpus = deque(maxlen=curva.JANELA)
+        self._fan_da_passada = _NAO_LIDO
+        # A suspensao (sono.py). Ao acordar o firmware larga o manual da
+        # ventoinha e troca o perfil termico: a passada seguinte reaplica.
+        self._acordou = threading.Event()
+        self._perfil_visto = None
+        self._perfil_antes_de_dormir = None
+        self._ac_antes_de_dormir = None
+        self._curva_reescreve = False
+        # Quanto o relogio de boot (que conta o tempo dormindo) passou do
+        # monotonico (que nao conta). Se a diferenca salta entre duas
+        # passadas, a maquina dormiu -- mesmo que o aviso do logind falte.
+        self._relogio_sono = _tempo_dormido
+        self._dormido = None
+        self._acordou_em = None
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -176,6 +218,9 @@ class Agent:
         if self._driver_presente is False:
             self.log.info("driver de volta; retomando")
         self._driver_presente = True
+
+        perfil = self._depois_de_dormir(perfil, now_on_ac)
+        self._perfil_visto = perfil
 
         # Recarregado a cada passada de proposito: a GUI escreve neste
         # arquivo, e o agente nao tem outro jeito de saber.
@@ -258,6 +303,9 @@ class Agent:
                 self.log.warning("não foi possível gravar a configuração: %s", erro)
 
         self._reconcile_maximum(decisao.config, now_on_ac, perfil)
+        # A curva antes da rede: ela cumpre o invariante da rede, e a rede,
+        # depois, confere por fora.
+        self._curva(decisao.config, now_on_ac, perfil)
         self._guarda_ventoinha(decisao.config.maximum_mode and now_on_ac is True)
 
         return decisao
@@ -335,6 +383,132 @@ class Agent:
         except (OSError, ValueError):
             return None
 
+    # Perfis em que a curva nao age: o driver escreve 0,0 ao entrar neles, e
+    # o que o firmware faz com a ventoinha ali nunca foi medido.
+    PERFIS_SEM_CURVA = ("quiet", "low-power")
+    # Passadas seguidas sem a temperatura em que a curva segura o que esta,
+    # antes de devolver o automatico. Uma leitura falha, de vez em quando,
+    # e a proxima volta (armadilha 24).
+    CURVA_FALHAS = 3
+
+    def _curva(self, config, on_ac, perfil):
+        """Uma passada da curva, e o fan_speed como ela o deixou: a rede, logo
+        depois, julga esse valor sem ler de novo. Cada leitura de fan_speed e
+        uma linha no journal do driver (test_leituras_wmi.py)."""
+        self._fan_da_passada = self._curva_passada(config, on_ac, perfil)
+
+    def _curva_passada(self, config, on_ac, perfil):
+        """A curva propria (docs/plano-curva.md, secao 11), uma passada.
+
+        So age com fan_curve no config, na tomada, fora de quiet e
+        low-power, e com o guarda no ar. Fora disso, devolve o automatico
+        se a ventoinha for dela, e para por ai.
+
+        Um valor em fan_speed que ela nao escreveu, e que nao e o
+        automatico, e de outra mao -- o Manual da janela: a curva espera o
+        automatico voltar. Na primeira passada do agente nao ha como saber
+        de quem e o manual que esta la, e ela o assume: com a curva ligada,
+        a ventoinha e dela quando o agente sobe.
+
+        Devolve o fan_speed depois do que ela fez.
+        """
+        setpoint = self._read_fan_speed()
+        if not config.fan_curve:
+            return self._curva_larga(setpoint, "fan_curve desligado")
+        if on_ac is not True:
+            return self._curva_larga(setpoint, "na bateria")
+        if perfil in self.PERFIS_SEM_CURVA:
+            return self._curva_larga(setpoint, f"perfil {perfil}")
+
+        primeira, self._curva_primeira = self._curva_primeira, False
+        if (
+            not primeira
+            and setpoint not in (None, (0, 0))
+            and setpoint != self._curva_escrito
+        ):
+            if not self._curva_cedeu:
+                self.log.info(
+                    "curva: fan_speed em %d,%d, que ela não escreveu; "
+                    "espera o automático voltar",
+                    *setpoint,
+                )
+            self._curva_cedeu = True
+            self._curva_escrito = None
+            return setpoint
+        if self._curva_cedeu:
+            self.log.info("curva: o automático voltou; a curva retoma")
+        self._curva_cedeu = False
+
+        cpu = telemetry.acer_cpu_temp(self.sysfs)
+        gpu = telemetry.acer_gpu_temp(self.sysfs)
+        alvo = None
+        if cpu is not None and gpu is not None:
+            self._curva_cpus.append(cpu)
+            self._curva_gpus.append(gpu)
+            alvo = curva.decide(
+                curva.mediana(self._curva_cpus),
+                curva.mediana(self._curva_gpus),
+                self._curva_escrito,
+                gpu_agora=gpu,
+            )
+        if alvo is None:
+            self._curva_falhas += 1
+            if self._curva_falhas >= self.CURVA_FALHAS:
+                return self._curva_larga(
+                    setpoint, f"sem a temperatura há {self._curva_falhas} passadas"
+                )
+            return setpoint
+        self._curva_falhas = 0
+        if alvo == setpoint and alvo == self._curva_escrito and not self._curva_reescreve:
+            return setpoint
+
+        # O registro antes da escrita: sem ele o guarda nao reconheceria o
+        # manual como do agente, e um agente travado deixaria a ventoinha
+        # baixa sem ninguem. Sem guarda, a curva nao age. Registra tambem
+        # quando assume um manual que ja estava la, sem escrever.
+        anterior = fan_speed_value(*setpoint) if setpoint else "0,0"
+        if not guarda.registra(anterior, fan_speed_value(*alvo)):
+            if not self._curva_sem_guarda_avisado:
+                self.log.warning(
+                    "curva: sem onde registrar o que escreve (RuntimeDirectory "
+                    "da unit); sem o guarda, a curva não age"
+                )
+            self._curva_sem_guarda_avisado = True
+            return setpoint
+        self._curva_sem_guarda_avisado = False
+        # Depois de dormir o firmware esta no automatico com fan_speed
+        # dizendo o manual: escrever o mesmo valor o reaplica.
+        reescreve, self._curva_reescreve = self._curva_reescreve, False
+        if alvo != setpoint or reescreve:
+            try:
+                self._controls.set_fan_speed(*alvo)
+            except WriteError as erro:
+                self.log.warning("curva: não conseguiu escrever %d,%d: %s", *alvo, erro)
+                return setpoint
+        if self._curva_escrito is None:
+            self.log.info(
+                "curva: ventoinha em %d,%d (CPU a %d °C, GPU a %d °C)", *alvo, cpu, gpu
+            )
+        self._curva_escrito = alvo
+        return alvo
+
+    def _curva_larga(self, setpoint, motivo):
+        """Devolve o automatico, se a ventoinha for da curva. Devolve o
+        fan_speed depois disso."""
+        escrito, self._curva_escrito = self._curva_escrito, None
+        self._curva_falhas = 0
+        self._curva_cpus.clear()
+        self._curva_gpus.clear()
+        if escrito is None or setpoint != escrito:
+            return setpoint
+        try:
+            self._controls.set_fan_speed(0, 0)
+        except WriteError as erro:
+            self.log.warning("curva: não conseguiu devolver o automático (%s): %s", motivo, erro)
+            return setpoint
+        self.log.info("curva: ventoinha devolvida ao automático (%s)", motivo)
+        return (0, 0)
+
     def _guarda_ventoinha(self, maximo_ativo):
         """A rede da ventoinha manual: devolve o automatico, e so isso.
 
@@ -346,7 +520,10 @@ class Agent:
         `maximo_ativo` e pedido E na tomada, como em _reconcile_maximum:
         e o modo que troca a curva do automatico.
         """
-        setpoint = self._read_fan_speed()
+        # A curva acabou de ler, e talvez de escrever: vale o que ela deixou.
+        setpoint, self._fan_da_passada = self._fan_da_passada, _NAO_LIDO
+        if setpoint is _NAO_LIDO:
+            setpoint = self._read_fan_speed()
         if not fan_guard.armada(setpoint, maximo_ativo):
             self._rede_seguidas = 0
             self._rede_recusa_avisada = False
@@ -386,6 +563,23 @@ class Agent:
             *rpm,
             gpu,
         )
+        if self._curva_escrito is not None and setpoint == self._curva_escrito:
+            self._curva_desliga()
+
+    def _curva_desliga(self):
+        """A rede disparou com a curva ativa: e defeito da curva, que
+        cumpre o invariante dela (docs/plano-curva.md, secao 8). A curva sai,
+        e sai no arquivo -- senao ela reescreveria o manual na passada
+        seguinte, e a rede o devolveria de novo."""
+        self._curva_escrito = None
+        self.log.warning(
+            "curva: a rede térmica disparou com a curva ativa; a curva foi "
+            "desligada (fan_curve = false). É defeito da curva"
+        )
+        try:
+            save(dataclasses.replace(load(self.config_path), fan_curve=False), self.config_path)
+        except OSError as erro:
+            self.log.warning("não foi possível gravar a configuração: %s", erro)
 
     def _avisa_falhas(self, falhas):
         """Uma linha quando a falha aparece, outra quando todas somem."""
@@ -406,17 +600,100 @@ class Agent:
             self.log.warning("falha ao liberar PowerMizer: %s", error)
         self._gpu_confirmed = False
 
+    def _vai_dormir(self):
+        """Do fio do sono, logo antes de a maquina dormir: so anota."""
+        self._perfil_antes_de_dormir = self._perfil_visto
+        self._ac_antes_de_dormir = self._was_on_ac
+
+    def _depois_de_dormir(self, perfil, on_ac):
+        """Na primeira passada depois de acordar, reaplica o que o firmware
+        desfez: o perfil termico que estava em vigor, e o manual da curva.
+
+        Medido no E-C5 em 2026-10-16: ao acordar, a rotacao estava no
+        automatico com fan_speed ainda dizendo o manual, e o perfil tinha
+        ido de balanced-performance para balanced. Devolve o perfil o que
+        dormiu: so na tomada e se o cabo nao mudou enquanto dormia -- senao
+        quem decide e a troca de fonte, como em qualquer passada.
+        """
+        dormido = self._relogio_sono()
+        saltou = self._dormido is not None and dormido - self._dormido > 2.0
+        self._dormido = dormido
+        if not (self._acordou.is_set() or saltou):
+            return perfil
+        self._acordou.clear()
+        # O salto do relogio e o aviso do logind sao a mesma volta: o que
+        # chegar segundo, em poucos segundos, nao conta de novo.
+        agora = time.monotonic()
+        if not saltou and self._acordou_em is not None and agora - self._acordou_em < 10:
+            return perfil
+        self._acordou_em = agora
+        if saltou and self._watchdog_usec:
+            # O aviso do logind nao veio, ou veio tarde: o watchdog pode estar
+            # alargado. Volta ao da unit.
+            self._avisa_systemd(f"WATCHDOG_USEC={self._watchdog_usec}")
+        antes, self._perfil_antes_de_dormir = self._perfil_antes_de_dormir, None
+        ac_antes, self._ac_antes_de_dormir = self._ac_antes_de_dormir, None
+        self._curva_reescreve = True
+        if (
+            antes is not None
+            and perfil != antes
+            and on_ac is True
+            and ac_antes in (True, None)
+            and antes in available(self._read_choices(), on_ac=True)
+        ):
+            try:
+                self._controls.set_profile(antes)
+            except WriteError as erro:
+                self.log.warning(
+                    "acordou: o firmware trocou o perfil para %s, e não "
+                    "consegui devolver %s: %s", perfil, antes, erro,
+                )
+                return perfil
+            self.log.info(
+                "acordou: o firmware trocou o perfil para %s; devolvido %s",
+                perfil, antes,
+            )
+            return antes
+        self.log.info("acordou da suspensão")
+        return perfil
+
+    def _avisa_systemd(self, mensagem):
+        """sd_notify, pela unit Type=notify. Sem socket -- num terminal, nos
+        testes -- nao ha a quem avisar. Com socket e sem conseguir, o
+        WatchdogSec vai matar um agente sadio a cada poucos segundos: isso
+        merece uma linha, uma vez."""
+        if guarda.notifica(mensagem) or not os.environ.get("NOTIFY_SOCKET"):
+            return
+        if not self._aviso_systemd_falhou:
+            self.log.warning("não foi possível avisar o systemd (%s)", mensagem)
+        self._aviso_systemd_falhou = True
+
     def run(self, stop_event=None):
         """O laco. Para quando `stop_event` for sinalizado."""
         parar = stop_event or threading.Event()
+        self._aviso_systemd_falhou = False
         self.log.info("agente no ar, sondando a cada %.1f s", self.interval)
+        self._avisa_systemd("READY=1")
+        vigia_do_sono = None
+        # So sob a unit com watchdog: sem ele nao ha o que alargar.
+        if self._watchdog_usec and os.environ.get("NOTIFY_SOCKET"):
+            vigia_do_sono = sono.Sono(
+                guarda.notifica, self._watchdog_usec, self._vai_dormir, self._acordou.set
+            )
+            vigia_do_sono.inicia()
         try:
             while not parar.is_set():
                 try:
                     self.tick()
                 except Exception:  # nunca deixar o laco morrer por um tick ruim
                     self.log.exception("falha inesperada numa passada")
+                # Depois de cada passada, boa ou ruim: o agente esta vivo.
+                # Quem para de avisar e o travado, e o WatchdogSec o mata --
+                # e o guarda devolve a ventoinha (docs/plano-curva.md, secao 8).
+                self._avisa_systemd("WATCHDOG=1")
                 parar.wait(self.interval)
         finally:
+            if vigia_do_sono is not None:
+                vigia_do_sono.para()
             self._release_gpu()
         self.log.info("agente encerrado")

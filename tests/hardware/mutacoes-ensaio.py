@@ -3,9 +3,9 @@
 
 tests/hardware/ensaio-termico.sh escreve na ventoinha de verdade e esquenta a
 maquina de proposito. O que o impede de fazer besteira esta provado em arvore
-de mentira, por tests/shell/test-ensaio-termico.sh, -e3.sh e -rede.sh. Este roteiro
-prova os testes: copia o ensaio, estraga UMA protecao, roda o teste que a
-guarda, e cobra que ele reprove.
+de mentira, por tests/shell/test-ensaio-termico.sh, -e3.sh, -rede.sh e
+-curva.sh. Este roteiro prova os testes: copia o ensaio, estraga UMA
+protecao, roda o teste que a guarda, e cobra que ele reprove.
 
 Nao faz parte da suite -- leva uns quinze minutos e ocupa cinco nucleos. Rode
 depois de mexer no ensaio ou nos testes dele, e nunca durante um ensaio na
@@ -32,7 +32,9 @@ ENSAIO = REPO / "tests/hardware/ensaio-termico.sh"
 E2 = "test-ensaio-termico.sh"
 E3 = "test-ensaio-termico-e3.sh"
 REDE = "test-ensaio-termico-rede.sh"
+CURVA = "test-ensaio-termico-curva.sh"
 APOIO = "lib-arvore-termica.sh"
+GUARDA = "packaging/scripts/guarda-ventoinha.sh"
 
 # O trecho da retomada existe igual no E3 e no E3b; o comentario o ancora no E3.
 RETOMA_E3 = (
@@ -66,7 +68,8 @@ MUT = [
      '    escreve_cru "100,100"\n    return 1', '    return 1'),
     # ---- os limites e as condicoes
     ("verifica nao ve a outra mao", E2,
-     '    if [ "$V_FAN" != "$ULTIMO" ]; then\n        MOTIVO="fan_speed e',
+     '    if [ "$V_FAN" != "$ULTIMO" ] && { [ -z "$ACEITA_FAN" ] || [ "$V_FAN" != "$ACEITA_FAN" ]; }; then\n'
+     '        MOTIVO="fan_speed e',
      '    if false; then\n        MOTIVO="fan_speed e'),
     ("SEN4 fora dos limites", E2,
      '               "SEN4:$V_SEN4:$LIM_SEN4" "SEN5:$V_SEN5:$LIM_SEN5" \\',
@@ -81,7 +84,7 @@ MUT = [
     ("crit_alarm ignorado", E2,
      '    if [ "$V_ALARM" = 1 ]; then', '    if [ "$V_ALARM" = x ]; then'),
     ("cabo fora ignorado", E2,
-     '    if [ "$V_ACAD" != 1 ]; then', '    if [ "$V_ACAD" = x ]; then'),
+     '    if ! livre cabo && [ "$V_ACAD" != 1 ]; then', '    if ! livre cabo && [ "$V_ACAD" = x ]; then'),
     ("carga baixa ignorada", E2,
      '    if [ "$V_PCT" -lt "$LIM_CARGA" ]; then', '    if [ "$V_PCT" -lt 0 ]; then'),
     ("jogo aberto ignorado, fora do E3b", E2,
@@ -100,7 +103,8 @@ MUT = [
      "    awk -v l=\"$V_LOAD\" -v m=\"$PARTIDA_LOAD\" 'BEGIN { exit !(l + 0 < m + 0) }' \\\n        || recusa",
      "    true \\\n        || recusa"),
     ("E2 comeca com o modo maximo ligado", E2,
-     '    [ "$V_MAX" = true ] && recusa "modo maximo ligado; o ensaio e com ele desligado"\n    awk -v l=',
+     '    [ "${1:-0}" != 1 ] && [ "$V_MAX" = true ] && recusa "modo maximo ligado; o ensaio e com ele desligado"\n'
+     '    awk -v l=',
      '    awk -v l='),
     ("controle positivo do mapa desligado", E2,
      '                termina "$COD_CONTROLE"', '                :'),
@@ -205,6 +209,29 @@ MUT = [
      '        if false; then\n            # E o manual desta prova'),
     ("rede: o manual de volta e acusado, e fica no piso", REDE,
      '    [ -n "$REDE_VALOR" ] && [ "$(le "$FAN")" = "$REDE_VALOR" ] && ULTIMO=$REDE_VALOR\n', ''),
+    # ---- o perfil de energia e os ensaios da curva
+    ("verifica nao ve o perfil de energia mudar", E2,
+     '    if ! livre ppd && [ "$V_PPD" != "$PPD0" ]; then', '    if false; then'),
+    ("curva: o perfil de energia nao volta no fim", CURVA,
+     '    [ -n "$PPD_INICIAL" ] && [ "$PPD_INICIAL" != NA ] || return 0\n', '    return 0\n'),
+    ("curva: o vigia nao devolve o perfil de energia", CURVA,
+     '    if [ -s "$RUN/ppd_inicial" ]; then', '    if false; then'),
+    ("curva: o controle do estagio 4 nao para o ensaio", CURVA,
+     '        echo "controle: FALHOU -- $MOTIVO" >> "$RESUMO"\n        termina "$COD_CONTROLE"',
+     '        :'),
+    ("curva: o gesto que nao vem passa", CURVA,
+     '    [ "${5:-0}" = 1 ] && return 1\n    MOTIVO="o gesto $N_GESTO nao veio no prazo: $1"',
+     '    return 1\n    MOTIVO="o gesto $N_GESTO nao veio no prazo: $1"'),
+    ("curva: o degrau de controle tambem troca", CURVA,
+     'then b=${reais[1]}; troca=0;', 'then b=${reais[1]}; troca=1;'),
+    ("curva: o trap devolve o manual que tinha de atravessar o reinicio", CURVA,
+     '    DEVOLVIDO=1; : > "$RUN/devolvido"\n    echo "reinicio: pedido', '    : > "$RUN/devolvido"\n    echo "reinicio: pedido'),
+    ("curva: o agente fica sob SIGSTOP", CURVA,
+     '    kill -CONT "$AGENTE_PARADO" 2>/dev/null\n', ''),
+    ("curva: o guarda passa sem a rotacao sair do manual", CURVA,
+     '        if rotacao_largou 30 "$C5_REF1" "$C5_REF2" "$QUEDA_RPM" queda; then\n'
+     '            echo "guarda, kill -9: PASSOU',
+     '        if true; then\n            echo "guarda, kill -9: PASSOU'),
 ]
 
 # Mutacoes que nao mudam o que o roteiro faz, e por isso nao tem como
@@ -229,6 +256,9 @@ def uma(i, nome, teste, de, para, orig, base):
     alvo.chmod(0o755)
     for f in (APOIO, teste):
         shutil.copy(REPO / "tests/shell" / f, d / "tests/shell" / f)
+    # O E-C5 roda o guarda de verdade como ExecStopPost do systemd de mentira.
+    (d / "packaging/scripts").mkdir(parents=True)
+    shutil.copy2(REPO / GUARDA, d / GUARDA)
     r = subprocess.run([str(d / "tests/shell" / teste)], capture_output=True, text=True)
     falhas = [l.strip()[6:].split(":")[0][:55] for l in r.stdout.splitlines() if l.startswith("  FALHA")]
     shutil.rmtree(d, ignore_errors=True)

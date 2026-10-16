@@ -83,11 +83,14 @@ MUT = [
      "rpm = telemetry.fan_rpm(self.sysfs) if fan_guard.quente(gpu) else None",
      "rpm = telemetry.fan_rpm(self.sysfs)", LACO),
     ("o canal da GPU pelo numero, e nao pelo rotulo", SENSORES,
-     "            if sysfs.read(rotulo) != GPU_LABEL:\n                continue\n",
-     "            if rotulo.name != \"temp2_label\":\n                continue\n", LEITURA),
+     "            if sysfs.read(rotulo) != nome:\n                continue\n",
+     "            if rotulo.name != (\"temp2_label\" if nome == GPU_LABEL else \"temp1_label\"):\n"
+     "                continue\n", LEITURA),
     # ---- o agente: o que escreve, e o que diz
     ("decide e nao escreve", AGENTE,
-     "            self._controls.set_fan_speed(0, 0)\n", "            pass\n", LACO),
+     "            self._controls.set_fan_speed(0, 0)\n        except WriteError as erro:\n"
+     "            # A conta fica onde esta",
+     "            pass\n        except WriteError as erro:\n            # A conta fica onde esta", LACO),
     ("escreve e nao registra", AGENTE,
      '            "GPU a %d °C; devolvida ao automático",\n            *setpoint,\n            *rpm,\n            gpu,\n        )\n',
      '            "GPU a %d °C; devolvida ao automático",\n            *setpoint,\n            *rpm,\n            gpu,\n        ) if False else None\n',
