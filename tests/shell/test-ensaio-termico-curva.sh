@@ -74,6 +74,8 @@ confere_ppd() {      # $1 = descricao, $2 = perfil de energia esperado
 #   sem_ppd         liga o modo, e a bandeja nao poe o perfil em performance
 #   larga_e_volta   ao suspender, o EC larga o manual e volta a ele em 0,3 s
 #   perfil_preso    ao acordar, o perfil fica no balanced: o agente nao o devolve
+#   larga_na_suspensao  como a maquina em 2026-10-16: ao acordar o EC larga o
+#                   manual e so o retoma quando fan_speed e escrito de novo
 # No jeito normal, ao acordar o perfil vai a balanced e volta em 0,3 s, como
 # na maquina: o firmware o troca, e o agente o devolve.
 usuario() {   # $1 = arvore, $2 = jeito
@@ -99,6 +101,7 @@ usuario() {   # $1 = arvore, $2 = jeito
                     poe "$d/processos" GameThread ;;
                 *"suspenda"*)
                     [ "$2" = larga_e_volta ] && : > "$d/ec_larga"
+                    [ "$2" = larga_na_suspensao ] && : > "$d/ec_larga"
                     # Como a maquina: o firmware troca o perfil ao acordar, e
                     # o agente o devolve logo depois. Com perfil_preso, nao.
                     [ "$2" = perfil_preso ] || [ "$2" = larga_e_volta ] \
@@ -107,7 +110,10 @@ usuario() {   # $1 = arvore, $2 = jeito
                     s=$(cat "$d/sys/power/suspend_stats/success")
                     poe "$d/sys/power/suspend_stats/success" $(( s + 1 ))
                     [ "$2" = larga_e_volta ] && { sleep 0.3; rm -f "$d/ec_larga"; }
-                    [ "$2" = normal ] && { sleep 0.3; poe "$d/sys/firmware/acpi/platform_profile" balanced-performance; } ;;
+                    case "$2" in
+                        normal|larga_na_suspensao)
+                            sleep 0.3; poe "$d/sys/firmware/acpi/platform_profile" balanced-performance ;;
+                    esac ;;
                 *"tire o cabo"*)
                     poe "$d/sys/class/power_supply/ACAD/online" 0
                     sleep 0.2      # o agente: na bateria, um perfil que ela aceita
@@ -584,6 +590,28 @@ grep -q '^reinicio: o manual 95,95 VOLTOU na partida' "$D/ec5.resumo.txt" \
     && ok "o resumo diz que o manual voltou na partida" \
     || falha "o resumo do reinicio: $(grep '^reinicio:' "$D/ec5.resumo.txt" | tail -1)"
 [ ! -e "$(estado)" ] && ok "a continuacao sai depois de lida" || falha "a continuacao ficou"
+
+# Como a maquina: o EC larga o manual na suspensao e so o retoma com uma
+# escrita nova. O roteiro reescreve os 95% antes do gesto seguinte, e o cabo e
+# o perfil se medem a partir do manual de verdade.
+c5 ec5-larga-na-suspensao completo larga_na_suspensao
+roda "$D" "${C5[@]}"
+confere "suspensao que larga o manual: o E-C5 segue ate o reinicio" "$?" 0 "95,95"
+grep -q '^suspensao: LARGOU o manual e nao voltou a ele' "$D/ec5.resumo.txt" \
+    && grep -q '^cabo: manteve o manual' "$D/ec5.resumo.txt" \
+    && grep -q '^perfil termico: manteve o manual' "$D/ec5.resumo.txt" \
+    && ok "depois da suspensao o manual e reescrito, e o cabo e o perfil medem a partir dele" \
+    || falha "a suspensao contaminou os gestos seguintes: $(grep -E '^(suspensao|cabo|perfil termico):' "$D/ec5.resumo.txt" | tr '\n' '|')"
+roda "$D" "$S" ec5-volta > /dev/null
+
+# So o cabo, sem pedir o reinicio: repetir uma parte nao exige refazer o resto.
+c5 ec5-so-o-cabo completo
+C5=("${C5[@]/%ec5/ec5}")
+roda "$D" env ENSAIO_C5_GESTOS=cabo ENSAIO_C5_REINICIO=0 "${C5[@]}"
+confere "so o cabo, sem reinicio: termina com 0 e a ventoinha em automatico" "$?" 0 "0,0"
+grep -q 'GESTO 1: tire o cabo' "$D/saida.txt" && ! grep -q 'suspenda' "$D/saida.txt" \
+    && ok "so o gesto pedido" || falha "gestos: $(grep '^GESTO' "$D/saida.txt" | tr '\n' '|')"
+[ ! -e "$(estado)" ] && ok "sem reinicio, sem continuacao gravada" || falha "gravou continuacao sem pedir reinicio"
 
 # O EC que larga o manual na suspensao e volta a ele. A unit de hoje, sem
 # guarda: o exercicio nao roda, e o codigo de saida diz isso.

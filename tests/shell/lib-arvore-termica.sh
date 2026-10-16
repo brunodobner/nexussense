@@ -181,7 +181,8 @@ FAN_DE() { echo "$1/sys/devices/platform/acer-wmi/nitro_sense/fan_speed"; }
 #   ganho        o mesmo, e a rotacao compra mais: 5,7% e 3 C
 #   presa        como curvas, mas a curva alta fica depois de o modo desligar
 # Em qualquer temperamento, com o arquivo ec_larga o EC larga o manual: a
-# rotacao vai para o automatico com fan_speed ainda dizendo o manual.
+# rotacao vai para o automatico com fan_speed ainda dizendo o manual. Uma
+# escrita nova em fan_speed (mais nova que o ec_larga) o reaplica.
 # A carga de mentira e bin/carga-falsa: enquanto existir o arquivo
 # carga_ligada, o pacote sobe ate 92 C; sem ele, desce ate 45.
 # Um "jogo" (uma linha no arquivo processos) esquenta igual, e esquenta
@@ -240,6 +241,9 @@ ec_falso() {
             # Quente, o EC larga o manual e volta para a curva dele.
             [ "$2" = retoma ] && [ "$pac" -ge 88000 ] && { r1=$a1; r2=$a2; }
         fi
+        # Escrever fan_speed de novo, mesmo com o mesmo valor, reaplica o
+        # manual -- como o firmware de verdade depois da suspensao.
+        [ -e "$1/ec_larga" ] && [ "$f" -nt "$1/ec_larga" ] && rm -f "$1/ec_larga"
         [ -e "$1/ec_larga" ] && { r1=$a1; r2=$a2; }
 
         # SEN4 anda 3 C por volta ate o alvo. "Fraca" e a ventoinha em manual

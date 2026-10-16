@@ -219,6 +219,23 @@ def test_ao_acordar_a_curva_reescreve_o_mesmo_manual(tmp_path, unit, monkeypatch
     assert escritas == [(25, 24), (25, 24)]
 
 
+def test_o_relogio_e_o_aviso_da_mesma_volta_contam_uma_vez(tmp_path, caplog):
+    """Na maquina, o salto do relogio chegou numa passada e o aviso do
+    logind na seguinte: era uma suspensao so."""
+    raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
+    a = Agent(Sysfs(raiz), tmp_path / "config.toml")
+    relogio = [10.0]
+    a._relogio_sono = lambda: relogio[0]
+    a.tick()
+    a._vai_dormir()
+    relogio[0] = 40.0
+    with caplog.at_level(logging.INFO):
+        a.tick()
+        a._acordou.set()
+        a.tick()
+    assert sum("acordou" in r.getMessage() for r in caplog.records) == 1
+
+
 def test_na_bateria_ao_acordar_nao_devolve_o_perfil_da_tomada(tmp_path):
     raiz = build_tree(tmp_path / "raiz", profile="balanced-performance")
     a = Agent(Sysfs(raiz), tmp_path / "config.toml")

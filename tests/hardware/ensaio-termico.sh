@@ -93,7 +93,11 @@
 #        Sem o guarda na unit, o exercicio diz que nao rodou, e o roteiro sai
 #        com 17. Por ultimo, pede
 #        o reinicio e sai DE PROPOSITO COM A VENTOINHA A 95%: nem o trap nem o
-#        vigia a devolvem. ~10 min.
+#        vigia a devolvem. ~10 min. Antes de cada gesto e do guarda reescreve
+#        os 95% e confere a rotacao: a suspensao faz o firmware largar o
+#        manual com fan_speed ainda dizendo o valor. ENSAIO_C5_GESTOS escolhe
+#        os gestos (padrao "suspensao cabo perfil"); ENSAIO_C5_REINICIO=0
+#        termina sem pedir o reinicio, com a ventoinha devolvida.
 #
 #   ec5-volta  depois do reinicio e do login: le o que voltou na partida
 #        (fan_speed e rotacao), devolve 0,0 se for o manual do ec5 e fecha o
@@ -1507,6 +1511,10 @@ C3_FALSO=${ENSAIO_C3_FALSO:-}            # a janela sem troca, de 1 a 4; sortead
 
 # O E-C5, em amostras; os prazos do guarda, em segundos.
 C5_P=${ENSAIO_C5_P:-95}
+# Quais gestos, e se termina pedindo o reinicio. Repetir so uma parte poupa os
+# gestos que ja foram medidos.
+C5_GESTOS=${ENSAIO_C5_GESTOS:-suspensao cabo perfil}
+C5_REINICIO=${ENSAIO_C5_REINICIO:-1}
 C5_DEPOIS=${ENSAIO_C5_DEPOIS:-30}        # olhando a rotacao depois de cada gesto
 C5_FORA=${ENSAIO_C5_FORA:-15}            # na bateria, ou no outro perfil
 GUARDA_PRAZO_KILL=${ENSAIO_GUARDA_PRAZO_KILL:-5}   # ate o guarda devolver, depois do kill -9
@@ -2123,6 +2131,29 @@ observa() {   # $1 = fase, $2 = amostras, $3 = condicoes livres
     LIVRE=
 }
 
+reassume_manual() {   # $1 = fase. Reescreve o manual e confere que a rotacao voltou a ele
+    # Um gesto pode ter feito o firmware largar o manual com fan_speed ainda
+    # dizendo o valor -- a suspensao faz isso (2026-10-16). Sem reescrever, o
+    # gesto seguinte partiria do automatico e mediria nada.
+    local v="$C5_P,$C5_P" i rc d1 d2
+    if ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi
+    for ((i = 0; i < ASSENTA + LEITURAS + 10; i++)); do
+        sleep "$PASSO"
+        amostra "$1"; registra
+        verifica; rc=$?
+        [ "$rc" -ne 0 ] && termina "$rc"
+        eh_num "$V_RPM1" && eh_num "$V_RPM2" || continue
+        d1=$(( V_RPM1 - C5_REF1 )); d2=$(( V_RPM2 - C5_REF2 ))
+        [ "${d1#-}" -lt "$QUEDA_RPM" ] && [ "${d2#-}" -lt "$QUEDA_RPM" ] && return 0
+    done
+    echo "$1: o manual reescrito nao pegou -- a rotacao ficou em $V_RPM1 / $V_RPM2 rpm (no manual: $C5_REF1 / $C5_REF2)" \
+        | tee -a "$RESUMO"
+    MOTIVO="o manual reescrito nao pegou"
+    termina "$COD_CONDICAO"
+}
+
+quer_gesto() { case " $C5_GESTOS " in *" $1 "*) return 0 ;; esac; return 1; }
+
 relata() {   # $1 = o gesto
     local r
     if [ "$OBS_FORA" = 0 ]; then r="manteve o manual"
@@ -2216,8 +2247,7 @@ exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem
         echo "guarda: nao rodou -- a pasta do agente em \$XDG_RUNTIME_DIR/$RUNTIME_AGENTE nao existe" | tee -a "$RESUMO"
         return 2
     fi
-    if [ "$ULTIMO" != "$v" ] && ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi
-    observa c5:guarda:antes "$ASSENTA"
+    reassume_manual c5:guarda:antes
     echo "  kill -9 no agente (pid $pid)"
     kill -KILL "$pid" 2>/dev/null
     if espera_guarda "$GUARDA_PRAZO_KILL" c5:guarda:kill; then
@@ -2250,8 +2280,7 @@ exercicio_guarda() {   # 0 passou, 1 falhou, 2 nao rodou inteiro: a unit nao tem
         echo "guarda, SIGSTOP: nao rodou -- o agente voltou sem a pasta $RUNTIME_AGENTE" | tee -a "$RESUMO"
         falhou=1
     else
-        if [ "$ULTIMO" != "$v" ] && ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi
-        observa c5:guarda:antes "$ASSENTA"
+        reassume_manual c5:guarda:antes
         pid=$NOVO_PID
         # Antes do sinal: se o roteiro morrer aqui, o trap e o vigia o soltam.
         printf '%s\n' "$pid" > "$RUN/agente_parado"; AGENTE_PARADO=$pid
@@ -2282,12 +2311,7 @@ reinicio_ec5() {   # $1 = como foi o guarda. Deixa o manual DE PROPOSITO e sai; 
     local v="$C5_P,$C5_P"
     echo
     echo "O REINICIO -- o que volta na partida, antes do login"
-    if [ "$ULTIMO" != "$v" ] && ! escreve "$v"; then MOTIVO="a escrita de $v foi recusada"; termina "$COD_CONDICAO"; fi
-    reinicia_obs
-    observa c5:reinicio:antes "$ASSENTA"
-    if [ "$OBS_ULT" = 1 ]; then
-        MOTIVO="antes do reinicio a rotacao nao esta no manual: $V_RPM1 / $V_RPM2 rpm"; termina "$COD_CONDICAO"
-    fi
+    reassume_manual c5:reinicio:antes
     mkdir -p "$(dirname "$ESTADO_EC5")" || exit 1
     {
         echo "valor=$v"; echo "rpm1=$C5_REF1"; echo "rpm2=$C5_REF2"
@@ -2351,54 +2375,70 @@ modo_ec5() {
     fi
 
     GESTO_HOOK=marca_fora
-    echo
-    echo "SUSPENSAO"
-    reinicia_obs; C5_SUSP0=$(le "$SUSPENSOES")
-    pid0=$(unit_prop MainPID)
-    # O perfil fica livre: medido em 2026-10-16, ao acordar o firmware o
-    # troca para balanced. E achado, e nao motivo para parar; quem o devolve
-    # e o agente (sono.py e Agent._depois_de_dormir).
-    espera_gesto "suspenda a maquina (menu Suspender, ou feche a tampa) e acorde-a." perfil suspendeu c5:suspensao
-    observa c5:suspensao:depois "$C5_DEPOIS" perfil
-    relata suspensao
-    pid1=$(unit_prop MainPID)
-    {
-        echo "    perfis vistos na suspensao: $OBS_PERFIS"
-        if [ -z "$pid0" ] || [ -z "$pid1" ]; then
-            echo "    o agente: sem a unit para perguntar"
-        elif [ "$pid0" = "$pid1" ]; then
-            echo "    o agente atravessou a suspensao vivo (pid $pid1)"
-        else
-            echo "    o agente NAO atravessou a suspensao: pid $pid0 antes, $pid1 depois"
-        fi
-    } | tee -a "$RESUMO"
-    acomoda perfil_de_volta perfil c5:suspensao \
-        "depois da suspensao o perfil nao voltou a $PERFIL0: quem o devolve e o agente"
+    if quer_gesto suspensao; then
+        echo
+        echo "SUSPENSAO"
+        reinicia_obs; C5_SUSP0=$(le "$SUSPENSOES")
+        pid0=$(unit_prop MainPID)
+        # O perfil fica livre: medido em 2026-10-16, ao acordar o firmware o
+        # troca para balanced. E achado, e nao motivo para parar; quem o devolve
+        # e o agente (sono.py e Agent._depois_de_dormir).
+        espera_gesto "suspenda a maquina (menu Suspender, ou feche a tampa) e acorde-a." perfil suspendeu c5:suspensao
+        observa c5:suspensao:depois "$C5_DEPOIS" perfil
+        relata suspensao
+        pid1=$(unit_prop MainPID)
+        {
+            echo "    perfis vistos na suspensao: $OBS_PERFIS"
+            if [ -z "$pid0" ] || [ -z "$pid1" ]; then
+                echo "    o agente: sem a unit para perguntar"
+            elif [ "$pid0" = "$pid1" ]; then
+                echo "    o agente atravessou a suspensao vivo (pid $pid1)"
+            else
+                echo "    o agente NAO atravessou a suspensao: pid $pid0 antes, $pid1 depois"
+            fi
+        } | tee -a "$RESUMO"
+        acomoda perfil_de_volta perfil c5:suspensao \
+            "depois da suspensao o perfil nao voltou a $PERFIL0: quem o devolve e o agente"
+    fi
 
-    echo
-    echo "CABO"
-    reinicia_obs
-    # Na bateria o agente troca o perfil, e o devolve com o cabo de volta.
-    espera_gesto "tire o cabo de energia." "cabo perfil" cabo_fora c5:cabo
-    observa c5:cabo:bateria "$C5_FORA" "cabo perfil"
-    espera_gesto "ponha o cabo de volta." "cabo perfil" cabo_dentro c5:cabo
-    acomoda perfil_de_volta perfil c5:cabo "com o cabo de volta, o perfil nao voltou a $PERFIL0"
-    observa c5:cabo:depois "$C5_DEPOIS"
-    relata cabo
+    if quer_gesto cabo; then
+        echo
+        echo "CABO"
+        reassume_manual c5:cabo:manual
+        reinicia_obs
+        # Na bateria o agente troca o perfil, e o devolve com o cabo de volta.
+        espera_gesto "tire o cabo de energia." "cabo perfil" cabo_fora c5:cabo
+        observa c5:cabo:bateria "$C5_FORA" "cabo perfil"
+        espera_gesto "ponha o cabo de volta." "cabo perfil" cabo_dentro c5:cabo
+        acomoda perfil_de_volta perfil c5:cabo "com o cabo de volta, o perfil nao voltou a $PERFIL0"
+        observa c5:cabo:depois "$C5_DEPOIS"
+        relata cabo
+    fi
 
-    echo
-    echo "PERFIL TERMICO"
-    reinicia_obs
-    # balanced, e nao quiet ou low-power: esses dois escrevem 0,0 no driver.
-    espera_gesto "na janela, troque o perfil termico para balanced." perfil perfil_trocado c5:perfil
-    observa c5:perfil:fora "$C5_FORA" perfil
-    espera_gesto "volte o perfil termico para $PERFIL0." perfil perfil_de_volta c5:perfil
-    observa c5:perfil:depois "$C5_DEPOIS"
-    relata "perfil termico"
+    if quer_gesto perfil; then
+        echo
+        echo "PERFIL TERMICO"
+        reassume_manual c5:perfil:manual
+        reinicia_obs
+        # balanced, e nao quiet ou low-power: esses dois escrevem 0,0 no driver.
+        espera_gesto "na janela, troque o perfil termico para balanced." perfil perfil_trocado c5:perfil
+        observa c5:perfil:fora "$C5_FORA" perfil
+        espera_gesto "volte o perfil termico para $PERFIL0." perfil perfil_de_volta c5:perfil
+        observa c5:perfil:depois "$C5_DEPOIS"
+        relata "perfil termico"
+    fi
     GESTO_HOOK=:
 
     exercicio_guarda; rcg=$?
-    reinicio_ec5 "$rcg"
+    if [ "$C5_REINICIO" = 1 ]; then
+        reinicio_ec5 "$rcg"
+    fi
+    echo "E-C5 terminou sem pedir o reinicio (ENSAIO_C5_REINICIO=0). Resumo em $RESUMO"
+    case "$rcg" in
+        1) exit "$COD_EXERCICIO" ;;
+        2) exit "$COD_SEM_GUARDA" ;;
+    esac
+    exit 0
 }
 
 chave() { grep -m1 "^$1=" "$ESTADO_EC5" 2>/dev/null | cut -d= -f2-; }

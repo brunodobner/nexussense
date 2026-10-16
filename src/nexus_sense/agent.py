@@ -181,6 +181,7 @@ class Agent:
         # passadas, a maquina dormiu -- mesmo que o aviso do logind falte.
         self._relogio_sono = _tempo_dormido
         self._dormido = None
+        self._acordou_em = None
 
     def _read_choices(self):
         caminho = self.sysfs.choices_path()
@@ -620,6 +621,12 @@ class Agent:
         if not (self._acordou.is_set() or saltou):
             return perfil
         self._acordou.clear()
+        # O salto do relogio e o aviso do logind sao a mesma volta: o que
+        # chegar segundo, em poucos segundos, nao conta de novo.
+        agora = time.monotonic()
+        if not saltou and self._acordou_em is not None and agora - self._acordou_em < 10:
+            return perfil
+        self._acordou_em = agora
         if saltou and self._watchdog_usec:
             # O aviso do logind nao veio, ou veio tarde: o watchdog pode estar
             # alargado. Volta ao da unit.
