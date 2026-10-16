@@ -43,8 +43,16 @@ def comando_espera():
     # janela entre um "wait" e o seguinte em que um sinal se perderia. Sem
     # --timeout: o wait espera para sempre (medido, 45 s sem sinal), e o
     # "--timeout=infinity" o busctl 262 recusa.
+    #
+    # stdbuf -oL: escrevendo para um pipe, o busctl guarda a saida num buffer
+    # e so a entrega ao sair -- e com --limit-messages alto ele nao sai. No
+    # E-C5 de 2026-10-16 o aviso de dormir ficou preso la, o bloqueio nunca
+    # saiu ("Delay lock is active ... but inhibitor timeout is reached") e o
+    # watchdog matou o agente ao acordar. Medido logo depois, com os mesmos
+    # sinais da bateria: sem stdbuf, nenhuma linha em 100 s; com ele, cada
+    # uma na hora.
     return [
-        "busctl", "--system", "--json=short", "wait",
+        "stdbuf", "-oL", "busctl", "--system", "--json=short", "wait",
         "--limit-messages=1000000", *LOGIND,
     ]
 
@@ -144,11 +152,13 @@ class Sono:
                     self._notifica(f"WATCHDOG_USEC={DORMINDO_USEC}")
                     self._ao_dormir()
                     self._solta()
+                    self._log.info("sono: a máquina vai dormir; watchdog alargado")
                 elif sinal is False:
                     self._notifica(f"WATCHDOG_USEC={self._watchdog_usec}")
                     self._notifica("WATCHDOG=1")
                     self._bloqueia()
                     self._ao_acordar()
+                    self._log.info("sono: a máquina acordou; watchdog de volta")
             if self._parar.is_set():
                 break
             # O busctl saiu sozinho -- o barramento caiu, ou ele morreu.

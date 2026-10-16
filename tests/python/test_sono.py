@@ -55,7 +55,7 @@ def roda(linhas):
     processos = []
 
     def executa(argv, **_):
-        p = Processo(argv, linhas if argv[0] == "busctl" else (), eventos)
+        p = Processo(argv, linhas if "busctl" in argv else (), eventos)
         processos.append(p)
         eventos.append(("abre", argv[0]))
         return p
@@ -79,7 +79,10 @@ def roda(linhas):
 
 
 def test_os_comandos():
-    assert sono.comando_espera()[:4] == ["busctl", "--system", "--json=short", "wait"]
+    """O stdbuf -oL e o que faz o aviso chegar: sem ele o busctl guarda a
+    saida para um pipe e so a entrega ao sair, e ele nao sai. Foi o defeito
+    do E-C5 de 2026-10-16."""
+    assert sono.comando_espera()[:6] == ["stdbuf", "-oL", "busctl", "--system", "--json=short", "wait"]
     assert sono.comando_espera()[-4:] == list(sono.LOGIND)
     assert "--mode=delay" in sono.comando_bloqueio()
     assert "--what=sleep" in sono.comando_bloqueio()
@@ -121,8 +124,8 @@ def test_sem_busctl_o_fio_avisa_uma_vez_e_nao_morre(caplog):
     voltas = []
 
     def executa(argv, **_):
-        if argv[0] == "busctl":
-            raise FileNotFoundError("busctl")
+        if "busctl" in argv:
+            raise FileNotFoundError("stdbuf")
         return Processo(argv)
 
     def espera(_):

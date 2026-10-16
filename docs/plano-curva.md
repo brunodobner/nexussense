@@ -640,4 +640,19 @@ nenhuma passou da suspensão:
   se o agente atravessou a suspensão vivo, e espera o agente devolver o
   perfil antes de seguir para o cabo.
 
-O que falta: instalar, o E-C5 de novo, e o botão na janela e na bandeja.
+**A terceira tentativa do E-C5, 2026-10-16 08:01, já com isso instalado:** a
+suspensão de novo largou o manual e não voltou (32 de 46 amostras fora, 2.213
+rpm com `fan_speed` em `95,95`), e o perfil foi a `balanced`. Mas o agente foi
+morto pelo watchdog do mesmo jeito. O journal do logind disse por quê: *"Delay
+lock is active (… systemd-inhibit) but inhibitor timeout is reached"* — o
+agente nunca soltou o bloqueio, porque nunca recebeu o aviso. **Escrevendo
+para um pipe, o `busctl` guarda a saída e só a entrega ao sair**, e com
+`--limit-messages` alto ele não sai. Medido logo depois, com os sinais da
+bateria: sem `stdbuf -oL`, nenhuma linha em 100 s; com ele, cada uma na hora.
+O agente novo, sem saber o perfil de antes, não o devolveu, e o E-C5 parou ali
+(código 11), como devia.
+
+Corrigido com `stdbuf -oL` na frente do `busctl`, e o fio do sono passa a
+dizer no journal quando a máquina vai dormir e quando acorda.
+
+O que falta: o E-C5 de novo, e o botão na janela e na bandeja.
