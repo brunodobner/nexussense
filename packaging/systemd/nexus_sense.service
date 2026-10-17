@@ -1,6 +1,6 @@
 [Unit]
 Description=Save Nexus Sense state and unload the module at shutdown
-Documentation=https://github.com/PXDiv/Div-Acer-Manager-Max
+Documentation=file:/usr/share/doc/nexus-sense/README.md
 After=multi-user.target
 
 [Service]

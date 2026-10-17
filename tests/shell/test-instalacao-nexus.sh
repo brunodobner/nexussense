@@ -27,6 +27,7 @@ exigir "$RAIZ/packaging/systemd/nexus-sense-agent.service"
 exigir "$RAIZ/packaging/udev/60-nexus-sense.rules"
 exigir "$RAIZ/packaging/scripts/apply-perms.sh"
 exigir "$RAIZ/packaging/scripts/guarda-ventoinha.sh"
+exigir "$RAIZ/README.md"
 
 confere() {  # $1=descricao  $2=padrao
     if grep -q -- "$2" "$S"; then
@@ -43,6 +44,7 @@ confere "instala dependencias da interface" 'install_runtime_deps'
 confere "pode importar sem abrir o menu"      'BASH_SOURCE\[0\].*==.*\$0'
 confere "instala o pacote Python"           '/usr/lib/nexus-sense'
 confere "instala o guarda da ventoinha"     'install -m 755 .*guarda-ventoinha\.sh.* /usr/lib/nexus-sense/guarda-ventoinha\.sh$'
+confere "instala o README que as units citam" 'install -Dm 644 .*/README\.md" /usr/share/doc/nexus-sense/README\.md$'
 confere "instala o lancador da GUI"         '/usr/bin/nexus-sense'
 confere "instala o lancador do agente"      'nexus-sense-agent'
 confere "instala o lancador do desktop"     'nexus-sense.desktop'
@@ -53,6 +55,18 @@ confere "avisa sobre a permissao nova"      'ventoinhas e o perfil'
 confere "recarrega o udev"                  'udevadm control'
 confere "remove variantes antigas do tray"  "status/nexus-sense-tray\*"
 confere "instala controle do perfil da CPU" 'power-profiles-daemon'
+
+# As duas units apontam a documentacao para o README instalado. Ate
+# 2026-10-17 a do agente apontava para um arquivo que o instalador nunca
+# copiava, e a do driver para o repositorio do DAMX.
+for u in nexus-sense-agent.service nexus_sense.service; do
+    if grep -qx 'Documentation=file:/usr/share/doc/nexus-sense/README.md' "$RAIZ/packaging/systemd/$u"; then
+        echo "  OK   $u aponta a documentacao para o README instalado"
+    else
+        echo "  FALHA $u: $(grep '^Documentation=' "$RAIZ/packaging/systemd/$u")"
+        falhas=$((falhas + 1))
+    fi
+done
 
 # A unit do agente e carregada pelo systemd de cada USUARIO; o
 # "systemctl daemon-reload" do root nao chega nele. A execucao disto esta

@@ -134,6 +134,7 @@ remove 'o enable global do agente'  '--global disable nexus-sense-agent\.service
 remove 'o lancador do menu'         '/nexus-sense\.desktop"?$'
 remove 'o autostart da bandeja'     '/nexus-sense-autostart\.desktop$'
 remove 'os icones'                  "hicolor .*-name 'nexus-sense\*' -delete"
+remove 'a documentacao'             'rm -rf /usr/share/doc/nexus-sense$'
 
 # O disable le a secao [Install] da unit: tem de rodar com ela no disco.
 ordem=$(printf '%s' "$app" | grep -v '^\s*#' \
