@@ -24,6 +24,8 @@ A instalação completa:
 - neutraliza o `acer_wmi`, que disputa os mesmos GUIDs WMI
 - instala o Nexus Sense: a janela, a bandeja e o agente de energia
 - instala o guarda da ventoinha, que devolve o automático se o agente parar
+- copia este README para `/usr/share/doc/nexus-sense`, a documentação que as
+  duas units citam
 - reinicia o agente e a bandeja que estiverem rodando, para que subam com o
   código novo; o que estava parado fica parado
 - mapeia o botão Nitro para um keycode vinculável e cria o atalho no KDE

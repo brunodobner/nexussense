@@ -79,6 +79,10 @@ seu momento.
   Ventoinhas do Painel diz o nome do modo, sem explicar, e mostra "máximo"
   no `100,100` (ramo `curva/painel-texto`), juntado (`933a856`), enviado e
   instalado.
+- **O README instalado** (ramo `inst/readme-doc`): o instalador o copia
+  para `/usr/share/doc/nexus-sense`, a desinstalação o apaga, e as duas units
+  apontam para ele — a do agente apontava para um arquivo que nunca era
+  copiado, e a do driver para o repositório do DAMX.
 - **Os ensaios pausam a curva** (ramo `curva/ensaio-pausa`): todo modo de
   `ensaio-termico.sh` que começa no `0,0` grava `fan_curve = false` antes da
   partida e devolve a linha como estava no fim; no ec5, quem devolve é o

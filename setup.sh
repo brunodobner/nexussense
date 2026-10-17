@@ -998,6 +998,9 @@ install_nexus_sense() {
   install -m 755 "${RAIZ}/packaging/scripts/apply-perms.sh" /usr/lib/nexus-sense/apply-perms.sh
   # O ExecStopPost da unit do agente: devolve a ventoinha quando ele para.
   install -m 755 "${RAIZ}/packaging/scripts/guarda-ventoinha.sh" /usr/lib/nexus-sense/guarda-ventoinha.sh
+  # A documentacao que as duas units citam em Documentation=. Local, e nao o
+  # GitHub: o repositorio e privado, e a copia e a da versao instalada.
+  install -Dm 644 "${RAIZ}/README.md" /usr/share/doc/nexus-sense/README.md
 
   # --- os dois lancadores
   # -P: sem ele o "-m" poe o diretorio corrente na frente do sys.path. O
@@ -1106,6 +1109,9 @@ cleanup_nexus_sense() {
   rm -f /usr/bin/nexus-sense
   rm -f /usr/bin/nexus-sense-agent
   rm -rf /usr/lib/nexus-sense
+
+  # --- a documentacao
+  rm -rf /usr/share/doc/nexus-sense
 }
 
 # Roda "systemctl --user ..." no gerenciador de cada usuario com sessao.
