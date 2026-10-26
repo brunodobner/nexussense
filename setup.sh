@@ -69,6 +69,14 @@ check_root() {
     # Check if sudo is available
     if command -v sudo &> /dev/null; then
       echo -e "${BLUE}Attempting to run with sudo...${NC}"
+      if [ -n "${NEXUS_SENSE_JANELA:-}" ]; then
+        # A janela aberta pelo clique fecha quando o script sai: sem a
+        # pausa, a senha errada some da tela antes de ser lida.
+        sudo "$0" "$@"
+        local st=$?
+        [ "$st" -eq 0 ] || pause
+        exit "$st"
+      fi
       exec sudo "$0" "$@"
       exit $?
     else
@@ -77,6 +85,41 @@ check_root() {
       exit 1
     fi
   fi
+}
+
+# Clicado no gerenciador de arquivos, o script roda sem terminal: o sudo
+# nao tem onde pedir a senha, desiste, e nada aparece na tela. Sem
+# terminal na entrada nem na saida, numa sessao grafica, ele se reabre
+# num emulador de terminal. Ver docs/armadilhas.md, armadilha 45.
+abrir_em_terminal() {
+  if [ -t 0 ] || [ -t 1 ]; then
+    return 0
+  fi
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+  [ -z "${NEXUS_SENSE_JANELA:-}" ] || return 0
+
+  local eu t
+  eu="${RAIZ}/$(basename "${BASH_SOURCE[0]}")"
+  local cmd=(env NEXUS_SENSE_JANELA=1 /bin/bash "$eu" "$@")
+
+  # Cada emulador separa o comando dos proprios argumentos de um jeito.
+  for t in xdg-terminal-exec konsole gnome-terminal xfce4-terminal \
+           alacritty kitty foot xterm; do
+    command -v "$t" &> /dev/null || continue
+    case "$t" in
+      xdg-terminal-exec|kitty|foot) exec "$t" "${cmd[@]}" ;;
+      gnome-terminal) exec "$t" -- "${cmd[@]}" ;;
+      xfce4-terminal) exec "$t" -x "${cmd[@]}" ;;
+      *) exec "$t" -e "${cmd[@]}" ;;
+    esac
+  done
+
+  local aviso="nenhum terminal encontrado. Rode num terminal: sudo ${eu}"
+  echo "Nexus Sense: ${aviso}" >&2
+  if command -v notify-send &> /dev/null; then
+    notify-send "Nexus Sense" "$aviso"
+  fi
+  exit 1
 }
 
 print_banner() {
@@ -1444,6 +1487,7 @@ main_menu() {
 # Executar abre o menu; importar expõe as funções para atualização e testes
 # sem iniciar uma interface interativa.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  abrir_em_terminal "$@"
   check_root "$@"
   main_menu
   exit 0

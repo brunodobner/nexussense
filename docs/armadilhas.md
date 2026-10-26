@@ -1740,6 +1740,36 @@ instala reinicia o que está rodando, ou diz que vale só depois de relogar.
 
 ---
 
+## 45. Clicado no Dolphin, o instalador roda sem terminal e morre calado
+
+**Sintoma.** Dois cliques no `setup.sh`, "Executar" no diálogo do Dolphin, e
+nada aparece. Nenhuma janela, nenhum erro.
+
+**Causa.** O gerenciador de arquivos roda o script sem terminal: entrada em
+`/dev/null`, saída no journal. O `check_root` fazia `exec sudo` ali mesmo, e o
+sudo não tinha onde pedir a senha. Medido rodando o script como o clique roda,
+com `setsid` e sem terminal:
+
+```
+sudo: um terminal é necessário para ler a senha; use a opção -S para ler a
+entrada padrão ou configure um auxiliar de askpass
+sudo: uma senha é necessária
+```
+
+**Como ficou.** `abrir_em_terminal`, chamada antes do `check_root`: sem
+terminal na entrada nem na saída, numa sessão gráfica, o script se reabre num
+emulador (`xdg-terminal-exec`, `konsole`, `gnome-terminal` e outros, cada um
+com o seu jeito de separar o comando). A variável `NEXUS_SENSE_JANELA` marca a
+janela reaberta: ela não se reabre de novo, e o sudo que falha pausa antes de o
+script sair, senão a janela fecha com o erro. Sem emulador nenhum, o aviso vai
+para o `notify-send`. `tests/shell/test-abre-terminal.sh` roda o `setup.sh`
+com emuladores falsos no `PATH`.
+
+**Regra.** Um script interativo que alguém pode clicar tem de achar o próprio
+terminal. E o erro que ele mostra tem de durar até ser lido.
+
+---
+
 ## Verificação rápida do conjunto
 
 ```bash

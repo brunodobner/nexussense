@@ -16,7 +16,8 @@ em Arch, Debian, Fedora e openSUSE.
 sudo ./setup.sh
 ```
 
-O menu traz instalar, instalar sem drivers, desinstalar, reinstalar e status.
+Dois cliques no `setup.sh` também servem: ele se abre num terminal para pedir
+a senha. O menu traz instalar, instalar sem drivers, desinstalar, reinstalar e status.
 A instalação completa:
 
 - compila e registra o módulo no **DKMS**, para todos os kernels com headers
